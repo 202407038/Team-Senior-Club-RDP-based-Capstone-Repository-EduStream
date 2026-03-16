@@ -1,1 +1,0 @@
-교수용 애플리케이션의 UI 화면 (WPF Window/UserControl)

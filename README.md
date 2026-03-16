@@ -20,6 +20,19 @@ EduStream은 대학 강의 환경에서 교수님의 화면을 학생들에게 �
 
 ---
 
+## 📂 디렉터리 구조 (Directory Structure)
+```text
+EduStream/
+├── EduStream.sln              # 통합 솔루션 파일
+├── src/
+│   ├── EduStream.Server/      # 교수용 Broadcaster 앱 (WPF)
+│   ├── EduStream.Client/      # 학생용 Receiver 앱 (WPF)
+│   └── EduStream.Core/        # 공통 통신 프로토콜 및 유틸리티 (Class Library)
+├── docs/                      # 설계 문서 및 다이어그램
+└── README.md
+
+---
+
 ## ✨ 주요 기능 (Key Features)
 
 * **실시간 화면 스트리밍**: RDP 기술 및 데스크톱 캡처 API를 응용하여 고해상도 화면을 다수의 학생 PC에 저지연으로 전송합니다.
