@@ -30,7 +30,7 @@ EduStream/
 │   └── EduStream.Core/        # 공통 통신 프로토콜 및 유틸리티 (Class Library)
 ├── docs/                      # 설계 문서 및 다이어그램
 └── README.md
-
+```
 ---
 
 ## ✨ 주요 기능 (Key Features)
