@@ -112,7 +112,7 @@ Team-Senior-Club-RDP-based-Capstone-Repository/
 * .NET 8.0 SDK 이상
 
 ### 빌드 및 실행 방법
-1. 저장소 클론: `git clone https://github.com/사용자명/EduStream.git`
+1. 저장소 클론: `git clone https://github.com/CCSS0923/Team-Senior-Club-RDP-based-Capstone-Repository.git`
 2. Visual Studio에서 `EduStream.sln` 열기
 3. 시작 프로젝트를 `EduStream.Server` 또는 다중 시작 프로젝트로 설정 후 `F5`로 실행
 
