@@ -22,7 +22,7 @@ EduStream은 대학 강의 환경에서 교수님의 화면을 학생들에게 �
 
 ## 📂 디렉터리 구조 (Directory Structure)
 ```text
-EduStream/
+Team-Senior-Club-RDP-based-Capstone-Repository/
 ├── EduStream.sln              # 통합 솔루션 파일
 ├── src/
 │   ├── EduStream.Server/      # 교수용 Broadcaster 앱 (WPF)
