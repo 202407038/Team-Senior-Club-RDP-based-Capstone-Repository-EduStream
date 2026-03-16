@@ -1,0 +1,25 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.14.37027.9 d17.14
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "EduStream.Server", "EduStream.Server\EduStream.Server.csproj", "{16DFC7DA-C45D-402D-9B75-BDEFAAE1077A}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{16DFC7DA-C45D-402D-9B75-BDEFAAE1077A}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{16DFC7DA-C45D-402D-9B75-BDEFAAE1077A}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{16DFC7DA-C45D-402D-9B75-BDEFAAE1077A}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{16DFC7DA-C45D-402D-9B75-BDEFAAE1077A}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {0295256D-67D2-4870-B772-31AD37560977}
+	EndGlobalSection
+EndGlobal
