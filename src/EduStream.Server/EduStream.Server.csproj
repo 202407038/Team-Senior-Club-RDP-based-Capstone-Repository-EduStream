@@ -4,9 +4,15 @@
     <ProjectReference Include="..\EduStream.Core\EduStream.Core.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <ApplicationDefinition Remove="EduStream.Server\App.xaml" />
+    <Compile Remove="EduStream.Server\**\*.cs" />
+    <Page Remove="EduStream.Server\**\*.xaml" />
+  </ItemGroup>
+
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
-    <TargetFramework>net9.0-windows</TargetFramework>
+    <TargetFramework>net8.0-windows</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWPF>true</UseWPF>
