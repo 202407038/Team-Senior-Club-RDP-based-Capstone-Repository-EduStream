@@ -6,7 +6,12 @@ namespace EduStream.Core.Models;
 public enum PacketType
 {
     Unknown = 0,
-    Chat = 1,
-    File = 2,
-    Screen = 3
+    SessionJoin = 1,
+    SessionLeave = 2,
+    Chat = 3,
+    File = 4,
+    Screen = 5,
+    Ack = 6,
+    Error = 7,
+    Heartbeat = 8
 }

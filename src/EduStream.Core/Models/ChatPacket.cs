@@ -13,4 +13,8 @@ public sealed class ChatPacket : BasePacket
     public string Sender { get; set; } = string.Empty;
 
     public string Message { get; set; } = string.Empty;
+
+    public bool IsSystemMessage { get; set; }
+
+    public DateTimeOffset SentAt { get; set; } = DateTimeOffset.UtcNow;
 }

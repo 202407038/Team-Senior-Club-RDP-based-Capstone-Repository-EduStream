@@ -14,5 +14,11 @@ public sealed class ScreenPacket : BasePacket
 
     public string FrameDescription { get; set; } = string.Empty;
 
+    public int Width { get; set; }
+
+    public int Height { get; set; }
+
+    public string Encoding { get; set; } = "raw";
+
     public byte[] Content { get; set; } = [];
 }
