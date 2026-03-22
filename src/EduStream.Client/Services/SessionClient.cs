@@ -19,24 +19,58 @@ public sealed class SessionClient
 
     public bool IsConnected => CurrentSession is not null;
 
-    public Task<SessionInfo> JoinSessionAsync(string hostAddress, int port)
+    public SessionJoinPacket CreateJoinRequest(string hostAddress, int port, string displayName)
+    {
+        return new SessionJoinPacket
+        {
+            SenderId = displayName,
+            DisplayName = displayName,
+            TargetAddress = hostAddress,
+            TargetPort = port
+        };
+    }
+
+    public Task<SessionInfo> ApplyJoinAckAsync(AckPacket packet, string hostAddress, int port)
     {
         CurrentSession = new SessionInfo
         {
+            SessionId = packet.SessionId ?? Guid.NewGuid(),
             HostAddress = hostAddress,
             Port = port,
-            SessionName = "EduStream 강의 세션"
+            SessionName = "EduStream 강의 세션",
+            ParticipantCount = 1
         };
 
-        _logSink.Write($"세션에 참여했습니다. 대상={hostAddress}:{port}");
+        _logSink.Write($"세션 참여 응답 수신: {packet.AckCode}, 대상={hostAddress}:{port}");
         return Task.FromResult(CurrentSession);
     }
 
-    public Task DisconnectAsync()
+    public ErrorPacket CreateJoinError(string hostAddress, int port, string message)
+    {
+        return new ErrorPacket
+        {
+            SenderId = "Client",
+            ErrorCode = "JOIN_REJECTED",
+            Message = $"{hostAddress}:{port} 연결 실패 - {message}",
+            IsRecoverable = true
+        };
+    }
+
+    public SessionLeavePacket CreateLeaveRequest(string senderId, string reason)
+    {
+        return new SessionLeavePacket
+        {
+            SessionId = CurrentSession?.SessionId,
+            SenderId = senderId,
+            Reason = reason
+        };
+    }
+
+    public Task DisconnectAsync(string reason = "사용자 종료")
     {
         if (CurrentSession is not null)
         {
-            _logSink.Write($"세션 연결을 종료했습니다. 대상={CurrentSession.HostAddress}:{CurrentSession.Port}");
+            _logSink.Write($"세션 연결을 종료했습니다. 대상={CurrentSession.HostAddress}:{CurrentSession.Port}, 사유={reason}");
         }
 
         CurrentSession = null;
