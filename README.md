@@ -171,31 +171,46 @@ EduStream.sln
 
 ## 협업 가이드
 
-### 브랜치 전략
+상세 협업 문서는 `docs/` 아래 별도 문서로 관리합니다.
 
-- `main`: 배포 가능 상태 유지
+읽기 권장 순서:
+
+1. [문서 허브](./docs/README.md)
+2. [팀 개발 가이드](./docs/TEAM_DEVELOPMENT_GUIDE.md)
+3. [아키텍처 가이드](./docs/ARCHITECTURE_GUIDE.md)
+4. [구현 플레이북](./docs/IMPLEMENTATION_PLAYBOOK.md)
+
+요약 규칙만 이 README에 남깁니다.
+
+### 브랜치 전략 요약
+
+- `main`: 항상 빌드 가능 상태 유지
 - `feature/<name>`: 기능 개발
 - `fix/<name>`: 버그 수정
+- `docs/<name>`: 문서 작업
+- `refactor/<name>`: 구조 개선
 
-### 커밋 규칙
+### 커밋 규칙 요약
 
 - `feat`: 기능 추가
 - `fix`: 버그 수정
-- `refactor`: 기능 변경 없는 구조 개선
 - `docs`: 문서 수정
-- `style`: 포맷팅 및 스타일 수정
-- `test`: 테스트 추가 및 수정
-- `chore`: 빌드, 설정, 의존성 관리
+- `refactor`: 구조 개선
+- `test`: 테스트 관련
+- `style`: 스타일 및 포맷팅
+- `chore`: 설정, 빌드, 의존성 관리
 
 예시:
 
 ```text
 feat: add session bootstrap flow
+docs: add collaboration workflow guide
 ```
 
-### 개발 원칙
+### 개발 원칙 요약
 
 - UI 로직과 비즈니스 로직을 분리합니다.
 - 공통 통신 모델은 `EduStream.Core`에 둡니다.
 - 비동기 I/O는 `async`/`await`를 우선 사용합니다.
 - 구현 완료 전 문서에는 "도입 예정"과 "현재 사용 중"을 구분해 적습니다.
+- 상세 규칙은 `docs/` 문서를 기준으로 따릅니다.
