@@ -5,7 +5,13 @@ namespace EduStream.Core.Models;
 /// </summary>
 public abstract class BasePacket
 {
+    public string ProtocolVersion { get; init; } = "1.0";
+
     public PacketType MessageType { get; init; }
+
+    public Guid? SessionId { get; set; }
+
+    public string SenderId { get; set; } = string.Empty;
 
     public int DataLength { get; set; }
 
