@@ -20,6 +20,7 @@ public sealed class ClientViewModel : ObservableObject
     private readonly FileReceiver _fileReceiver;
     private string _hostAddress = "127.0.0.1";
     private int _port = 5000;
+    private string _displayName = "StudentDemo";
     private string _connectionState = "연결 대기";
     private string _renderStatus = "화면을 아직 수신하지 않았습니다.";
     private string _downloadStatus = "다운로드 대기";
@@ -49,6 +50,12 @@ public sealed class ClientViewModel : ObservableObject
     {
         get => _port;
         set => SetProperty(ref _port, value);
+    }
+
+    public string DisplayName
+    {
+        get => _displayName;
+        set => SetProperty(ref _displayName, value);
     }
 
     public string ConnectionState
@@ -115,15 +122,27 @@ public sealed class ClientViewModel : ObservableObject
 
     private async Task JoinSessionAsync()
     {
-        await _sessionClient.JoinSessionAsync(HostAddress, Port);
+        var joinRequest = _sessionClient.CreateJoinRequest(HostAddress, Port, DisplayName);
+        var ack = new AckPacket
+        {
+            SessionId = Guid.NewGuid(),
+            SenderId = "Server",
+            AckCode = "SESSION_JOINED",
+            Message = $"{DisplayName}님 연결 승인"
+        };
+
+        await _sessionClient.ApplyJoinAckAsync(ack, HostAddress, Port);
         IsConnected = true;
         ConnectionState = "연결됨";
+        _logSink.Write($"세션 참여 요청 생성: {joinRequest.DisplayName} -> {joinRequest.TargetAddress}:{joinRequest.TargetPort}");
         SyncLogs();
     }
 
     private async Task DisconnectAsync()
     {
-        await _sessionClient.DisconnectAsync();
+        var leavePacket = _sessionClient.CreateLeaveRequest(DisplayName, "사용자 종료");
+        _logSink.Write($"세션 이탈 요청 생성: {leavePacket.SenderId}, 사유={leavePacket.Reason}");
+        await _sessionClient.DisconnectAsync(leavePacket.Reason);
         IsConnected = false;
         ConnectionState = "연결 종료";
         RenderStatus = "화면 수신 중지";

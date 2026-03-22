@@ -10,6 +10,7 @@ namespace EduStream.Server.Services;
 public sealed class SessionManager
 {
     private readonly ILogSink _logSink;
+    private readonly HashSet<string> _participants = [];
 
     public SessionManager(ILogSink logSink)
     {
@@ -25,6 +26,7 @@ public sealed class SessionManager
         CurrentSession = new SessionInfo
         {
             SessionName = sessionName,
+            HostName = Environment.MachineName,
             Port = port,
             HostAddress = "127.0.0.1"
         };
@@ -40,6 +42,7 @@ public sealed class SessionManager
             _logSink.Write($"세션을 종료했습니다. 이름={CurrentSession.SessionName}");
         }
 
+        _participants.Clear();
         CurrentSession = null;
         return Task.CompletedTask;
     }
@@ -48,5 +51,77 @@ public sealed class SessionManager
     {
         _logSink.Write($"패킷 브로드캐스트 요청: {packet.MessageType}, 길이={packet.DataLength}");
         return Task.CompletedTask;
+    }
+
+    public Task<BasePacket> HandleJoinAsync(SessionJoinPacket packet)
+    {
+        if (CurrentSession is null)
+        {
+            return Task.FromResult<BasePacket>(CreateError("SESSION_NOT_OPEN", "현재 열려 있는 세션이 없습니다.", false, packet));
+        }
+
+        if (string.IsNullOrWhiteSpace(packet.DisplayName))
+        {
+            return Task.FromResult<BasePacket>(CreateError("DISPLAY_NAME_REQUIRED", "참여자 이름은 비워둘 수 없습니다.", true, packet));
+        }
+
+        _participants.Add(packet.DisplayName);
+        CurrentSession.ParticipantCount = _participants.Count;
+
+        _logSink.Write($"세션 참여 처리: {packet.DisplayName}, 현재 인원={CurrentSession.ParticipantCount}");
+
+        return Task.FromResult<BasePacket>(new AckPacket
+        {
+            SessionId = CurrentSession.SessionId,
+            SenderId = "Server",
+            AckCode = "SESSION_JOINED",
+            Message = $"{packet.DisplayName}님이 세션에 참여했습니다."
+        });
+    }
+
+    public Task<BasePacket> HandleLeaveAsync(SessionLeavePacket packet)
+    {
+        if (CurrentSession is null)
+        {
+            return Task.FromResult<BasePacket>(CreateError("SESSION_NOT_OPEN", "현재 열려 있는 세션이 없습니다.", false, packet));
+        }
+
+        if (!string.IsNullOrWhiteSpace(packet.SenderId))
+        {
+            _participants.Remove(packet.SenderId);
+        }
+
+        CurrentSession.ParticipantCount = _participants.Count;
+        _logSink.Write($"세션 이탈 처리: {packet.SenderId}, 현재 인원={CurrentSession.ParticipantCount}");
+
+        return Task.FromResult<BasePacket>(new AckPacket
+        {
+            SessionId = CurrentSession.SessionId,
+            SenderId = "Server",
+            AckCode = "SESSION_LEFT",
+            Message = "세션 이탈이 처리되었습니다."
+        });
+    }
+
+    public HeartbeatPacket CreateHeartbeat()
+    {
+        return new HeartbeatPacket
+        {
+            SessionId = CurrentSession?.SessionId,
+            SenderId = "Server"
+        };
+    }
+
+    private static ErrorPacket CreateError(string errorCode, string message, bool isRecoverable, BasePacket requestPacket)
+    {
+        return new ErrorPacket
+        {
+            SessionId = requestPacket.SessionId,
+            SenderId = "Server",
+            CorrelationId = requestPacket.CorrelationId,
+            ErrorCode = errorCode,
+            Message = message,
+            IsRecoverable = isRecoverable
+        };
     }
 }
