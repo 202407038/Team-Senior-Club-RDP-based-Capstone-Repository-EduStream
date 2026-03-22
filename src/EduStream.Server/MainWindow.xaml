@@ -1,12 +1,85 @@
-﻿<Window x:Class="EduStream.Server.MainWindow"
+<Window x:Class="EduStream.Server.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
-        xmlns:local="clr-namespace:EduStream.Server"
         mc:Ignorable="d"
-        Title="MainWindow" Height="450" Width="800">
-    <Grid>
+        Title="EduStream Server"
+        Height="720"
+        Width="1180"
+        MinHeight="640"
+        MinWidth="960">
+    <Grid Margin="20">
+        <Border Padding="20" CornerRadius="12" Background="#FFF7F4EA" BorderBrush="#FFE0D6B8" BorderThickness="1">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="2*" />
+                    <ColumnDefinition Width="16" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
 
+                <StackPanel>
+                    <TextBlock FontSize="28" FontWeight="Bold" Text="교수용 세션 대시보드" />
+                    <TextBlock Margin="0,8,0,0"
+                               Foreground="#FF5F5A4E"
+                               Text="세션 개설, 화면 공유, 파일 전송, 채팅 흐름을 먼저 연결하는 스켈레톤 화면입니다."
+                               TextWrapping="Wrap" />
+
+                    <UniformGrid Margin="0,20,0,0" Columns="2">
+                        <StackPanel Margin="0,0,12,0">
+                            <TextBlock FontWeight="SemiBold" Text="세션 이름" />
+                            <TextBox Margin="0,6,0,0" Padding="10,8" Text="{Binding SessionName, UpdateSourceTrigger=PropertyChanged}" />
+                        </StackPanel>
+                        <StackPanel Margin="12,0,0,0">
+                            <TextBlock FontWeight="SemiBold" Text="포트" />
+                            <TextBox Margin="0,6,0,0" Padding="10,8" Text="{Binding Port, UpdateSourceTrigger=PropertyChanged}" />
+                        </StackPanel>
+                    </UniformGrid>
+
+                    <WrapPanel Margin="0,20,0,0">
+                        <Button Margin="0,0,10,10" Padding="18,10" Command="{Binding OpenSessionCommand}" Content="세션 개설" />
+                        <Button Margin="0,0,10,10" Padding="18,10" Command="{Binding CloseSessionCommand}" Content="세션 종료" />
+                        <Button Margin="0,0,10,10" Padding="18,10" Command="{Binding StartScreenShareCommand}" Content="화면 공유 시작" />
+                        <Button Margin="0,0,10,10" Padding="18,10" Command="{Binding SendSampleFileCommand}" Content="샘플 파일 전송" />
+                    </WrapPanel>
+
+                    <Border Margin="0,14,0,0" Padding="16" Background="White" BorderBrush="#FFE0D6B8" BorderThickness="1" CornerRadius="10">
+                        <StackPanel>
+                            <TextBlock FontWeight="SemiBold" Text="현재 화면 공유 상태" />
+                            <TextBlock Margin="0,8,0,0" Text="{Binding LatestScreenStatus}" />
+                        </StackPanel>
+                    </Border>
+
+                    <TextBlock Margin="0,20,0,0" FontWeight="SemiBold" Text="실시간 채팅" />
+                    <DockPanel Margin="0,8,0,0">
+                        <Button DockPanel.Dock="Right" Width="110" Margin="12,0,0,0" Command="{Binding SendChatCommand}" Content="메시지 전송" />
+                        <TextBox Padding="10,8" Text="{Binding ChatInput, UpdateSourceTrigger=PropertyChanged}" />
+                    </DockPanel>
+                    <ListBox Margin="0,10,0,0" Height="160" ItemsSource="{Binding ChatMessages}" />
+                </StackPanel>
+
+                <Grid Grid.Column="2">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="12" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+
+                    <Border Padding="16" Background="White" BorderBrush="#FFE0D6B8" BorderThickness="1" CornerRadius="10">
+                        <StackPanel>
+                            <TextBlock FontWeight="SemiBold" Text="전송 예정/완료 파일" />
+                            <ListBox Margin="0,10,0,0" Height="120" ItemsSource="{Binding SharedFiles}" />
+                        </StackPanel>
+                    </Border>
+
+                    <Border Grid.Row="2" Padding="16" Background="White" BorderBrush="#FFE0D6B8" BorderThickness="1" CornerRadius="10">
+                        <StackPanel>
+                            <TextBlock FontWeight="SemiBold" Text="활동 로그" />
+                            <ListBox Margin="0,10,0,0" ItemsSource="{Binding ActivityLogs}" />
+                        </StackPanel>
+                    </Border>
+                </Grid>
+            </Grid>
+        </Border>
     </Grid>
 </Window>
