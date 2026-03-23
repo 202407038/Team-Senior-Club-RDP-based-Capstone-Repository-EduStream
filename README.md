@@ -57,8 +57,7 @@ EduStream은 교수자 화면을 여러 수강생에게 실시간으로 전달�
 
 ```text
 Team-Senior-Club-RDP-based-Capstone-Repository/
-├─ assets/
-├─ docs/
+├─ BaseUML.mdj
 ├─ src/
 │  ├─ EduStream.Server/
 │  │  ├─ EduStream.Server.csproj
@@ -67,13 +66,25 @@ Team-Senior-Club-RDP-based-Capstone-Repository/
 │  │  └─ EduStream.Client.csproj
 │  ├─ EduStream.Core/
 │  │  └─ EduStream.Core.csproj
-│  └─ EduStream.Tests/
+│  └─ ...
 ├─ EduStream.sln
 ├─ LICENSE
 └─ README.md
 ```
 
 `EduStream.sln`이 루트 기준 메인 솔루션이며, `src/EduStream.Server/EduStream.Server.sln`은 서버 프로젝트 단독 실행용 보조 솔루션입니다.
+
+---
+
+## UML 다이어그램
+
+루트의 `BaseUML.mdj`는 프로젝트 UML 문서 파일입니다.
+
+- 권장 도구: `draw.io` 또는 `diagrams.net`
+- 포함 탭: `Use Case`, `Class Diagram`, `Sequence`
+- 수정 시 주의: draw.io에서 다시 열 수 있도록 XML 형식을 유지해야 합니다.
+
+UML을 수정할 때는 현재 코드 구조와 다이어그램이 서로 어긋나지 않는지 함께 확인하는 것을 권장합니다.
 
 ---
 
