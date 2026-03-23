@@ -13,41 +13,38 @@
         <mxCell id="4" value="Student" style="shape=umlActor;verticalLabelPosition=bottom;verticalAlign=top;html=1;outlineConnect=0;fontColor=#f8fafc;fontSize=16;strokeColor=#f8fafc;" vertex="1" parent="1">
           <mxGeometry x="1490" y="240" width="80" height="150" as="geometry"/>
         </mxCell>
-        <mxCell id="5" value="Open Demo Session" style="ellipse;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#1f2937;fontColor=#111827;fontSize=15;" vertex="1" parent="1">
+        <mxCell id="5" value="Open Session" style="ellipse;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#1f2937;fontColor=#111827;fontSize=15;" vertex="1" parent="1">
           <mxGeometry x="430" y="120" width="220" height="76" as="geometry"/>
         </mxCell>
-        <mxCell id="6" value="Join Demo Session" style="ellipse;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#1f2937;fontColor=#111827;fontSize=15;" vertex="1" parent="1">
+        <mxCell id="6" value="Join Session" style="ellipse;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#1f2937;fontColor=#111827;fontSize=15;" vertex="1" parent="1">
           <mxGeometry x="1020" y="120" width="220" height="76" as="geometry"/>
         </mxCell>
         <mxCell id="7" value="Close Session" style="ellipse;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#1f2937;fontColor=#111827;fontSize=15;" vertex="1" parent="1">
           <mxGeometry x="430" y="235" width="220" height="76" as="geometry"/>
         </mxCell>
-        <mxCell id="8" value="Start Preview Screen Share" style="ellipse;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#1f2937;fontColor=#111827;fontSize=15;" vertex="1" parent="1">
+        <mxCell id="8" value="Start Screen Sharing" style="ellipse;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#1f2937;fontColor=#111827;fontSize=15;" vertex="1" parent="1">
           <mxGeometry x="400" y="380" width="280" height="84" as="geometry"/>
         </mxCell>
-        <mxCell id="9" value="Simulate Screen Render" style="ellipse;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#1f2937;fontColor=#111827;fontSize=15;" vertex="1" parent="1">
+        <mxCell id="9" value="Render Shared Screen" style="ellipse;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#1f2937;fontColor=#111827;fontSize=15;" vertex="1" parent="1">
           <mxGeometry x="990" y="380" width="280" height="84" as="geometry"/>
         </mxCell>
-        <mxCell id="10" value="Send Sample File" style="ellipse;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#1f2937;fontColor=#111827;fontSize=15;" vertex="1" parent="1">
+        <mxCell id="10" value="Send Files in Bulk" style="ellipse;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#1f2937;fontColor=#111827;fontSize=15;" vertex="1" parent="1">
           <mxGeometry x="430" y="530" width="230" height="76" as="geometry"/>
         </mxCell>
-        <mxCell id="11" value="Simulate File Receive" style="ellipse;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#1f2937;fontColor=#111827;fontSize=15;" vertex="1" parent="1">
+        <mxCell id="11" value="Background File Download" style="ellipse;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#1f2937;fontColor=#111827;fontSize=15;" vertex="1" parent="1">
           <mxGeometry x="960" y="530" width="340" height="76" as="geometry"/>
         </mxCell>
-        <mxCell id="12" value="Send Chat Message" style="ellipse;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#1f2937;fontColor=#111827;fontSize=15;" vertex="1" parent="1">
+        <mxCell id="12" value="Realtime Text Chat" style="ellipse;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#1f2937;fontColor=#111827;fontSize=15;" vertex="1" parent="1">
           <mxGeometry x="760" y="680" width="220" height="76" as="geometry"/>
         </mxCell>
-        <mxCell id="13" value="Input Host / Port / Name" style="ellipse;whiteSpace=wrap;html=1;fillColor=#f4f9ff;strokeColor=#2563eb;fontColor=#111827;fontSize=14;dashed=1;" vertex="1" parent="1">
-          <mxGeometry x="1000" y="235" width="260" height="64" as="geometry"/>
+        <mxCell id="13" value="Input IP / Port" style="ellipse;whiteSpace=wrap;html=1;fillColor=#f4f9ff;strokeColor=#2563eb;fontColor=#111827;fontSize=14;dashed=1;" vertex="1" parent="1">
+          <mxGeometry x="1035" y="235" width="190" height="64" as="geometry"/>
         </mxCell>
-        <mxCell id="14" value="Create Temp Sample File" style="ellipse;whiteSpace=wrap;html=1;fillColor=#fff7ed;strokeColor=#d97706;fontColor=#111827;fontSize=14;dashed=1;" vertex="1" parent="1">
-          <mxGeometry x="405" y="635" width="280" height="64" as="geometry"/>
+        <mxCell id="14" value="Drag &amp; Drop File" style="ellipse;whiteSpace=wrap;html=1;fillColor=#fff7ed;strokeColor=#d97706;fontColor=#111827;fontSize=14;dashed=1;" vertex="1" parent="1">
+          <mxGeometry x="430" y="635" width="230" height="64" as="geometry"/>
         </mxCell>
-        <mxCell id="15" value="Display Chat / Download Status" style="ellipse;whiteSpace=wrap;html=1;fillColor=#f0fdf4;strokeColor=#16a34a;fontColor=#111827;fontSize=14;dashed=1;" vertex="1" parent="1">
-          <mxGeometry x="980" y="675" width="300" height="64" as="geometry"/>
-        </mxCell>
-        <mxCell id="16" value="Disconnect Session" style="ellipse;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#1f2937;fontColor=#111827;fontSize=15;" vertex="1" parent="1">
-          <mxGeometry x="1020" y="250" width="220" height="76" as="geometry"/>
+        <mxCell id="15" value="Receive Chat Message" style="ellipse;whiteSpace=wrap;html=1;fillColor=#f0fdf4;strokeColor=#16a34a;fontColor=#111827;fontSize=14;dashed=1;" vertex="1" parent="1">
+          <mxGeometry x="1010" y="675" width="240" height="64" as="geometry"/>
         </mxCell>
         <mxCell id="e1" edge="1" parent="1" source="3" target="5" style="endArrow=none;html=1;strokeColor=#4b5563;rounded=1;">
           <mxGeometry relative="1" as="geometry"/>
@@ -76,9 +73,6 @@
         <mxCell id="e9" edge="1" parent="1" source="4" target="12" style="endArrow=none;html=1;strokeColor=#4b5563;rounded=1;">
           <mxGeometry relative="1" as="geometry"/>
         </mxCell>
-        <mxCell id="e9b" edge="1" parent="1" source="4" target="16" style="endArrow=none;html=1;strokeColor=#4b5563;rounded=1;">
-          <mxGeometry relative="1" as="geometry"/>
-        </mxCell>
         <mxCell id="e10" value="&lt;&lt;include&gt;&gt;" edge="1" parent="1" source="6" target="13" style="endArrow=open;html=1;dashed=1;strokeColor=#2563eb;fontSize=12;">
           <mxGeometry relative="1" as="geometry"/>
         </mxCell>
@@ -88,22 +82,22 @@
         <mxCell id="e12" value="&lt;&lt;extend&gt;&gt;" edge="1" parent="1" source="15" target="12" style="endArrow=open;html=1;dashed=1;strokeColor=#16a34a;fontSize=12;">
           <mxGeometry relative="1" as="geometry"/>
         </mxCell>
-        <mxCell id="22" value="&#44368;&#49688;: &#49464;&#49496; &#44060;&#49444;/&#51333;&#47308;, &#48120;&#47532;&#48372;&#44592; &#54868;&#47732; &#44277;&#50976;, &#49368;&#54540; &#54028;&#51068; &#51204;&#49569;, &#52292;&#54021; &#49569;&#49888;" style="text;html=1;fontSize=14;fontColor=#e5e7eb;align=left;" vertex="1" parent="1">
-          <mxGeometry x="70" y="900" width="780" height="24" as="geometry"/>
+        <mxCell id="22" value="&#44368;&#49688;: &#49464;&#49496; &#44060;&#49444;/&#51333;&#47308;, &#54868;&#47732; &#44277;&#50976; &#49884;&#51089;, &#54028;&#51068; &#51068;&#44292; &#51204;&#49569;, &#52292;&#54021; &#49569;&#49888;" style="text;html=1;fontSize=14;fontColor=#e5e7eb;align=left;" vertex="1" parent="1">
+          <mxGeometry x="70" y="900" width="720" height="24" as="geometry"/>
         </mxCell>
-        <mxCell id="23" value="&#54617;&#49373;: &#49464;&#49496; &#52280;&#50668;/&#54644;&#51228;, &#54868;&#47732; &#47116;&#45908;&#47553; &#49884;&#47928;&#47112;&#51060;&#49496;, &#54028;&#51068; &#49688;&#49888; &#49884;&#47928;&#47112;&#51060;&#49496;, &#52292;&#54021; &#49345;&#53468; &#54869;&#51064;" style="text;html=1;fontSize=14;fontColor=#e5e7eb;align=right;" vertex="1" parent="1">
-          <mxGeometry x="1000" y="900" width="810" height="24" as="geometry"/>
+        <mxCell id="23" value="&#54617;&#49373;: &#49464;&#49496; &#52280;&#50668;, &#44277;&#50976; &#54868;&#47732; &#47116;&#45908;&#47553;, &#54028;&#51068; &#45796;&#50868;&#47196;&#46300;, &#52292;&#54021; &#49688;&#49888;" style="text;html=1;fontSize=14;fontColor=#e5e7eb;align=right;" vertex="1" parent="1">
+          <mxGeometry x="1090" y="900" width="720" height="24" as="geometry"/>
         </mxCell>
       </root>
     </mxGraphModel>
   </diagram>
   <diagram id="class-page" name="Class Diagram">
-    <mxGraphModel dx="2400" dy="1500" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="2400" pageHeight="1800" math="0" shadow="0">
+    <mxGraphModel dx="2400" dy="1500" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="2400" pageHeight="1500" math="0" shadow="0">
       <root>
         <mxCell id="0"/>
         <mxCell id="1" parent="0"/>
         <mxCell id="c0" value="&lt;b&gt;EduStream.Core&lt;/b&gt;" style="swimlane;html=1;horizontal=1;startSize=36;fillColor=#eaf2ff;strokeColor=#2563eb;fontColor=#111827;fontSize=20;fontStyle=1;" vertex="1" parent="1">
-          <mxGeometry x="40" y="40" width="740" height="1520" as="geometry"/>
+          <mxGeometry x="40" y="40" width="700" height="820" as="geometry"/>
         </mxCell>
         <mxCell id="c1" value="&lt;b&gt;BasePacket&lt;/b&gt;&lt;hr/&gt;+ messageType: PacketType&lt;br/&gt;+ payloadLength: int&lt;br/&gt;+ payload: byte[]" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#1f2937;fontColor=#111827;fontSize=15;spacing=8;" vertex="1" parent="1">
           <mxGeometry x="90" y="110" width="250" height="140" as="geometry"/>
@@ -123,77 +117,44 @@
         <mxCell id="c6" value="&lt;b&gt;PacketType&lt;/b&gt;&lt;hr/&gt;Chat&lt;br/&gt;File&lt;br/&gt;Screen" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#f8fbff;strokeColor=#2563eb;fontColor=#111827;fontSize=14;spacing=8;dashed=1;" vertex="1" parent="1">
           <mxGeometry x="470" y="560" width="170" height="120" as="geometry"/>
         </mxCell>
-        <mxCell id="c7" value="&lt;b&gt;AckPacket&lt;/b&gt;&lt;hr/&gt;+ ackCode: string&lt;br/&gt;+ message: string" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#1f2937;fontColor=#111827;fontSize=15;spacing=8;" vertex="1" parent="1">
-          <mxGeometry x="80" y="720" width="220" height="100" as="geometry"/>
-        </mxCell>
-        <mxCell id="c8" value="&lt;b&gt;ErrorPacket&lt;/b&gt;&lt;hr/&gt;+ errorCode: string&lt;br/&gt;+ message: string&lt;br/&gt;+ isRecoverable: bool" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#1f2937;fontColor=#111827;fontSize=15;spacing=8;" vertex="1" parent="1">
-          <mxGeometry x="330" y="710" width="260" height="120" as="geometry"/>
-        </mxCell>
-        <mxCell id="c9" value="&lt;b&gt;HeartbeatPacket&lt;/b&gt;&lt;hr/&gt;+ lastSeenAt: DateTimeOffset" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#1f2937;fontColor=#111827;fontSize=15;spacing=8;" vertex="1" parent="1">
-          <mxGeometry x="80" y="860" width="250" height="100" as="geometry"/>
-        </mxCell>
-        <mxCell id="c10" value="&lt;b&gt;SessionJoinPacket&lt;/b&gt;&lt;hr/&gt;+ displayName: string&lt;br/&gt;+ targetAddress: string&lt;br/&gt;+ targetPort: int" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#1f2937;fontColor=#111827;fontSize=15;spacing=8;" vertex="1" parent="1">
-          <mxGeometry x="360" y="850" width="290" height="120" as="geometry"/>
-        </mxCell>
-        <mxCell id="c11" value="&lt;b&gt;SessionLeavePacket&lt;/b&gt;&lt;hr/&gt;+ reason: string" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#1f2937;fontColor=#111827;fontSize=15;spacing=8;" vertex="1" parent="1">
-          <mxGeometry x="80" y="1000" width="250" height="100" as="geometry"/>
-        </mxCell>
-        <mxCell id="c12" value="&lt;b&gt;SessionInfo&lt;/b&gt;&lt;hr/&gt;+ sessionId: Guid&lt;br/&gt;+ sessionName: string&lt;br/&gt;+ hostName: string&lt;br/&gt;+ hostAddress: string&lt;br/&gt;+ port: int&lt;br/&gt;+ participantCount: int" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#1f2937;fontColor=#111827;fontSize=14;spacing=8;" vertex="1" parent="1">
-          <mxGeometry x="360" y="990" width="310" height="150" as="geometry"/>
-        </mxCell>
-        <mxCell id="c13" value="&lt;b&gt;&lt;i&gt;IPacketSerializer&lt;/i&gt;&lt;/b&gt;&lt;hr/&gt;+ Serialize&lt;TPacket&gt;(packet): byte[]&lt;br/&gt;+ Deserialize&lt;TPacket&gt;(payload): TPacket?" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#f8fbff;strokeColor=#2563eb;fontColor=#111827;fontSize=14;spacing=8;dashed=1;" vertex="1" parent="1">
-          <mxGeometry x="90" y="1140" width="280" height="100" as="geometry"/>
-        </mxCell>
-        <mxCell id="c14" value="&lt;b&gt;&lt;i&gt;ILogSink&lt;/i&gt;&lt;/b&gt;&lt;hr/&gt;+ Write(message): void&lt;br/&gt;+ Snapshot(): IReadOnlyList&lt;string&gt;" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#f8fbff;strokeColor=#2563eb;fontColor=#111827;fontSize=14;spacing=8;dashed=1;" vertex="1" parent="1">
-          <mxGeometry x="390" y="1150" width="280" height="90" as="geometry"/>
-        </mxCell>
-        <mxCell id="c15" value="&lt;b&gt;InMemoryLogSink&lt;/b&gt;&lt;hr/&gt;+ Write(message): void&lt;br/&gt;+ Snapshot(): IReadOnlyList&lt;string&gt;" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#1f2937;fontColor=#111827;fontSize=14;spacing=8;" vertex="1" parent="1">
-          <mxGeometry x="90" y="1280" width="280" height="90" as="geometry"/>
-        </mxCell>
-        <mxCell id="c16" value="&lt;b&gt;ObservableObject&lt;/b&gt;&lt;hr/&gt;+ PropertyChanged&lt;br/&gt;+ SetProperty&lt;T&gt;(...): bool&lt;br/&gt;+ OnPropertyChanged(...): void" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#1f2937;fontColor=#111827;fontSize=14;spacing=8;" vertex="1" parent="1">
-          <mxGeometry x="390" y="1280" width="280" height="110" as="geometry"/>
-        </mxCell>
-        <mxCell id="c17" value="&lt;b&gt;RelayCommand&lt;/b&gt;&lt;hr/&gt;+ CanExecute(...): bool&lt;br/&gt;+ Execute(...): void&lt;br/&gt;+ RaiseCanExecuteChanged(): void" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#1f2937;fontColor=#111827;fontSize=14;spacing=8;" vertex="1" parent="1">
-          <mxGeometry x="220" y="1410" width="300" height="100" as="geometry"/>
-        </mxCell>
         <mxCell id="s0" value="&lt;b&gt;EduStream.Server&lt;/b&gt;" style="swimlane;html=1;horizontal=1;startSize=36;fillColor=#fff2df;strokeColor=#d97706;fontColor=#111827;fontSize=20;fontStyle=1;" vertex="1" parent="1">
           <mxGeometry x="810" y="40" width="760" height="900" as="geometry"/>
         </mxCell>
-        <mxCell id="s1" value="&lt;b&gt;SessionManager&lt;/b&gt;&lt;hr/&gt;+ OpenSessionAsync(name, port): Task&lt;SessionInfo&gt;&lt;br/&gt;+ CloseSessionAsync(): Task&lt;br/&gt;+ BroadcastPacketAsync(packet): Task&lt;br/&gt;+ HandleJoinAsync(packet): Task&lt;BasePacket&gt;" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#1f2937;fontColor=#111827;fontSize=14;spacing=8;" vertex="1" parent="1">
-          <mxGeometry x="850" y="110" width="300" height="160" as="geometry"/>
+        <mxCell id="s1" value="&lt;b&gt;SessionManager&lt;/b&gt;&lt;hr/&gt;+ HostSession(port)&lt;br/&gt;+ BroadcastAsync(packet): Task" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#1f2937;fontColor=#111827;fontSize=15;spacing=8;" vertex="1" parent="1">
+          <mxGeometry x="870" y="110" width="260" height="130" as="geometry"/>
         </mxCell>
-        <mxCell id="s2" value="&lt;b&gt;ScreenCapturer&lt;/b&gt;&lt;hr/&gt;+ CapturePreviewFrame(): ScreenPacket" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#1f2937;fontColor=#111827;fontSize=15;spacing=8;" vertex="1" parent="1">
+        <mxCell id="s2" value="&lt;b&gt;ScreenCapturer&lt;/b&gt;&lt;hr/&gt;+ CaptureFrame(): byte[]" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#1f2937;fontColor=#111827;fontSize=15;spacing=8;" vertex="1" parent="1">
           <mxGeometry x="1190" y="110" width="300" height="110" as="geometry"/>
         </mxCell>
-        <mxCell id="s3" value="&lt;b&gt;RdpHost&lt;/b&gt;&lt;hr/&gt;+ StartHostAsync(): Task&lt;br/&gt;+ StopHostAsync(): Task" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#1f2937;fontColor=#111827;fontSize=15;spacing=8;" vertex="1" parent="1">
-          <mxGeometry x="870" y="330" width="260" height="110" as="geometry"/>
+        <mxCell id="s3" value="&lt;b&gt;RdpHost&lt;/b&gt;&lt;hr/&gt;+ StartHost(): void" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#1f2937;fontColor=#111827;fontSize=15;spacing=8;" vertex="1" parent="1">
+          <mxGeometry x="870" y="330" width="240" height="110" as="geometry"/>
         </mxCell>
-        <mxCell id="s4" value="&lt;b&gt;FileDistributor&lt;/b&gt;&lt;hr/&gt;+ BuildFilePacketAsync(path): Task&lt;FilePacket&gt;&lt;br/&gt;+ BuildFilePacketsAsync(path, chunkSize): Task&lt;IReadOnlyList&lt;FilePacket&gt;&gt;" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#1f2937;fontColor=#111827;fontSize=14;spacing=8;" vertex="1" parent="1">
-          <mxGeometry x="1150" y="315" width="360" height="140" as="geometry"/>
+        <mxCell id="s4" value="&lt;b&gt;FileDistributor&lt;/b&gt;&lt;hr/&gt;+ SendFileAsync(path): Task&lt;br/&gt;+ CreateChecksum(path): string" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#1f2937;fontColor=#111827;fontSize=15;spacing=8;" vertex="1" parent="1">
+          <mxGeometry x="1170" y="315" width="330" height="140" as="geometry"/>
         </mxCell>
-        <mxCell id="s5" value="&lt;b&gt;ServerViewModel&lt;/b&gt;&lt;hr/&gt;+ sessionName: string&lt;br/&gt;+ port: int&lt;br/&gt;+ OpenSessionCommand&lt;br/&gt;+ StartScreenShareCommand&lt;br/&gt;+ SendSampleFileCommand" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#1f2937;fontColor=#111827;fontSize=14;spacing=8;" vertex="1" parent="1">
-          <mxGeometry x="970" y="560" width="330" height="150" as="geometry"/>
+        <mxCell id="s5" value="&lt;b&gt;ServerViewModel&lt;/b&gt;&lt;hr/&gt;+ HandleFileDrop(path): Task" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#1f2937;fontColor=#111827;fontSize=15;spacing=8;" vertex="1" parent="1">
+          <mxGeometry x="990" y="575" width="290" height="110" as="geometry"/>
         </mxCell>
-        <mxCell id="s6" value="&lt;b&gt;MainWindow&lt;/b&gt;&lt;hr/&gt;+ DataContext: ServerViewModel" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fffaf0;strokeColor=#d97706;fontColor=#111827;fontSize=15;spacing=8;dashed=1;" vertex="1" parent="1">
-          <mxGeometry x="995" y="780" width="280" height="90" as="geometry"/>
+        <mxCell id="s6" value="&lt;b&gt;BroadcasterWindow&lt;/b&gt;&lt;hr/&gt;+ StartSession()&lt;br/&gt;+ SelectFile()" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fffaf0;strokeColor=#d97706;fontColor=#111827;fontSize=15;spacing=8;dashed=1;" vertex="1" parent="1">
+          <mxGeometry x="980" y="760" width="310" height="120" as="geometry"/>
         </mxCell>
         <mxCell id="cl0" value="&lt;b&gt;EduStream.Client&lt;/b&gt;" style="swimlane;html=1;horizontal=1;startSize=36;fillColor=#ebfbef;strokeColor=#16a34a;fontColor=#111827;fontSize=20;fontStyle=1;" vertex="1" parent="1">
           <mxGeometry x="1640" y="40" width="720" height="860" as="geometry"/>
         </mxCell>
-        <mxCell id="cl1" value="&lt;b&gt;SessionClient&lt;/b&gt;&lt;hr/&gt;+ CreateJoinRequest(...): SessionJoinPacket&lt;br/&gt;+ ApplyJoinAckAsync(...): Task&lt;SessionInfo&gt;&lt;br/&gt;+ CreateLeaveRequest(...): SessionLeavePacket&lt;br/&gt;+ DisconnectAsync(...): Task" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#1f2937;fontColor=#111827;fontSize=14;spacing=8;" vertex="1" parent="1">
-          <mxGeometry x="1685" y="110" width="300" height="160" as="geometry"/>
+        <mxCell id="cl1" value="&lt;b&gt;SessionClient&lt;/b&gt;&lt;hr/&gt;+ ReceiveAsync(): Task" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#1f2937;fontColor=#111827;fontSize=15;spacing=8;" vertex="1" parent="1">
+          <mxGeometry x="1710" y="110" width="250" height="110" as="geometry"/>
         </mxCell>
-        <mxCell id="cl2" value="&lt;b&gt;ScreenRenderer&lt;/b&gt;&lt;hr/&gt;+ Render(packet): string" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#1f2937;fontColor=#111827;fontSize=15;spacing=8;" vertex="1" parent="1">
+        <mxCell id="cl2" value="&lt;b&gt;ScreenRenderer&lt;/b&gt;&lt;hr/&gt;+ RenderFrame(frame): void" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#1f2937;fontColor=#111827;fontSize=15;spacing=8;" vertex="1" parent="1">
           <mxGeometry x="2020" y="110" width="280" height="110" as="geometry"/>
         </mxCell>
-        <mxCell id="cl3" value="&lt;b&gt;FileReceiver&lt;/b&gt;&lt;hr/&gt;+ SaveAsync(packet, targetDirectory): Task&lt;string&gt;" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#1f2937;fontColor=#111827;fontSize=15;spacing=8;" vertex="1" parent="1">
-          <mxGeometry x="1710" y="330" width="300" height="110" as="geometry"/>
+        <mxCell id="cl3" value="&lt;b&gt;FileReceiver&lt;/b&gt;&lt;hr/&gt;+ VerifyChecksum(packet): bool&lt;br/&gt;+ SaveToDisk(packet): Task" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#1f2937;fontColor=#111827;fontSize=15;spacing=8;" vertex="1" parent="1">
+          <mxGeometry x="1710" y="330" width="290" height="140" as="geometry"/>
         </mxCell>
-        <mxCell id="cl4" value="&lt;b&gt;ClientViewModel&lt;/b&gt;&lt;hr/&gt;+ hostAddress: string&lt;br/&gt;+ port: int&lt;br/&gt;+ displayName: string&lt;br/&gt;+ connectionState: string&lt;br/&gt;+ JoinSessionCommand&lt;br/&gt;+ SimulateFileReceiveCommand" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#1f2937;fontColor=#111827;fontSize=14;spacing=8;" vertex="1" parent="1">
-          <mxGeometry x="2045" y="315" width="300" height="160" as="geometry"/>
+        <mxCell id="cl4" value="&lt;b&gt;ClientViewModel&lt;/b&gt;&lt;hr/&gt;+ downloadProgress: double&lt;br/&gt;+ chatMessage: string&lt;br/&gt;+ connectionState: string" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#1f2937;fontColor=#111827;fontSize=15;spacing=8;" vertex="1" parent="1">
+          <mxGeometry x="2060" y="325" width="280" height="140" as="geometry"/>
         </mxCell>
-        <mxCell id="cl5" value="&lt;b&gt;MainWindow&lt;/b&gt;&lt;hr/&gt;+ DataContext: ClientViewModel" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#f7fff9;strokeColor=#16a34a;fontColor=#111827;fontSize=15;spacing=8;dashed=1;" vertex="1" parent="1">
-          <mxGeometry x="1900" y="600" width="270" height="90" as="geometry"/>
+        <mxCell id="cl5" value="&lt;b&gt;ReceiverWindow&lt;/b&gt;&lt;hr/&gt;+ JoinSession(): void&lt;br/&gt;+ ShowProgress(): void" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#f7fff9;strokeColor=#16a34a;fontColor=#111827;fontSize=15;spacing=8;dashed=1;" vertex="1" parent="1">
+          <mxGeometry x="1885" y="600" width="300" height="120" as="geometry"/>
         </mxCell>
         <mxCell id="e1" value="extends" edge="1" parent="1" source="c3" target="c1" style="endArrow=block;endFill=0;html=1;strokeColor=#374151;fontSize=13;">
           <mxGeometry relative="1" as="geometry"/>
@@ -222,13 +183,13 @@
         <mxCell id="e9" value="starts host" edge="1" parent="1" source="s5" target="s3" style="endArrow=open;html=1;dashed=1;strokeColor=#6b7280;fontSize=13;">
           <mxGeometry relative="1" as="geometry"/>
         </mxCell>
-        <mxCell id="e10" value="renders screen" edge="1" parent="1" source="cl4" target="cl2" style="endArrow=open;html=1;dashed=1;strokeColor=#6b7280;fontSize=13;">
+        <mxCell id="e10" value="receives stream" edge="1" parent="1" source="cl1" target="cl2" style="endArrow=open;html=1;dashed=1;strokeColor=#6b7280;fontSize=13;">
           <mxGeometry relative="1" as="geometry"/>
         </mxCell>
-        <mxCell id="e11" value="saves files" edge="1" parent="1" source="cl4" target="cl3" style="endArrow=open;html=1;dashed=1;strokeColor=#6b7280;fontSize=13;">
+        <mxCell id="e11" value="stores files" edge="1" parent="1" source="cl1" target="cl3" style="endArrow=open;html=1;dashed=1;strokeColor=#6b7280;fontSize=13;">
           <mxGeometry relative="1" as="geometry"/>
         </mxCell>
-        <mxCell id="e12" value="manages session" edge="1" parent="1" source="cl4" target="cl1" style="endArrow=open;html=1;dashed=1;strokeColor=#6b7280;fontSize=13;">
+        <mxCell id="e12" value="updates UI" edge="1" parent="1" source="cl3" target="cl4" style="endArrow=open;html=1;dashed=1;strokeColor=#6b7280;fontSize=13;">
           <mxGeometry relative="1" as="geometry"/>
         </mxCell>
         <mxCell id="e13" value="binds" edge="1" parent="1" source="cl4" target="cl5" style="endArrow=open;html=1;dashed=1;strokeColor=#6b7280;fontSize=13;">
@@ -240,88 +201,13 @@
         <mxCell id="e15" value="enum" edge="1" parent="1" source="c1" target="c6" style="endArrow=open;html=1;dashed=1;strokeColor=#2563eb;fontSize=13;">
           <mxGeometry relative="1" as="geometry"/>
         </mxCell>
-        <mxCell id="e19" value="extends" edge="1" parent="1" source="c7" target="c1" style="endArrow=block;endFill=0;html=1;strokeColor=#374151;fontSize=13;">
-          <mxGeometry relative="1" as="geometry"/>
+        <mxCell id="e16" value="&#44277;&#53685; &#44228;&#52789;: &#54056;&#53431; &#47784;&#45944;, &#51649;&#47148;&#54868;, &#54056;&#53431; &#51333;&#47448; &#51221;&#51032;" style="text;html=1;fontSize=14;fontColor=#e5e7eb;align=left;" vertex="1" parent="1">
+          <mxGeometry x="60" y="900" width="520" height="24" as="geometry"/>
         </mxCell>
-        <mxCell id="e20" value="extends" edge="1" parent="1" source="c8" target="c1" style="endArrow=block;endFill=0;html=1;strokeColor=#374151;fontSize=13;">
-          <mxGeometry relative="1" as="geometry"/>
-        </mxCell>
-        <mxCell id="e21" value="extends" edge="1" parent="1" source="c9" target="c1" style="endArrow=block;endFill=0;html=1;strokeColor=#374151;fontSize=13;">
-          <mxGeometry relative="1" as="geometry"/>
-        </mxCell>
-        <mxCell id="e22" value="extends" edge="1" parent="1" source="c10" target="c1" style="endArrow=block;endFill=0;html=1;strokeColor=#374151;fontSize=13;">
-          <mxGeometry relative="1" as="geometry"/>
-        </mxCell>
-        <mxCell id="e23" value="extends" edge="1" parent="1" source="c11" target="c1" style="endArrow=block;endFill=0;html=1;strokeColor=#374151;fontSize=13;">
-          <mxGeometry relative="1" as="geometry"/>
-        </mxCell>
-        <mxCell id="e24" value="implements" edge="1" parent="1" source="c2" target="c13" style="endArrow=open;html=1;dashed=1;strokeColor=#2563eb;fontSize=13;">
-          <mxGeometry relative="1" as="geometry"/>
-        </mxCell>
-        <mxCell id="e25" value="implements" edge="1" parent="1" source="c15" target="c14" style="endArrow=open;html=1;dashed=1;strokeColor=#2563eb;fontSize=13;">
-          <mxGeometry relative="1" as="geometry"/>
-        </mxCell>
-        <mxCell id="e26" value="returns" edge="1" parent="1" source="c10" target="c12" style="endArrow=open;html=1;dashed=1;strokeColor=#6b7280;fontSize=13;">
-          <mxGeometry relative="1" as="geometry"/>
-        </mxCell>
-        <mxCell id="e27" value="returns" edge="1" parent="1" source="c11" target="c12" style="endArrow=open;html=1;dashed=1;strokeColor=#6b7280;fontSize=13;">
-          <mxGeometry relative="1" as="geometry"/>
-        </mxCell>
-        <mxCell id="e28" value="supports commands" edge="1" parent="1" source="c16" target="c17" style="endArrow=open;html=1;dashed=1;strokeColor=#6b7280;fontSize=13;">
-          <mxGeometry relative="1" as="geometry"/>
-        </mxCell>
-        <mxCell id="e29" value="uses logs" edge="1" parent="1" source="s1" target="c14" style="endArrow=open;html=1;dashed=1;strokeColor=#6b7280;fontSize=13;">
-          <mxGeometry relative="1" as="geometry"/>
-        </mxCell>
-        <mxCell id="e30" value="uses packets" edge="1" parent="1" source="s1" target="c10" style="endArrow=open;html=1;dashed=1;strokeColor=#6b7280;fontSize=13;">
-          <mxGeometry relative="1" as="geometry"/>
-        </mxCell>
-        <mxCell id="e31" value="uses packets" edge="1" parent="1" source="s1" target="c11" style="endArrow=open;html=1;dashed=1;strokeColor=#6b7280;fontSize=13;">
-          <mxGeometry relative="1" as="geometry"/>
-        </mxCell>
-        <mxCell id="e32" value="binds base VM" edge="1" parent="1" source="s5" target="c16" style="endArrow=open;html=1;dashed=1;strokeColor=#6b7280;fontSize=13;">
-          <mxGeometry relative="1" as="geometry"/>
-        </mxCell>
-        <mxCell id="e33" value="binds base VM" edge="1" parent="1" source="cl4" target="c16" style="endArrow=open;html=1;dashed=1;strokeColor=#6b7280;fontSize=13;">
-          <mxGeometry relative="1" as="geometry"/>
-        </mxCell>
-        <mxCell id="e34" value="raises commands" edge="1" parent="1" source="s5" target="c17" style="endArrow=open;html=1;dashed=1;strokeColor=#6b7280;fontSize=13;">
-          <mxGeometry relative="1" as="geometry"/>
-        </mxCell>
-        <mxCell id="e35" value="uses logs" edge="1" parent="1" source="cl1" target="c14" style="endArrow=open;html=1;dashed=1;strokeColor=#6b7280;fontSize=13;">
-          <mxGeometry relative="1" as="geometry"/>
-        </mxCell>
-        <mxCell id="e36" value="returns session" edge="1" parent="1" source="cl1" target="c12" style="endArrow=open;html=1;dashed=1;strokeColor=#6b7280;fontSize=13;">
-          <mxGeometry relative="1" as="geometry"/>
-        </mxCell>
-        <mxCell id="e37" value="creates join packet" edge="1" parent="1" source="cl1" target="c10" style="endArrow=open;html=1;dashed=1;strokeColor=#6b7280;fontSize=13;">
-          <mxGeometry relative="1" as="geometry"/>
-        </mxCell>
-        <mxCell id="e38" value="creates leave packet" edge="1" parent="1" source="cl1" target="c11" style="endArrow=open;html=1;dashed=1;strokeColor=#6b7280;fontSize=13;">
-          <mxGeometry relative="1" as="geometry"/>
-        </mxCell>
-        <mxCell id="e39" value="uses ack" edge="1" parent="1" source="cl1" target="c7" style="endArrow=open;html=1;dashed=1;strokeColor=#6b7280;fontSize=13;">
-          <mxGeometry relative="1" as="geometry"/>
-        </mxCell>
-        <mxCell id="e40" value="creates errors" edge="1" parent="1" source="cl1" target="c8" style="endArrow=open;html=1;dashed=1;strokeColor=#6b7280;fontSize=13;">
-          <mxGeometry relative="1" as="geometry"/>
-        </mxCell>
-        <mxCell id="e41" value="uses logs" edge="1" parent="1" source="s3" target="c14" style="endArrow=open;html=1;dashed=1;strokeColor=#6b7280;fontSize=13;">
-          <mxGeometry relative="1" as="geometry"/>
-        </mxCell>
-        <mxCell id="e42" value="builds file packets" edge="1" parent="1" source="s4" target="c4" style="endArrow=open;html=1;dashed=1;strokeColor=#6b7280;fontSize=13;">
-          <mxGeometry relative="1" as="geometry"/>
-        </mxCell>
-        <mxCell id="e43" value="captures screen packets" edge="1" parent="1" source="s2" target="c5" style="endArrow=open;html=1;dashed=1;strokeColor=#6b7280;fontSize=13;">
-          <mxGeometry relative="1" as="geometry"/>
-        </mxCell>
-        <mxCell id="e16" value="&#44277;&#53685; &#44228;&#52735;: &#54056;&#53431; &#47784;&#45944;, &#51649;&#47148;&#54868;, &#54056;&#53431; &#51333;&#47448; &#51221;&#51032;" style="text;html=1;fontSize=14;fontColor=#e5e7eb;align=left;" vertex="1" parent="1">
-          <mxGeometry x="60" y="1540" width="620" height="24" as="geometry"/>
-        </mxCell>
-        <mxCell id="e17" value="&#49436;&#48260; &#44228;&#52735;: &#49464;&#49496; &#44288;&#47532;, &#54868;&#47732; &#52897;&#52376;, &#54028;&#51068; &#48176;&#54252;, UI &#51228;&#50612;" style="text;html=1;fontSize=14;fontColor=#e5e7eb;align=left;" vertex="1" parent="1">
+        <mxCell id="e17" value="&#49436;&#48260; &#44228;&#52789;: &#49464;&#49496; &#44288;&#47532;, &#54868;&#47732; &#52897;&#52376;, &#54028;&#51068; &#48176;&#54252;, UI &#51228;&#50612;" style="text;html=1;fontSize=14;fontColor=#e5e7eb;align=left;" vertex="1" parent="1">
           <mxGeometry x="840" y="960" width="560" height="24" as="geometry"/>
         </mxCell>
-        <mxCell id="e18" value="&#53364;&#46972;&#51060;&#50616;&#53944; &#44228;&#52735;: &#49688;&#49888;, &#47116;&#45908;&#47553;, &#54028;&#51068; &#51200;&#51109;, UI &#44081;&#49888;" style="text;html=1;fontSize=14;fontColor=#e5e7eb;align=left;" vertex="1" parent="1">
+        <mxCell id="e18" value="&#53364;&#46972;&#51060;&#50616;&#53944; &#44228;&#52789;: &#49688;&#49888;, &#47116;&#45908;&#47553;, &#54028;&#51068; &#51200;&#51109;, UI &#44081;&#49888;" style="text;html=1;fontSize=14;fontColor=#e5e7eb;align=left;" vertex="1" parent="1">
           <mxGeometry x="1660" y="920" width="540" height="24" as="geometry"/>
         </mxCell>
       </root>
@@ -362,15 +248,15 @@
         <mxCell id="207" value="1. dragAndDropFile()" edge="1" parent="1" source="200" target="201" style="html=1;endArrow=block;strokeColor=#111827;fontSize=14;rounded=1;">
           <mxGeometry relative="1" as="geometry"/>
         </mxCell>
-        <mxCell id="208" value="2. SendSampleFileAsync(): Task" edge="1" parent="1" source="201" target="202" style="html=1;endArrow=block;strokeColor=#111827;fontSize=14;rounded=1;">
+        <mxCell id="208" value="2. HandleFileDrop(path): Task" edge="1" parent="1" source="201" target="202" style="html=1;endArrow=block;strokeColor=#111827;fontSize=14;rounded=1;">
           <mxGeometry relative="1" as="geometry"/>
         </mxCell>
-        <mxCell id="209" value="3. Read file + SHA256 checksum" edge="1" parent="1" source="202" target="202" style="html=1;endArrow=block;strokeColor=#111827;fontSize=14;rounded=1;">
+        <mxCell id="209" value="3. CreateChecksum(path): string" edge="1" parent="1" source="202" target="202" style="html=1;endArrow=block;strokeColor=#111827;fontSize=14;rounded=1;">
           <mxGeometry relative="1" as="geometry">
             <mxPoint x="860" y="390" as="targetPoint"/>
           </mxGeometry>
         </mxCell>
-        <mxCell id="210" value="4. BuildFilePacketAsync(path)" edge="1" parent="1" source="202" target="202" style="html=1;endArrow=block;strokeColor=#111827;fontSize=14;rounded=1;">
+        <mxCell id="210" value="4. Build FilePacket metadata" edge="1" parent="1" source="202" target="202" style="html=1;endArrow=block;strokeColor=#111827;fontSize=14;rounded=1;">
           <mxGeometry relative="1" as="geometry">
             <mxPoint x="860" y="480" as="targetPoint"/>
           </mxGeometry>
@@ -378,21 +264,21 @@
         <mxCell id="211" value="5. Serialize(filePacket)" edge="1" parent="1" source="202" target="203" style="html=1;endArrow=block;strokeColor=#111827;fontSize=14;rounded=1;">
           <mxGeometry relative="1" as="geometry"/>
         </mxCell>
-        <mxCell id="212" value="6. BroadcastPacketAsync(packet): Task" edge="1" parent="1" source="201" target="204" style="html=1;endArrow=block;strokeColor=#111827;fontSize=14;rounded=1;">
+        <mxCell id="212" value="6. BroadcastAsync(packet): Task" edge="1" parent="1" source="203" target="204" style="html=1;endArrow=block;strokeColor=#111827;fontSize=14;rounded=1;">
           <mxGeometry relative="1" as="geometry"/>
         </mxCell>
-        <mxCell id="213" value="7. ApplyJoinAckAsync / session update" edge="1" parent="1" source="204" target="205" style="html=1;endArrow=block;strokeColor=#111827;fontSize=14;rounded=1;">
+        <mxCell id="213" value="7. ReceiveAsync(): Task" edge="1" parent="1" source="204" target="205" style="html=1;endArrow=block;strokeColor=#111827;fontSize=14;rounded=1;">
           <mxGeometry relative="1" as="geometry"/>
         </mxCell>
-        <mxCell id="214" value="8. SaveAsync(packet, targetDirectory)" edge="1" parent="1" source="205" target="206" style="html=1;endArrow=block;strokeColor=#111827;fontSize=14;rounded=1;">
+        <mxCell id="214" value="8. Forward packet" edge="1" parent="1" source="205" target="206" style="html=1;endArrow=block;strokeColor=#111827;fontSize=14;rounded=1;">
           <mxGeometry relative="1" as="geometry"/>
         </mxCell>
-        <mxCell id="215" value="9. Verify checksum internally" edge="1" parent="1" source="206" target="206" style="html=1;endArrow=block;strokeColor=#111827;fontSize=14;rounded=1;">
+        <mxCell id="215" value="9. VerifyChecksum(packet): bool" edge="1" parent="1" source="206" target="206" style="html=1;endArrow=block;strokeColor=#111827;fontSize=14;rounded=1;">
           <mxGeometry relative="1" as="geometry">
             <mxPoint x="2060" y="840" as="targetPoint"/>
           </mxGeometry>
         </mxCell>
-        <mxCell id="216" value="10. WriteAllBytesAsync(...)" edge="1" parent="1" source="206" target="206" style="html=1;endArrow=block;strokeColor=#111827;fontSize=14;rounded=1;">
+        <mxCell id="216" value="10. SaveToDisk(packet): Task" edge="1" parent="1" source="206" target="206" style="html=1;endArrow=block;strokeColor=#111827;fontSize=14;rounded=1;">
           <mxGeometry relative="1" as="geometry">
             <mxPoint x="2060" y="930" as="targetPoint"/>
           </mxGeometry>
@@ -403,7 +289,7 @@
         <mxCell id="218" value="12. update progress / status" edge="1" parent="1" source="205" target="201" style="html=1;endArrow=open;dashed=1;strokeColor=#6b7280;fontSize=14;rounded=1;">
           <mxGeometry relative="1" as="geometry"/>
         </mxCell>
-        <mxCell id="219" value="&#49444;&#47749;: &#44368;&#49688;&#51088;&#44032; &#54028;&#51068;&#51012; &#49436;&#48260; UI&#50640; &#50732;&#47532;&#47732;, &#49436;&#48260;&#45716; &#52404;&#53356;&#49452;&#51012; &#47564;&#46304; &#46384; &#54056;&#53431;&#51012; &#51649;&#47148;&#54868;&#54616;&#50668; &#50672;&#44208;&#46108; &#53364;&#46972;&#51060;&#50616;&#53944; &#51204;&#52404;&#50640; &#51204;&#49569;&#54620;&#45796;." style="text;html=1;fontSize=14;fontColor=#e5e7eb;align=left;" vertex="1" parent="1">
+        <mxCell id="219" value="&#49444;&#47749;: &#44368;&#49688;&#51088;&#44032; &#54028;&#51068;&#51012; &#49436;&#48260; UI&#50640; &#50732;&#47532;&#47732;, &#49436;&#48260;&#45716; &#52404;&#53356;&#49452;&#51012; &#47564;&#46304; &#46244; &#54056;&#53431;&#51012; &#51649;&#47148;&#54868;&#54616;&#50668; &#50672;&#44208;&#46108; &#53364;&#46972;&#51060;&#50616;&#53944; &#51204;&#52404;&#50640; &#51204;&#49569;&#54620;&#45796;." style="text;html=1;fontSize=14;fontColor=#e5e7eb;align=left;" vertex="1" parent="1">
           <mxGeometry x="120" y="1130" width="1160" height="24" as="geometry"/>
         </mxCell>
         <mxCell id="220" value="&#49444;&#47749;: &#53364;&#46972;&#51060;&#50616;&#53944;&#45716; &#49688;&#49888;&#54620; &#54028;&#51068; &#54056;&#53431;&#51032; &#52404;&#53356;&#49452;&#51012; &#44160;&#51613;&#54620; &#54980; &#51200;&#51109;&#54616;&#44256;, &#49457;&#44277; &#46608;&#45716; &#49892;&#54056; &#49345;&#53468;&#47484; UI&#50640; &#48152;&#50689;&#54620;&#45796;." style="text;html=1;fontSize=14;fontColor=#e5e7eb;align=left;" vertex="1" parent="1">
