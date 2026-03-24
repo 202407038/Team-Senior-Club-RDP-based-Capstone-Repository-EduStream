@@ -9,6 +9,7 @@
 3. `docs/ARCHITECTURE_GUIDE.md`
 4. `docs/IMPLEMENTATION_PLAYBOOK.md`
 5. `docs/USER_WORKFLOW_SCENARIOS.md`
+6. `docs/SPRINT_7DAY_IMPLEMENTATION_GUIDE.md`
 
 ## 문서 목록
 
@@ -40,6 +41,13 @@
 - 교수자/수강생 중심 사용 절차
 - 화면 공유, 파일 전송, 채팅, 세션 종료 시나리오
 - 향후 테스트 케이스 및 예외 흐름 확장 기준
+
+### 5. [7일 스프린트 상세 구현 가이드](./SPRINT_7DAY_IMPLEMENTATION_GUIDE.md)
+
+- 5명 기준 7일 구현 계획
+- 무리하지 않는 일일 목표
+- 세션/채팅/파일/화면 우선순위
+- 작업 시작 전 `git pull --all --prune` 규칙 포함
 
 ## 문서 운영 원칙
 
