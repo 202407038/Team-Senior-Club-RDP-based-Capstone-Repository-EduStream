@@ -1,0 +1,13 @@
+namespace EduStream.Core.Protocols;
+
+/// <summary>
+/// 오류 응답 패킷에서 공통으로 사용하는 코드 목록입니다.
+/// </summary>
+public static class ErrorCodes
+{
+    public const string SessionNotOpen = "SESSION_NOT_OPEN";
+    public const string DisplayNameRequired = "DISPLAY_NAME_REQUIRED";
+    public const string JoinRejected = "JOIN_REJECTED";
+    public const string ChecksumMismatch = "CHECKSUM_MISMATCH";
+    public const string InvalidChunkSize = "INVALID_CHUNK_SIZE";
+}

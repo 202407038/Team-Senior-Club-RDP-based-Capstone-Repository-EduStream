@@ -1,5 +1,6 @@
 using EduStream.Core.Logging;
 using EduStream.Core.Models;
+using EduStream.Core.Protocols;
 
 namespace EduStream.Client.Services;
 
@@ -50,7 +51,7 @@ public sealed class SessionClient
         return new ErrorPacket
         {
             SenderId = "Client",
-            ErrorCode = "JOIN_REJECTED",
+            ErrorCode = ErrorCodes.JoinRejected,
             Message = $"{hostAddress}:{port} 연결 실패 - {message}",
             IsRecoverable = true
         };

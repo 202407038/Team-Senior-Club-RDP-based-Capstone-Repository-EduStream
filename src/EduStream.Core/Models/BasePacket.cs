@@ -1,3 +1,5 @@
+using EduStream.Core.Protocols;
+
 namespace EduStream.Core.Models;
 
 /// <summary>
@@ -5,7 +7,7 @@ namespace EduStream.Core.Models;
 /// </summary>
 public abstract class BasePacket
 {
-    public string ProtocolVersion { get; init; } = "1.0";
+    public string ProtocolVersion { get; init; } = ProtocolVersions.Current;
 
     public PacketType MessageType { get; init; }
 

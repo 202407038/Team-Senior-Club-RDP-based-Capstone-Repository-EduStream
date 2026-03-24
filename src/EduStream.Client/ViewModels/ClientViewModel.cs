@@ -1,11 +1,12 @@
 using System.Collections.ObjectModel;
 using System.IO;
-using System.Security.Cryptography;
 using System.Text;
 using EduStream.Client.Services;
 using EduStream.Core.Common;
 using EduStream.Core.Logging;
 using EduStream.Core.Models;
+using EduStream.Core.Protocols;
+using EduStream.Core.Utils;
 
 namespace EduStream.Client.ViewModels;
 
@@ -127,7 +128,7 @@ public sealed class ClientViewModel : ObservableObject
         {
             SessionId = Guid.NewGuid(),
             SenderId = "Server",
-            AckCode = "SESSION_JOINED",
+            AckCode = AckCodes.SessionJoined,
             Message = $"{DisplayName}님 연결 승인"
         };
 
@@ -178,7 +179,7 @@ public sealed class ClientViewModel : ObservableObject
             FileName = "received-sample.txt",
             FileSize = content.LongLength,
             Content = content,
-            Checksum = Convert.ToHexString(SHA256.HashData(content))
+            Checksum = ChecksumUtility.ComputeSha256(content)
         };
 
         var path = await _fileReceiver.SaveAsync(packet, Path.Combine(Path.GetTempPath(), "EduStreamClient"));

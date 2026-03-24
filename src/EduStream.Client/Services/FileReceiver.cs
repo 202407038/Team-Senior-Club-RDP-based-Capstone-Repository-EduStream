@@ -1,6 +1,7 @@
 using System.IO;
-using System.Security.Cryptography;
 using EduStream.Core.Models;
+using EduStream.Core.Protocols;
+using EduStream.Core.Utils;
 
 namespace EduStream.Client.Services;
 
@@ -13,11 +14,9 @@ public sealed class FileReceiver
     {
         Directory.CreateDirectory(targetDirectory);
         var savePath = Path.Combine(targetDirectory, packet.FileName);
-        var actualChecksum = Convert.ToHexString(SHA256.HashData(packet.Content));
-
-        if (!string.Equals(actualChecksum, packet.Checksum, StringComparison.OrdinalIgnoreCase))
+        if (!ChecksumUtility.VerifySha256(packet.Content, packet.Checksum))
         {
-            throw new InvalidOperationException("체크섬 검증에 실패했습니다.");
+            throw new InvalidOperationException(ErrorCodes.ChecksumMismatch);
         }
 
         await File.WriteAllBytesAsync(savePath, packet.Content);

@@ -1,5 +1,6 @@
 using EduStream.Core.Logging;
 using EduStream.Core.Models;
+using EduStream.Core.Protocols;
 
 namespace EduStream.Server.Services;
 
@@ -57,12 +58,12 @@ public sealed class SessionManager
     {
         if (CurrentSession is null)
         {
-            return Task.FromResult<BasePacket>(CreateError("SESSION_NOT_OPEN", "현재 열려 있는 세션이 없습니다.", false, packet));
+            return Task.FromResult<BasePacket>(CreateError(ErrorCodes.SessionNotOpen, "현재 열려 있는 세션이 없습니다.", false, packet));
         }
 
         if (string.IsNullOrWhiteSpace(packet.DisplayName))
         {
-            return Task.FromResult<BasePacket>(CreateError("DISPLAY_NAME_REQUIRED", "참여자 이름은 비워둘 수 없습니다.", true, packet));
+            return Task.FromResult<BasePacket>(CreateError(ErrorCodes.DisplayNameRequired, "참여자 이름은 비워둘 수 없습니다.", true, packet));
         }
 
         _participants.Add(packet.DisplayName);
@@ -74,7 +75,7 @@ public sealed class SessionManager
         {
             SessionId = CurrentSession.SessionId,
             SenderId = "Server",
-            AckCode = "SESSION_JOINED",
+            AckCode = AckCodes.SessionJoined,
             Message = $"{packet.DisplayName}님이 세션에 참여했습니다."
         });
     }
@@ -83,7 +84,7 @@ public sealed class SessionManager
     {
         if (CurrentSession is null)
         {
-            return Task.FromResult<BasePacket>(CreateError("SESSION_NOT_OPEN", "현재 열려 있는 세션이 없습니다.", false, packet));
+            return Task.FromResult<BasePacket>(CreateError(ErrorCodes.SessionNotOpen, "현재 열려 있는 세션이 없습니다.", false, packet));
         }
 
         if (!string.IsNullOrWhiteSpace(packet.SenderId))
@@ -98,7 +99,7 @@ public sealed class SessionManager
         {
             SessionId = CurrentSession.SessionId,
             SenderId = "Server",
-            AckCode = "SESSION_LEFT",
+            AckCode = AckCodes.SessionLeft,
             Message = "세션 이탈이 처리되었습니다."
         });
     }
