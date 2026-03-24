@@ -10,12 +10,13 @@ EduStream은 교수자 화면을 여러 수강생에게 실시간으로 전달�
 1. [프로젝트 개요](#프로젝트-개요)
 2. [현재 상태](#현재-상태)
 3. [디렉터리 구조](#디렉터리-구조)
-4. [시스템 구성](#시스템-구성)
-5. [기술 스택](#기술-스택)
-6. [도입 예정 기술](#도입-예정-기술)
-7. [로드맵](#로드맵)
-8. [시작하기](#시작하기)
-9. [협업 가이드](#협업-가이드)
+4. [UML 다이어그램](#uml-다이어그램)
+5. [시스템 구성](#시스템-구성)
+6. [기술 스택](#기술-스택)
+7. [도입 예정 기술](#도입-예정-기술)
+8. [로드맵](#로드맵)
+9. [시작하기](#시작하기)
+10. [협업 가이드](#협업-가이드)
 
 ---
 
@@ -42,14 +43,15 @@ EduStream은 교수자 화면을 여러 수강생에게 실시간으로 전달�
 - WPF 기반 서버/클라이언트 프로젝트 생성 완료
 - 공통 코어 라이브러리 프로젝트 생성 완료
 - 기본 진입 창 및 애플리케이션 골격 구성 완료
+- 공통 패킷 계약과 세션 흐름 스켈레톤 반영 완료
 
 아래 기능은 아직 본격 구현 전입니다.
 
+- 실제 TCP/UDP 통신
 - 화면 캡처 및 스트리밍
-- 세션 관리
-- 파일 전송
-- 채팅
-- 직렬화 프로토콜 구체화
+- 실제 세션 join/leave 네트워크 연결
+- 파일 청크 재조립 및 재전송
+- Heartbeat 주기 관리
 
 ---
 
@@ -57,16 +59,19 @@ EduStream은 교수자 화면을 여러 수강생에게 실시간으로 전달�
 
 ```text
 Team-Senior-Club-RDP-based-Capstone-Repository/
-├─ BaseUML.mdj
+├─ assets/
+├─ docs/
 ├─ src/
 │  ├─ EduStream.Server/
 │  │  ├─ EduStream.Server.csproj
-│  │  └─ EduStream.Server.sln
+│  │  └─ ...
 │  ├─ EduStream.Client/
-│  │  └─ EduStream.Client.csproj
-│  ├─ EduStream.Core/
-│  │  └─ EduStream.Core.csproj
-│  └─ ...
+│  │  ├─ EduStream.Client.csproj
+│  │  └─ ...
+│  └─ EduStream.Core/
+│     ├─ EduStream.Core.csproj
+│     └─ ...
+├─ BaseUML.mdj
 ├─ EduStream.sln
 ├─ LICENSE
 └─ README.md
