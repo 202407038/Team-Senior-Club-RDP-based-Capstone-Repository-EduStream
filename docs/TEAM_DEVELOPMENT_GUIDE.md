@@ -31,6 +31,14 @@
 
 ### 브랜치 생성 규칙
 
+작업 시작 전에는 반드시 아래 명령을 먼저 실행합니다.
+
+```bash
+git pull --all --prune
+```
+
+이후 아래 순서로 진행합니다.
+
 1. 항상 최신 `main`에서 새 브랜치를 만듭니다.
 2. 하나의 브랜치에서는 하나의 목적만 다룹니다.
 3. 서로 다른 기능을 한 브랜치에 섞지 않습니다.
@@ -39,7 +47,7 @@
 
 ```bash
 git checkout main
-git pull origin main
+git pull --all --prune
 git checkout -b feature/chat-flow
 ```
 
@@ -163,15 +171,16 @@ feat: add UML-based project skeleton for server, client, and core
 
 ## 7. 일일 작업 절차
 
-1. `main` 최신화
-2. 본인 작업 브랜치 생성 또는 갱신
-3. 작업 전 담당 범위 확인
-4. 구현
-5. 로컬 빌드
-6. 커밋
-7. 푸시
-8. PR 생성
-9. 리뷰 반영 후 머지
+1. `git pull --all --prune` 실행
+2. `main` 최신화
+3. 본인 작업 브랜치 생성 또는 갱신
+4. 작업 전 담당 범위 확인
+5. 구현
+6. 로컬 빌드
+7. 커밋
+8. 푸시
+9. PR 생성
+10. 리뷰 반영 후 머지
 
 ## 8. 충돌 방지 규칙
 

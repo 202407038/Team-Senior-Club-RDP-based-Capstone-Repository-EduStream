@@ -54,6 +54,24 @@ EduStream은 교수자 화면을 여러 수강생에게 실시간으로 전달�
 - 파일 청크 재조립 및 재전송
 - Heartbeat 주기 관리
 
+### 개발 시작 전 동기화
+
+모든 개발 팀원은 작업을 시작하기 전에 아래 명령을 먼저 실행합니다.
+
+```bash
+git pull --all --prune
+```
+
+권장 순서:
+
+```bash
+git checkout main
+git pull --all --prune
+git checkout -b feature/<작업명>
+```
+
+이 규칙은 선택이 아니라 기본 절차입니다.
+
 ---
 
 ## 디렉터리 구조
@@ -214,6 +232,7 @@ EduStream.sln
 3. [아키텍처 가이드](./docs/ARCHITECTURE_GUIDE.md)
 4. [구현 플레이북](./docs/IMPLEMENTATION_PLAYBOOK.md)
 5. [사용자 워크플로우 시나리오](./docs/USER_WORKFLOW_SCENARIOS.md)
+6. [7일 스프린트 상세 구현 가이드](./docs/SPRINT_7DAY_IMPLEMENTATION_GUIDE.md)
 
 요약 규칙만 이 README에 남깁니다.
 
