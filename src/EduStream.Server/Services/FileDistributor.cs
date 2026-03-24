@@ -1,8 +1,9 @@
 using System.IO;
-using System.Security.Cryptography;
 using EduStream.Core.Logging;
 using EduStream.Core.Models;
+using EduStream.Core.Protocols;
 using EduStream.Core.Serialization;
+using EduStream.Core.Utils;
 
 namespace EduStream.Server.Services;
 
@@ -29,7 +30,7 @@ public sealed class FileDistributor
             FileName = Path.GetFileName(filePath),
             FileSize = content.LongLength,
             Content = content,
-            Checksum = Convert.ToHexString(SHA256.HashData(content))
+            Checksum = ChecksumUtility.ComputeSha256(content)
         };
 
         packet.DataLength = _serializer.Serialize(packet).Length;
@@ -41,11 +42,11 @@ public sealed class FileDistributor
     {
         if (chunkSize <= 0)
         {
-            throw new ArgumentOutOfRangeException(nameof(chunkSize), "청크 크기는 1 이상이어야 합니다.");
+            throw new ArgumentOutOfRangeException(nameof(chunkSize), ErrorCodes.InvalidChunkSize);
         }
 
         var content = await File.ReadAllBytesAsync(filePath);
-        var checksum = Convert.ToHexString(SHA256.HashData(content));
+        var checksum = ChecksumUtility.ComputeSha256(content);
         var transferId = Guid.NewGuid();
         var totalChunks = (int)Math.Ceiling(content.Length / (double)chunkSize);
         var packets = new List<FilePacket>(totalChunks);

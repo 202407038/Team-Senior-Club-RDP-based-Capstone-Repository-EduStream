@@ -1,3 +1,5 @@
+using EduStream.Core.Network;
+
 namespace EduStream.Core.Models;
 
 /// <summary>
@@ -18,4 +20,18 @@ public sealed class SessionInfo
     public int ParticipantCount { get; set; }
 
     public DateTimeOffset OpenedAt { get; set; } = DateTimeOffset.UtcNow;
+
+    /// <summary>
+    /// UI나 로그에서 바로 사용할 수 있는 접속 문자열입니다.
+    /// </summary>
+    public string DisplayAddress => $"{HostAddress}:{Port}";
+
+    public SessionEndpoint ToEndpoint()
+    {
+        return new SessionEndpoint
+        {
+            Address = HostAddress,
+            Port = Port
+        };
+    }
 }
