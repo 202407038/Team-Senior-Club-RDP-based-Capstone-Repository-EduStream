@@ -8,6 +8,7 @@
 2. `docs/TEAM_DEVELOPMENT_GUIDE.md`
 3. `docs/ARCHITECTURE_GUIDE.md`
 4. `docs/IMPLEMENTATION_PLAYBOOK.md`
+5. `docs/USER_WORKFLOW_SCENARIOS.md`
 
 ## 문서 목록
 
@@ -32,6 +33,13 @@
 - 인원이 부족할 때의 축소 운영 방법
 - 각 작업 단위를 시작하고 끝내는 절차
 - 기능별 권장 개발 순서
+
+### 4. [사용자 워크플로우 시나리오](./USER_WORKFLOW_SCENARIOS.md)
+
+- 현재 프로젝트 기준 대표 사용자 흐름
+- 교수자/수강생 중심 사용 절차
+- 화면 공유, 파일 전송, 채팅, 세션 종료 시나리오
+- 향후 테스트 케이스 및 예외 흐름 확장 기준
 
 ## 문서 운영 원칙
 
