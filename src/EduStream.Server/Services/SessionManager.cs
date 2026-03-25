@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using EduStream.Core.Logging;
 using EduStream.Core.Models;
 using EduStream.Core.Protocols;
@@ -11,7 +12,8 @@ namespace EduStream.Server.Services;
 public sealed class SessionManager
 {
     private readonly ILogSink _logSink;
-    private readonly HashSet<string> _participants = [];
+    private readonly ConcurrentDictionary<string, string> _participants = new();
+    private readonly object _sessionLock = new();
 
     public SessionManager(ILogSink logSink)
     {
@@ -22,15 +24,20 @@ public sealed class SessionManager
 
     public bool IsSessionOpen => CurrentSession is not null;
 
+    public int ParticipantCount => _participants.Count;
+
     public Task<SessionInfo> OpenSessionAsync(string sessionName, int port)
     {
-        CurrentSession = new SessionInfo
+        lock (_sessionLock)
         {
-            SessionName = sessionName,
-            HostName = Environment.MachineName,
-            Port = port,
-            HostAddress = "127.0.0.1"
-        };
+            CurrentSession = new SessionInfo
+            {
+                SessionName = sessionName,
+                HostName = Environment.MachineName,
+                Port = port,
+                HostAddress = "127.0.0.1"
+            };
+        }
 
         _logSink.Write($"세션을 개설했습니다. 이름={sessionName}, 포트={port}");
         return Task.FromResult(CurrentSession);
@@ -38,13 +45,17 @@ public sealed class SessionManager
 
     public Task CloseSessionAsync()
     {
-        if (CurrentSession is not null)
+        lock (_sessionLock)
         {
-            _logSink.Write($"세션을 종료했습니다. 이름={CurrentSession.SessionName}");
+            if (CurrentSession is not null)
+            {
+                _logSink.Write($"세션을 종료했습니다. 이름={CurrentSession.SessionName}");
+            }
+
+            _participants.Clear();
+            CurrentSession = null;
         }
 
-        _participants.Clear();
-        CurrentSession = null;
         return Task.CompletedTask;
     }
 
@@ -66,7 +77,11 @@ public sealed class SessionManager
             return Task.FromResult<BasePacket>(CreateError(ErrorCodes.DisplayNameRequired, "참여자 이름은 비워둘 수 없습니다.", true, packet));
         }
 
-        _participants.Add(packet.DisplayName);
+        if (!_participants.TryAdd(packet.DisplayName, packet.SenderId))
+        {
+            return Task.FromResult<BasePacket>(CreateError(ErrorCodes.AlreadyJoined, $"{packet.DisplayName}은(는) 이미 참여 중입니다.", true, packet));
+        }
+
         CurrentSession.ParticipantCount = _participants.Count;
 
         _logSink.Write($"세션 참여 처리: {packet.DisplayName}, 현재 인원={CurrentSession.ParticipantCount}");
@@ -87,13 +102,13 @@ public sealed class SessionManager
             return Task.FromResult<BasePacket>(CreateError(ErrorCodes.SessionNotOpen, "현재 열려 있는 세션이 없습니다.", false, packet));
         }
 
-        if (!string.IsNullOrWhiteSpace(packet.SenderId))
+        if (!string.IsNullOrWhiteSpace(packet.DisplayName))
         {
-            _participants.Remove(packet.SenderId);
+            _participants.TryRemove(packet.DisplayName, out _);
         }
 
         CurrentSession.ParticipantCount = _participants.Count;
-        _logSink.Write($"세션 이탈 처리: {packet.SenderId}, 현재 인원={CurrentSession.ParticipantCount}");
+        _logSink.Write($"세션 이탈 처리: {packet.DisplayName}, 현재 인원={CurrentSession.ParticipantCount}");
 
         return Task.FromResult<BasePacket>(new AckPacket
         {

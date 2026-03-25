@@ -10,4 +10,5 @@ public static class ErrorCodes
     public const string JoinRejected = "JOIN_REJECTED";
     public const string ChecksumMismatch = "CHECKSUM_MISMATCH";
     public const string InvalidChunkSize = "INVALID_CHUNK_SIZE";
+    public const string AlreadyJoined = "ALREADY_JOINED";
 }
