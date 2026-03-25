@@ -5,9 +5,18 @@ namespace EduStream.Server;
 
 public partial class MainWindow : Window
 {
+    private readonly ServerViewModel _viewModel;
+
     public MainWindow()
     {
         InitializeComponent();
-        DataContext = new ServerViewModel();
+        _viewModel = new ServerViewModel();
+        DataContext = _viewModel;
+        Loaded += OnLoaded;
+    }
+
+    private void OnLoaded(object sender, RoutedEventArgs e)
+    {
+        _viewModel.AttachRdpSurface(RdpPreviewHost);
     }
 }
