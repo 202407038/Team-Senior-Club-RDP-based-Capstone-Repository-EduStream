@@ -41,6 +41,7 @@ public sealed class FileReceiver
             return savePath;
         }
 
+        FileTransferBuffer? bufferToFinalize = null;
         lock (_syncRoot)
         {
             if (packet.TotalChunks <= 1)
@@ -86,10 +87,55 @@ public sealed class FileReceiver
                 buffer.Chunks[packet.ChunkIndex] = packet.Content;
                 buffer.ReceivedCount++;
             }
+
+            if (buffer.ReceivedCount == buffer.TotalChunks)
+            {
+                // 마지막 청크 도착 시 조립/검증/저장을 수행합니다.
+                bufferToFinalize = buffer;
+                _buffers.Remove(packet.TransferId);
+            }
         }
 
-        // day1: 조립/검증/저장까지는 day4에서 완료합니다.
-        // 중간 청크는 저장하지 않으며, 마지막 청크도 당장은 string.Empty를 반환합니다.
-        return string.Empty;
+        if (bufferToFinalize is null)
+        {
+            // 중간 청크 단계입니다.
+            return string.Empty;
+        }
+
+        if (bufferToFinalize.FileSize > int.MaxValue)
+        {
+            throw new NotSupportedException("File size is too large to assemble in memory.");
+        }
+
+        var combined = new byte[bufferToFinalize.FileSize];
+        var offset = 0L;
+        for (var i = 0; i < bufferToFinalize.TotalChunks; i++)
+        {
+            var chunk = bufferToFinalize.Chunks[i] ?? throw new InvalidOperationException("Missing chunk while finalizing transfer.");
+            Buffer.BlockCopy(chunk, 0, combined, (int)offset, chunk.Length);
+            offset += chunk.Length;
+        }
+
+        if (offset != bufferToFinalize.FileSize)
+        {
+            throw new InvalidOperationException("Combined file size does not match expected file size.");
+        }
+
+        if (!ChecksumUtility.VerifySha256(combined, bufferToFinalize.Checksum))
+        {
+            throw new InvalidOperationException(ErrorCodes.ChecksumMismatch);
+        }
+
+        var finalPath = Path.Combine(targetDirectory, bufferToFinalize.FileName);
+        var tempPath = Path.Combine(targetDirectory, $"{bufferToFinalize.FileName}.{packet.TransferId:N}.part");
+        await File.WriteAllBytesAsync(tempPath, combined);
+
+        if (File.Exists(finalPath))
+        {
+            File.Delete(finalPath);
+        }
+
+        File.Move(tempPath, finalPath);
+        return finalPath;
     }
 }
