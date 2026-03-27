@@ -11,7 +11,7 @@ using EduStream.Core.Utils;
 namespace EduStream.Client.ViewModels;
 
 /// <summary>
-/// 학생용 화면에서 세션 참여와 수신 상태를 표현합니다.
+/// Presents the student dashboard state and wires it to the demo services.
 /// </summary>
 public sealed class ClientViewModel : ObservableObject
 {
@@ -22,10 +22,10 @@ public sealed class ClientViewModel : ObservableObject
     private string _hostAddress = "127.0.0.1";
     private int _port = 5000;
     private string _displayName = "StudentDemo";
-    private string _connectionState = "연결 대기";
-    private string _renderStatus = "화면을 아직 수신하지 않았습니다.";
-    private string _downloadStatus = "다운로드 대기";
-    private string _chatInput = "학생 질문: 오늘 과제 제출 기한이 언제인가요?";
+    private string _connectionState = "Waiting for connection";
+    private string _renderStatus = "No screen frame has been received yet.";
+    private string _downloadStatus = "Waiting for download";
+    private string _chatInput = "Student question: when is the assignment due?";
     private bool _isConnected;
 
     public ClientViewModel()
@@ -129,31 +129,31 @@ public sealed class ClientViewModel : ObservableObject
             SessionId = Guid.NewGuid(),
             SenderId = "Server",
             AckCode = AckCodes.SessionJoined,
-            Message = $"{DisplayName}님 연결 승인"
+            Message = $"{DisplayName} connection acknowledged"
         };
 
         await _sessionClient.ApplyJoinAckAsync(ack, HostAddress, Port);
         IsConnected = true;
-        ConnectionState = "연결됨";
-        _logSink.Write($"세션 참여 요청 생성: {joinRequest.DisplayName} -> {joinRequest.TargetAddress}:{joinRequest.TargetPort}");
+        ConnectionState = "Connected";
+        _logSink.Write($"Session join request created: {joinRequest.DisplayName} -> {joinRequest.TargetAddress}:{joinRequest.TargetPort}");
         SyncLogs();
     }
 
     private async Task DisconnectAsync()
     {
-        var leavePacket = _sessionClient.CreateLeaveRequest(DisplayName, "사용자 종료");
-        _logSink.Write($"세션 이탈 요청 생성: {leavePacket.SenderId}, 사유={leavePacket.Reason}");
+        var leavePacket = _sessionClient.CreateLeaveRequest(DisplayName, "User requested disconnect");
+        _logSink.Write($"Session leave request created: {leavePacket.SenderId}, reason={leavePacket.Reason}");
         await _sessionClient.DisconnectAsync(leavePacket.Reason);
         IsConnected = false;
-        ConnectionState = "연결 종료";
-        RenderStatus = "화면 수신 중지";
+        ConnectionState = "Disconnected";
+        RenderStatus = "Screen rendering stopped";
         SyncLogs();
     }
 
     private void SendChat()
     {
-        ChatMessages.Insert(0, $"학생: {ChatInput}");
-        _logSink.Write($"채팅 메시지를 전송했습니다: {ChatInput}");
+        ChatMessages.Insert(0, $"Student: {ChatInput}");
+        _logSink.Write($"Chat message sent: {ChatInput}");
         ChatInput = string.Empty;
         SyncLogs();
     }
@@ -163,17 +163,17 @@ public sealed class ClientViewModel : ObservableObject
         var packet = new ScreenPacket
         {
             FrameIndex = 1,
-            FrameDescription = "교수 화면 샘플 프레임"
+            FrameDescription = "Professor sample preview frame"
         };
 
         RenderStatus = _screenRenderer.Render(packet);
-        _logSink.Write("샘플 화면 프레임을 렌더링했습니다.");
+        _logSink.Write("Rendered a sample screen frame.");
         SyncLogs();
     }
 
     private async Task SimulateFileReceiveAsync()
     {
-        var content = Encoding.UTF8.GetBytes("EduStream 수신 샘플 파일");
+        var content = Encoding.UTF8.GetBytes("EduStream received sample file");
         var packet = new FilePacket
         {
             FileName = "received-sample.txt",
@@ -184,8 +184,8 @@ public sealed class ClientViewModel : ObservableObject
 
         var path = await _fileReceiver.SaveAsync(packet, Path.Combine(Path.GetTempPath(), "EduStreamClient"));
         DownloadedFiles.Insert(0, Path.GetFileName(path));
-        DownloadStatus = $"{Path.GetFileName(path)} 저장 완료";
-        _logSink.Write($"샘플 파일을 저장했습니다: {path}");
+        DownloadStatus = $"{Path.GetFileName(path)} saved successfully";
+        _logSink.Write($"Saved sample file to {path}");
         SyncLogs();
     }
 

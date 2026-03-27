@@ -23,7 +23,6 @@ public sealed class ServerViewModel : ObservableObject
     private readonly ScreenCapturer _screenCapturer;
     private readonly RdpHost _rdpHost;
     private readonly FileDistributor _fileDistributor;
-
     private string _sessionName = "Capstone Live Class";
     private int _port = 5000;
     private string _chatInput = "Announcement: today's lecture note has been uploaded.";
