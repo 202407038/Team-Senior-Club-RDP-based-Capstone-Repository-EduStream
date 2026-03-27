@@ -1,4 +1,4 @@
-﻿using System.Configuration;
+using System.Configuration;
 using System.Data;
 using System.Windows;
 
@@ -10,4 +10,3 @@ namespace EduStream.Server;
 public partial class App : System.Windows.Application
 {
 }
-
