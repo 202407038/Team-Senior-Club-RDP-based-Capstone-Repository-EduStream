@@ -1,4 +1,5 @@
 using System.IO;
+using System.Threading;
 using EduStream.Core.Logging;
 using EduStream.Core.Models;
 using EduStream.Core.Protocols;
@@ -75,5 +76,24 @@ public sealed class FileDistributor
 
         _logSink.Write($"파일 청크 패킷 생성: {Path.GetFileName(filePath)}, 청크 수={totalChunks}, 청크 크기={chunkSize} byte");
         return packets;
+    }
+
+    /// <summary>
+    /// 파일을 청크로 분할한 뒤, 청크를 생성 순서대로 전달합니다.
+    /// </summary>
+    public async Task DistributeFileAsync(
+        string filePath,
+        Func<FilePacket, Task> sendPacketAsync,
+        int chunkSize = DefaultChunkSize,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(sendPacketAsync);
+
+        var packets = await BuildFilePacketsAsync(filePath, chunkSize);
+        foreach (var packet in packets)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            await sendPacketAsync(packet);
+        }
     }
 }
