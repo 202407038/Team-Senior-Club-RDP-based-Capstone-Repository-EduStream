@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using System.IO;
+using System.Windows;
 using EduStream.Core.Common;
 using EduStream.Core.Logging;
 using EduStream.Core.Models;
@@ -15,6 +16,8 @@ public sealed class ServerViewModel : ObservableObject
 {
     private readonly InMemoryLogSink _logSink = new();
     private readonly SessionManager _sessionManager;
+    private readonly TcpServerService _tcpServer;
+    private readonly HeartbeatService _heartbeatService;
     private readonly ScreenCapturer _screenCapturer;
     private readonly RdpHost _rdpHost;
     private readonly FileDistributor _fileDistributor;
@@ -23,14 +26,19 @@ public sealed class ServerViewModel : ObservableObject
     private string _chatInput = "공지: 오늘 강의 자료를 업로드했습니다.";
     private string _latestScreenStatus = "화면 공유를 아직 시작하지 않았습니다.";
     private bool _isSessionOpen;
+    private int _participantCount;
 
     public ServerViewModel()
     {
         var serializer = new PacketSerializer();
-        _sessionManager = new SessionManager(_logSink);
+        _tcpServer = new TcpServerService(serializer, _logSink);
+        _sessionManager = new SessionManager(_tcpServer, _logSink);
+        _heartbeatService = new HeartbeatService(_sessionManager, _logSink);
         _screenCapturer = new ScreenCapturer();
         _rdpHost = new RdpHost(_logSink);
         _fileDistributor = new FileDistributor(serializer, _logSink);
+
+        _sessionManager.ParticipantsChanged += OnParticipantsChanged;
 
         OpenSessionCommand = new RelayCommand(() => _ = OpenSessionAsync(), () => !IsSessionOpen);
         CloseSessionCommand = new RelayCommand(() => _ = CloseSessionAsync(), () => IsSessionOpen);
@@ -85,6 +93,12 @@ public sealed class ServerViewModel : ObservableObject
         }
     }
 
+    public int ParticipantCount
+    {
+        get => _participantCount;
+        private set => SetProperty(ref _participantCount, value);
+    }
+
     public ObservableCollection<string> ActivityLogs { get; } = [];
 
     public ObservableCollection<string> SharedFiles { get; } = [];
@@ -105,15 +119,18 @@ public sealed class ServerViewModel : ObservableObject
     {
         await _sessionManager.OpenSessionAsync(SessionName, Port);
         await _rdpHost.StartHostAsync();
+        _heartbeatService.Start();
         IsSessionOpen = true;
         SyncLogs();
     }
 
     private async Task CloseSessionAsync()
     {
+        _heartbeatService.Stop();
         await _rdpHost.StopHostAsync();
         await _sessionManager.CloseSessionAsync();
         IsSessionOpen = false;
+        ParticipantCount = 0;
         LatestScreenStatus = "세션 종료 상태";
         SyncLogs();
     }
@@ -152,6 +169,15 @@ public sealed class ServerViewModel : ObservableObject
         ChatMessages.Insert(0, $"교수: {ChatInput}");
         ChatInput = string.Empty;
         SyncLogs();
+    }
+
+    private void OnParticipantsChanged()
+    {
+        Application.Current?.Dispatcher.Invoke(() =>
+        {
+            ParticipantCount = _sessionManager.ParticipantCount;
+            SyncLogs();
+        });
     }
 
     private void SyncLogs()
