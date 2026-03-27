@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using System.IO;
 using System.Windows;
+using System.Windows.Forms.Integration;
 using EduStream.Core.Common;
 using EduStream.Core.Logging;
 using EduStream.Core.Models;
@@ -10,7 +11,8 @@ using EduStream.Server.Services;
 namespace EduStream.Server.ViewModels;
 
 /// <summary>
-/// 교수용 화면에서 세션 개설과 데모용 상호작용 흐름을 다룹니다.
+/// 교수자 대시보드의 상태와 명령을 관리합니다.
+/// RDP 테스트 대시보드와 세션 네트워크 흐름을 함께 연결합니다.
 /// </summary>
 public sealed class ServerViewModel : ObservableObject
 {
@@ -21,21 +23,26 @@ public sealed class ServerViewModel : ObservableObject
     private readonly ScreenCapturer _screenCapturer;
     private readonly RdpHost _rdpHost;
     private readonly FileDistributor _fileDistributor;
-    private string _sessionName = "캡스톤 실시간 강의";
+
+    private string _sessionName = "Capstone Live Class";
     private int _port = 5000;
-    private string _chatInput = "공지: 오늘 강의 자료를 업로드했습니다.";
-    private string _latestScreenStatus = "화면 공유를 아직 시작하지 않았습니다.";
+    private string _chatInput = "Announcement: today's lecture note has been uploaded.";
+    private string _latestScreenStatus = "Screen sharing has not started yet.";
+    private string _rdpServerAddress = "127.0.0.1";
+    private string _rdpUserName = Environment.UserName;
+    private string _rdpPassword = string.Empty;
+    private string _rdpStatus = "RDP preview is idle.";
     private bool _isSessionOpen;
     private int _participantCount;
 
-    public ServerViewModel()
+    public ServerViewModel(RdpHost? rdpHost = null)
     {
         var serializer = new PacketSerializer();
         _tcpServer = new TcpServerService(serializer, _logSink);
         _sessionManager = new SessionManager(_tcpServer, _logSink);
         _heartbeatService = new HeartbeatService(_sessionManager, _logSink);
         _screenCapturer = new ScreenCapturer();
-        _rdpHost = new RdpHost(_logSink);
+        _rdpHost = rdpHost ?? new RdpHost(_logSink);
         _fileDistributor = new FileDistributor(serializer, _logSink);
 
         _sessionManager.ParticipantsChanged += OnParticipantsChanged;
@@ -45,6 +52,8 @@ public sealed class ServerViewModel : ObservableObject
         StartScreenShareCommand = new RelayCommand(() => _ = StartScreenShareAsync(), () => IsSessionOpen);
         SendSampleFileCommand = new RelayCommand(() => _ = SendSampleFileAsync(), () => IsSessionOpen);
         SendChatCommand = new RelayCommand(() => _ = SendChatAsync(), () => IsSessionOpen && !string.IsNullOrWhiteSpace(ChatInput));
+        StartRdpPreviewCommand = new RelayCommand(() => _ = StartRdpPreviewAsync(), () => IsSessionOpen && _rdpHost.IsAttached);
+        StopRdpPreviewCommand = new RelayCommand(() => _ = StopRdpPreviewAsync(), () => _rdpHost.IsAttached);
     }
 
     public string SessionName
@@ -77,6 +86,30 @@ public sealed class ServerViewModel : ObservableObject
         private set => SetProperty(ref _latestScreenStatus, value);
     }
 
+    public string RdpServerAddress
+    {
+        get => _rdpServerAddress;
+        set => SetProperty(ref _rdpServerAddress, value);
+    }
+
+    public string RdpUserName
+    {
+        get => _rdpUserName;
+        set => SetProperty(ref _rdpUserName, value);
+    }
+
+    public string RdpPassword
+    {
+        get => _rdpPassword;
+        set => SetProperty(ref _rdpPassword, value);
+    }
+
+    public string RdpStatus
+    {
+        get => _rdpStatus;
+        private set => SetProperty(ref _rdpStatus, value);
+    }
+
     public bool IsSessionOpen
     {
         get => _isSessionOpen;
@@ -89,6 +122,7 @@ public sealed class ServerViewModel : ObservableObject
                 StartScreenShareCommand.RaiseCanExecuteChanged();
                 SendSampleFileCommand.RaiseCanExecuteChanged();
                 SendChatCommand.RaiseCanExecuteChanged();
+                StartRdpPreviewCommand.RaiseCanExecuteChanged();
             }
         }
     }
@@ -115,12 +149,26 @@ public sealed class ServerViewModel : ObservableObject
 
     public RelayCommand SendChatCommand { get; }
 
+    public RelayCommand StartRdpPreviewCommand { get; }
+
+    public RelayCommand StopRdpPreviewCommand { get; }
+
+    public void AttachRdpSurface(WindowsFormsHost hostSurface)
+    {
+        _rdpHost.AttachHost(hostSurface);
+        StartRdpPreviewCommand.RaiseCanExecuteChanged();
+        StopRdpPreviewCommand.RaiseCanExecuteChanged();
+        SyncLogs();
+    }
+
     private async Task OpenSessionAsync()
     {
         await _sessionManager.OpenSessionAsync(SessionName, Port);
-        await _rdpHost.StartHostAsync();
         _heartbeatService.Start();
         IsSessionOpen = true;
+        RdpStatus = _rdpHost.IsAttached
+            ? "RDP preview is ready. Enter credentials and start the connection."
+            : "RDP preview host is not attached yet.";
         SyncLogs();
     }
 
@@ -131,7 +179,8 @@ public sealed class ServerViewModel : ObservableObject
         await _sessionManager.CloseSessionAsync();
         IsSessionOpen = false;
         ParticipantCount = 0;
-        LatestScreenStatus = "세션 종료 상태";
+        LatestScreenStatus = "Session closed.";
+        RdpStatus = "RDP preview stopped.";
         SyncLogs();
     }
 
@@ -140,14 +189,14 @@ public sealed class ServerViewModel : ObservableObject
         var frame = _screenCapturer.CapturePreviewFrame();
         frame.DataLength = frame.Content.Length;
         await _sessionManager.BroadcastPacketAsync(frame);
-        LatestScreenStatus = $"{frame.FrameDescription} 송신 준비 완료";
+        LatestScreenStatus = $"{frame.FrameDescription} is ready to broadcast.";
         SyncLogs();
     }
 
     private async Task SendSampleFileAsync()
     {
         var tempFile = Path.Combine(Path.GetTempPath(), "edustream-sample-note.txt");
-        await File.WriteAllTextAsync(tempFile, "EduStream 샘플 강의 자료");
+        await File.WriteAllTextAsync(tempFile, "EduStream sample lecture note");
         var packet = await _fileDistributor.BuildFilePacketAsync(tempFile);
         await _sessionManager.BroadcastPacketAsync(packet);
 
@@ -166,14 +215,37 @@ public sealed class ServerViewModel : ObservableObject
         packet.DataLength = ChatInput.Length;
         await _sessionManager.BroadcastPacketAsync(packet);
 
-        ChatMessages.Insert(0, $"교수: {ChatInput}");
+        ChatMessages.Insert(0, $"Professor: {ChatInput}");
         ChatInput = string.Empty;
+        SyncLogs();
+    }
+
+    private async Task StartRdpPreviewAsync()
+    {
+        try
+        {
+            await _rdpHost.StartHostAsync(RdpServerAddress, RdpUserName, RdpPassword);
+            RdpStatus = $"RDP connection started for {RdpServerAddress}.";
+        }
+        catch (Exception ex)
+        {
+            RdpStatus = $"RDP start failed: {ex.Message}";
+            _logSink.Write(RdpStatus);
+        }
+
+        SyncLogs();
+    }
+
+    private async Task StopRdpPreviewAsync()
+    {
+        await _rdpHost.StopHostAsync();
+        RdpStatus = "RDP preview stopped.";
         SyncLogs();
     }
 
     private void OnParticipantsChanged()
     {
-        Application.Current?.Dispatcher.Invoke(() =>
+        System.Windows.Application.Current?.Dispatcher.Invoke(() =>
         {
             ParticipantCount = _sessionManager.ParticipantCount;
             SyncLogs();
