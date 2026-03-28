@@ -12,8 +12,11 @@ public sealed class FileReceiver
 {
     public async Task<string> SaveAsync(FilePacket packet, string targetDirectory)
     {
+        FileTransferUtility.ValidatePacketMetadata(packet);
+
         Directory.CreateDirectory(targetDirectory);
         var savePath = Path.Combine(targetDirectory, packet.FileName);
+
         if (!ChecksumUtility.VerifySha256(packet.Content, packet.Checksum))
         {
             throw new InvalidOperationException(ErrorCodes.ChecksumMismatch);
