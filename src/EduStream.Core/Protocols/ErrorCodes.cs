@@ -10,5 +10,11 @@ public static class ErrorCodes
     public const string DisplayNameRequired = "DISPLAY_NAME_REQUIRED";
     public const string JoinRejected = "JOIN_REJECTED";
     public const string ChecksumMismatch = "CHECKSUM_MISMATCH";
+    public const string ChecksumRequired = "CHECKSUM_REQUIRED";
     public const string InvalidChunkSize = "INVALID_CHUNK_SIZE";
+    public const string InvalidChunkIndex = "INVALID_CHUNK_INDEX";
+    public const string InvalidTotalChunks = "INVALID_TOTAL_CHUNKS";
+    public const string InvalidFileName = "INVALID_FILE_NAME";
+    public const string InvalidFileSize = "INVALID_FILE_SIZE";
+    public const string EmptyChunkPayload = "EMPTY_CHUNK_PAYLOAD";
 }

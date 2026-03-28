@@ -14,7 +14,6 @@ public sealed class FileDistributor
 {
     private readonly PacketSerializer _serializer;
     private readonly ILogSink _logSink;
-    private const int DefaultChunkSize = 64 * 1024;
 
     public FileDistributor(PacketSerializer serializer, ILogSink logSink)
     {
@@ -38,23 +37,19 @@ public sealed class FileDistributor
         return packet;
     }
 
-    public async Task<IReadOnlyList<FilePacket>> BuildFilePacketsAsync(string filePath, int chunkSize = DefaultChunkSize)
+    public async Task<IReadOnlyList<FilePacket>> BuildFilePacketsAsync(string filePath, int chunkSize = FileTransferRules.DefaultChunkSize)
     {
-        if (chunkSize <= 0)
-        {
-            throw new ArgumentOutOfRangeException(nameof(chunkSize), ErrorCodes.InvalidChunkSize);
-        }
-
         var content = await File.ReadAllBytesAsync(filePath);
+        FileTransferUtility.ValidateChunkSize(chunkSize);
         var checksum = ChecksumUtility.ComputeSha256(content);
         var transferId = Guid.NewGuid();
-        var totalChunks = (int)Math.Ceiling(content.Length / (double)chunkSize);
+        var totalChunks = FileTransferUtility.CalculateTotalChunks(content.LongLength, chunkSize);
         var packets = new List<FilePacket>(totalChunks);
 
         for (var index = 0; index < totalChunks; index++)
         {
             var offset = index * chunkSize;
-            var length = Math.Min(chunkSize, content.Length - offset);
+            var length = FileTransferUtility.GetChunkLength(content.LongLength, chunkSize, index);
             var chunk = new byte[length];
             Array.Copy(content, offset, chunk, 0, length);
 
@@ -69,6 +64,7 @@ public sealed class FileDistributor
                 Content = chunk
             };
 
+            FileTransferUtility.ValidatePacketMetadata(packet);
             packet.DataLength = _serializer.Serialize(packet).Length;
             packets.Add(packet);
         }
