@@ -5,85 +5,197 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         mc:Ignorable="d"
         Title="EduStream Client"
-        Height="720"
-        Width="1180"
-        MinHeight="640"
-        MinWidth="960">
-    <Grid Margin="20">
-        <Border Padding="20" CornerRadius="12" Background="#FFF0F5FB" BorderBrush="#FFC8DBEF" BorderThickness="1">
-            <Grid>
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="2*" />
-                    <ColumnDefinition Width="16" />
-                    <ColumnDefinition Width="*" />
-                </Grid.ColumnDefinitions>
+        Height="760"
+        Width="1220"
+        MinHeight="700"
+        MinWidth="1000"
+        Background="#FFF6F8FB">
+    <Grid Margin="24">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="20" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="20" />
+            <RowDefinition Height="220" />
+        </Grid.RowDefinitions>
 
-                <StackPanel>
-                    <TextBlock FontSize="28" FontWeight="Bold" Text="학생용 수신 대시보드" />
-                    <TextBlock Margin="0,8,0,0"
-                               Foreground="#FF4C5F73"
-                               Text="세션 참여, 채팅, 파일 수신, 화면 렌더링을 단계적으로 구현하기 위한 기본 뷰입니다."
-                               TextWrapping="Wrap" />
+        <Border Padding="24"
+                Background="White"
+                BorderBrush="#FFD5DFEC"
+                BorderThickness="1"
+                CornerRadius="18">
+            <StackPanel>
+                <TextBlock FontSize="30" FontWeight="Bold" Text="학생 클라이언트" />
+                <TextBlock Margin="0,10,0,0"
+                           Foreground="#FF5F6B79"
+                           Text="세션 참가, 연결 상태 확인, 채팅 송수신 흐름을 먼저 검증하는 학생용 화면입니다."
+                           TextWrapping="Wrap" />
+            </StackPanel>
+        </Border>
 
-                    <UniformGrid Margin="0,20,0,0" Columns="2">
-                        <StackPanel Margin="0,0,12,0">
-                            <TextBlock FontWeight="SemiBold" Text="서버 IP" />
-                            <TextBox Margin="0,6,0,0" Padding="10,8" Text="{Binding HostAddress, UpdateSourceTrigger=PropertyChanged}" />
-                        </StackPanel>
-                        <StackPanel Margin="12,0,0,0">
-                            <TextBlock FontWeight="SemiBold" Text="포트" />
-                            <TextBox Margin="0,6,0,0" Padding="10,8" Text="{Binding Port, UpdateSourceTrigger=PropertyChanged}" />
-                        </StackPanel>
-                    </UniformGrid>
+        <Grid Grid.Row="2">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="1.15*" />
+                <ColumnDefinition Width="20" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
 
-                    <WrapPanel Margin="0,20,0,0">
-                        <Button Margin="0,0,10,10" Padding="18,10" Command="{Binding JoinSessionCommand}" Content="세션 참여" />
-                        <Button Margin="0,0,10,10" Padding="18,10" Command="{Binding DisconnectCommand}" Content="연결 종료" />
-                        <Button Margin="0,0,10,10" Padding="18,10" Command="{Binding SimulateScreenRenderCommand}" Content="화면 수신 테스트" />
-                        <Button Margin="0,0,10,10" Padding="18,10" Command="{Binding SimulateFileReceiveCommand}" Content="파일 수신 테스트" />
-                    </WrapPanel>
+            <StackPanel>
+                <Border Padding="20"
+                        Background="White"
+                        BorderBrush="#FFD5DFEC"
+                        BorderThickness="1"
+                        CornerRadius="16">
+                    <StackPanel>
+                        <TextBlock FontSize="20" FontWeight="SemiBold" Text="세션 참가" />
+                        <TextBlock Margin="0,8,0,0"
+                                   Foreground="#FF5F6B79"
+                                   Text="접속 정보와 표시 이름을 입력한 뒤 세션 참가/종료 버튼을 사용할 수 있습니다."
+                                   TextWrapping="Wrap" />
 
-                    <Border Margin="0,14,0,0" Padding="16" Background="White" BorderBrush="#FFC8DBEF" BorderThickness="1" CornerRadius="10">
-                        <StackPanel>
-                            <TextBlock FontWeight="SemiBold" Text="연결 상태" />
-                            <TextBlock Margin="0,8,0,0" Text="{Binding ConnectionState}" />
-                            <TextBlock Margin="0,12,0,0" FontWeight="SemiBold" Text="화면 렌더링 상태" />
-                            <TextBlock Margin="0,8,0,0" Text="{Binding RenderStatus}" />
-                            <TextBlock Margin="0,12,0,0" FontWeight="SemiBold" Text="다운로드 상태" />
-                            <TextBlock Margin="0,8,0,0" Text="{Binding DownloadStatus}" />
-                        </StackPanel>
-                    </Border>
+                        <Grid Margin="0,18,0,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="14" />
+                                <ColumnDefinition Width="180" />
+                            </Grid.ColumnDefinitions>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="12" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="12" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
 
-                    <TextBlock Margin="0,20,0,0" FontWeight="SemiBold" Text="실시간 채팅" />
-                    <DockPanel Margin="0,8,0,0">
-                        <Button DockPanel.Dock="Right" Width="110" Margin="12,0,0,0" Command="{Binding SendChatCommand}" Content="질문 전송" />
-                        <TextBox Padding="10,8" Text="{Binding ChatInput, UpdateSourceTrigger=PropertyChanged}" />
-                    </DockPanel>
-                    <ListBox Margin="0,10,0,0" Height="160" ItemsSource="{Binding ChatMessages}" />
-                </StackPanel>
+                            <StackPanel Grid.Row="0" Grid.ColumnSpan="3">
+                                <TextBlock FontWeight="SemiBold" Text="표시 이름" />
+                                <TextBox Margin="0,6,0,0"
+                                         Padding="10,8"
+                                         Text="{Binding DisplayName, UpdateSourceTrigger=PropertyChanged}" />
+                            </StackPanel>
 
-                <Grid Grid.Column="2">
+                            <StackPanel Grid.Row="2" Grid.Column="0">
+                                <TextBlock FontWeight="SemiBold" Text="서버 IP" />
+                                <TextBox Margin="0,6,0,0"
+                                         Padding="10,8"
+                                         Text="{Binding HostAddress, UpdateSourceTrigger=PropertyChanged}" />
+                            </StackPanel>
+
+                            <StackPanel Grid.Row="2" Grid.Column="2">
+                                <TextBlock FontWeight="SemiBold" Text="포트" />
+                                <TextBox Margin="0,6,0,0"
+                                         Padding="10,8"
+                                         Text="{Binding Port, UpdateSourceTrigger=PropertyChanged}" />
+                            </StackPanel>
+
+                            <WrapPanel Grid.Row="4" Grid.ColumnSpan="3">
+                                <Button Margin="0,0,10,0"
+                                        Padding="18,10"
+                                        Command="{Binding JoinSessionCommand}"
+                                        Content="세션 참가" />
+                                <Button Padding="18,10"
+                                        Command="{Binding DisconnectCommand}"
+                                        Content="연결 종료" />
+                            </WrapPanel>
+                        </Grid>
+                    </StackPanel>
+                </Border>
+
+                <Border Margin="0,18,0,0"
+                        Padding="20"
+                        Background="White"
+                        BorderBrush="#FFD5DFEC"
+                        BorderThickness="1"
+                        CornerRadius="16">
+                    <StackPanel>
+                        <TextBlock FontSize="20" FontWeight="SemiBold" Text="연결 상태" />
+                        <Grid Margin="0,18,0,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="170" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="14" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="14" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="14" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+
+                            <TextBlock Grid.Row="0" Grid.Column="0" FontWeight="SemiBold" Text="현재 상태" />
+                            <TextBlock Grid.Row="0" Grid.Column="1" Text="{Binding ConnectionState}" />
+
+                            <TextBlock Grid.Row="2" Grid.Column="0" FontWeight="SemiBold" Text="세션 정보" />
+                            <TextBlock Grid.Row="2" Grid.Column="1" Text="{Binding SessionSummary}" TextWrapping="Wrap" />
+
+                            <TextBlock Grid.Row="4" Grid.Column="0" FontWeight="SemiBold" Text="최근 서버 메시지" />
+                            <TextBlock Grid.Row="4" Grid.Column="1" Text="{Binding LastServerMessage}" TextWrapping="Wrap" />
+
+                            <TextBlock Grid.Row="6" Grid.Column="0" FontWeight="SemiBold" Text="최근 오류" />
+                            <TextBlock Grid.Row="6" Grid.Column="1" Foreground="#FFB02A37" Text="{Binding LastErrorMessage}" TextWrapping="Wrap" />
+                        </Grid>
+                    </StackPanel>
+                </Border>
+            </StackPanel>
+
+            <Border Grid.Column="2"
+                    Padding="20"
+                    Background="White"
+                    BorderBrush="#FFD5DFEC"
+                    BorderThickness="1"
+                    CornerRadius="16">
+                <Grid>
                     <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="14" />
                         <RowDefinition Height="*" />
-                        <RowDefinition Height="12" />
-                        <RowDefinition Height="*" />
+                        <RowDefinition Height="14" />
+                        <RowDefinition Height="Auto" />
                     </Grid.RowDefinitions>
 
-                    <Border Padding="16" Background="White" BorderBrush="#FFC8DBEF" BorderThickness="1" CornerRadius="10">
-                        <StackPanel>
-                            <TextBlock FontWeight="SemiBold" Text="다운로드 파일 목록" />
-                            <ListBox Margin="0,10,0,0" ItemsSource="{Binding DownloadedFiles}" />
-                        </StackPanel>
-                    </Border>
+                    <StackPanel>
+                        <TextBlock FontSize="20" FontWeight="SemiBold" Text="실시간 채팅" />
+                        <TextBlock Margin="0,8,0,0"
+                                   Foreground="#FF5F6B79"
+                                   Text="세션 연결 후 공지와 질문을 주고받는 영역입니다."
+                                   TextWrapping="Wrap" />
+                    </StackPanel>
 
-                    <Border Grid.Row="2" Padding="16" Background="White" BorderBrush="#FFC8DBEF" BorderThickness="1" CornerRadius="10">
-                        <StackPanel>
-                            <TextBlock FontWeight="SemiBold" Text="활동 로그" />
-                            <ListBox Margin="0,10,0,0" ItemsSource="{Binding ActivityLogs}" />
-                        </StackPanel>
-                    </Border>
+                    <ListBox Grid.Row="2"
+                             Padding="8"
+                             BorderBrush="#FFD5DFEC"
+                             BorderThickness="1"
+                             ItemsSource="{Binding ChatMessages}" />
+
+                    <DockPanel Grid.Row="4">
+                        <Button DockPanel.Dock="Right"
+                                Width="110"
+                                Margin="12,0,0,0"
+                                Command="{Binding SendChatCommand}"
+                                Content="전송" />
+                        <TextBox Padding="10,8"
+                                 Text="{Binding ChatInput, UpdateSourceTrigger=PropertyChanged}" />
+                    </DockPanel>
                 </Grid>
-            </Grid>
+            </Border>
+        </Grid>
+
+        <Border Grid.Row="4"
+                Padding="20"
+                Background="White"
+                BorderBrush="#FFD5DFEC"
+                BorderThickness="1"
+                CornerRadius="16">
+            <StackPanel>
+                <TextBlock FontSize="20" FontWeight="SemiBold" Text="활동 로그" />
+                <TextBlock Margin="0,8,0,0"
+                           Foreground="#FF5F6B79"
+                           Text="세션 참가, 종료, 채팅 전송 등 현재까지의 클라이언트 동작을 기록합니다."
+                           TextWrapping="Wrap" />
+                <ListBox Margin="0,16,0,0" ItemsSource="{Binding ActivityLogs}" />
+            </StackPanel>
         </Border>
     </Grid>
 </Window>
