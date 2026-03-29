@@ -6,8 +6,8 @@ using EduStream.Server.Controls;
 namespace EduStream.Server.Services;
 
 /// <summary>
-/// WPF 내부에 Microsoft Remote Desktop ActiveX 컨트롤을 호스팅합니다.
-/// 현재 단계에서는 최종 스트리밍 구조가 아니라 RDP 연동 검증용입니다.
+/// Hosts the built-in Microsoft Remote Desktop ActiveX control inside WPF.
+/// This is intended as a quick integration spike, not the final streaming architecture.
 /// </summary>
 public sealed class RdpHost
 {

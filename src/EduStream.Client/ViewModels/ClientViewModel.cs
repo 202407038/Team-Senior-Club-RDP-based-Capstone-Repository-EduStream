@@ -194,7 +194,7 @@ public sealed class ClientViewModel : ObservableObject
         DownloadStatus = "다운로드 대기 중";
 
         ChatMessages.Insert(0, $"[시스템] {DisplayName} 님이 세션에서 나갔습니다.");
-        _logSink.Write($"세션 이탈 요청 생성: {leavePacket.DisplayName}, reason={leavePacket.Reason}");
+        _logSink.Write($"세션 이탈 요청 생성: {leavePacket.SenderId}, reason={leavePacket.Reason}");
         SyncLogs();
     }
 

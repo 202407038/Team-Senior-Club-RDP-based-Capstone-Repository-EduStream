@@ -57,13 +57,12 @@ public sealed class SessionClient
         };
     }
 
-    public SessionLeavePacket CreateLeaveRequest(string displayName, string reason)
+    public SessionLeavePacket CreateLeaveRequest(string senderId, string reason)
     {
         return new SessionLeavePacket
         {
             SessionId = CurrentSession?.SessionId,
-            SenderId = displayName,
-            DisplayName = displayName,
+            SenderId = senderId,
             Reason = reason
         };
     }
