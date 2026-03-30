@@ -16,4 +16,5 @@ public static class ErrorCodes
     public const string InvalidFileName = "INVALID_FILE_NAME";
     public const string InvalidFileSize = "INVALID_FILE_SIZE";
     public const string EmptyChunkPayload = "EMPTY_CHUNK_PAYLOAD";
+    public const string AlreadyJoined = "ALREADY_JOINED";
 }

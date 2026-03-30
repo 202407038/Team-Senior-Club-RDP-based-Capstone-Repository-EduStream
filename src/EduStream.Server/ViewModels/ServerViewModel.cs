@@ -15,7 +15,9 @@ namespace EduStream.Server.ViewModels;
 public sealed class ServerViewModel : ObservableObject
 {
     private readonly InMemoryLogSink _logSink = new();
+    private readonly TcpServerService _tcpServer;
     private readonly SessionManager _sessionManager;
+    private readonly HeartbeatService _heartbeatService;
     private readonly ScreenCapturer _screenCapturer;
     private readonly RdpHost _rdpHost;
     private readonly FileDistributor _fileDistributor;
@@ -28,14 +30,19 @@ public sealed class ServerViewModel : ObservableObject
     private string _rdpPassword = string.Empty;
     private string _rdpStatus = "RDP preview is idle.";
     private bool _isSessionOpen;
+    private int _participantCount;
 
     public ServerViewModel(RdpHost? rdpHost = null)
     {
         var serializer = new PacketSerializer();
-        _sessionManager = new SessionManager(_logSink);
+        _tcpServer = new TcpServerService(_logSink, serializer);
+        _sessionManager = new SessionManager(_logSink, _tcpServer);
+        _heartbeatService = new HeartbeatService(_sessionManager, _tcpServer, _logSink);
         _screenCapturer = new ScreenCapturer();
         _rdpHost = rdpHost ?? new RdpHost(_logSink);
         _fileDistributor = new FileDistributor(serializer, _logSink);
+
+        _sessionManager.ParticipantsChanged += OnParticipantsChanged;
 
         OpenSessionCommand = new RelayCommand(() => _ = OpenSessionAsync(), () => !IsSessionOpen);
         CloseSessionCommand = new RelayCommand(() => _ = CloseSessionAsync(), () => IsSessionOpen);
@@ -100,6 +107,12 @@ public sealed class ServerViewModel : ObservableObject
         private set => SetProperty(ref _rdpStatus, value);
     }
 
+    public int ParticipantCount
+    {
+        get => _participantCount;
+        private set => SetProperty(ref _participantCount, value);
+    }
+
     public bool IsSessionOpen
     {
         get => _isSessionOpen;
@@ -145,9 +158,20 @@ public sealed class ServerViewModel : ObservableObject
         SyncLogs();
     }
 
+    private void OnParticipantsChanged()
+    {
+        // UI 스레드에서 실행되도록 Dispatcher를 통해 갱신
+        System.Windows.Application.Current?.Dispatcher?.Invoke(() =>
+        {
+            ParticipantCount = _sessionManager.ParticipantNames.Count;
+            SyncLogs();
+        });
+    }
+
     private async Task OpenSessionAsync()
     {
         await _sessionManager.OpenSessionAsync(SessionName, Port);
+        _heartbeatService.Start();
         IsSessionOpen = true;
         RdpStatus = _rdpHost.IsAttached
             ? "RDP preview is ready. Enter credentials and start the connection."
@@ -157,9 +181,11 @@ public sealed class ServerViewModel : ObservableObject
 
     private async Task CloseSessionAsync()
     {
+        _heartbeatService.Stop();
         await _rdpHost.StopHostAsync();
         await _sessionManager.CloseSessionAsync();
         IsSessionOpen = false;
+        ParticipantCount = 0;
         LatestScreenStatus = "Session closed.";
         RdpStatus = "RDP preview stopped.";
         SyncLogs();
