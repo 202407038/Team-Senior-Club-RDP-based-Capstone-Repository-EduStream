@@ -1,18 +1,20 @@
 using System.Collections.ObjectModel;
 using System.IO;
-using System.Text;
+using System.Text.Json;
+using System.Windows;
 using EduStream.Client.Services;
 using EduStream.Core.Common;
 using EduStream.Core.Logging;
 using EduStream.Core.Models;
 using EduStream.Core.Protocols;
+using EduStream.Core.Serialization;
 using EduStream.Core.Utils;
 
 namespace EduStream.Client.ViewModels;
 
 /// <summary>
 /// 수강생 클라이언트의 세션/채팅/파일/화면 수신 상태를 화면에 표시하기 위한 ViewModel입니다.
-/// 실제 네트워크 수신이 붙기 전까지는 최소 시뮬레이션으로 UI 흐름을 검증합니다.
+/// TcpClientService를 통해 실제 서버와 통신합니다.
 /// </summary>
 public sealed class ClientViewModel : ObservableObject
 {
@@ -20,6 +22,9 @@ public sealed class ClientViewModel : ObservableObject
     private readonly SessionClient _sessionClient;
     private readonly ScreenRenderer _screenRenderer;
     private readonly FileReceiver _fileReceiver;
+    private readonly TcpClientService _tcpClient;
+    private readonly IPacketSerializer _serializer = new PacketSerializer();
+
     private string _hostAddress = "127.0.0.1";
     private int _port = 5000;
     private string _displayName = "StudentDemo";
@@ -37,12 +42,14 @@ public sealed class ClientViewModel : ObservableObject
         _sessionClient = new SessionClient(_logSink);
         _screenRenderer = new ScreenRenderer();
         _fileReceiver = new FileReceiver();
+        _tcpClient = new TcpClientService(_logSink, _serializer);
+
+        _tcpClient.PacketReceived += OnPacketReceivedAsync;
+        _tcpClient.Disconnected += OnDisconnectedAsync;
 
         JoinSessionCommand = new RelayCommand(() => _ = JoinSessionAsync(), () => !IsConnected);
         DisconnectCommand = new RelayCommand(() => _ = DisconnectAsync(), () => IsConnected);
-        SendChatCommand = new RelayCommand(SendChat, () => IsConnected && !string.IsNullOrWhiteSpace(ChatInput));
-        SimulateScreenRenderCommand = new RelayCommand(SimulateScreenRender, () => IsConnected);
-        SimulateFileReceiveCommand = new RelayCommand(() => _ = SimulateFileReceiveAsync(), () => IsConnected);
+        SendChatCommand = new RelayCommand(() => _ = SendChatAsync(), () => IsConnected && !string.IsNullOrWhiteSpace(ChatInput));
 
         SyncLogs();
     }
@@ -123,8 +130,6 @@ public sealed class ClientViewModel : ObservableObject
                 JoinSessionCommand.RaiseCanExecuteChanged();
                 DisconnectCommand.RaiseCanExecuteChanged();
                 SendChatCommand.RaiseCanExecuteChanged();
-                SimulateScreenRenderCommand.RaiseCanExecuteChanged();
-                SimulateFileReceiveCommand.RaiseCanExecuteChanged();
             }
         }
     }
@@ -141,10 +146,6 @@ public sealed class ClientViewModel : ObservableObject
 
     public RelayCommand SendChatCommand { get; }
 
-    public RelayCommand SimulateScreenRenderCommand { get; }
-
-    public RelayCommand SimulateFileReceiveCommand { get; }
-
     private async Task JoinSessionAsync()
     {
         if (string.IsNullOrWhiteSpace(DisplayName))
@@ -159,46 +160,58 @@ public sealed class ClientViewModel : ObservableObject
             return;
         }
 
-        var joinRequest = _sessionClient.CreateJoinRequest(HostAddress, Port, DisplayName);
-        var ack = new AckPacket
+        try
         {
-            SessionId = Guid.NewGuid(),
-            SenderId = "Server",
-            AckCode = AckCodes.SessionJoined,
-            Message = $"{DisplayName} 님의 세션 참가 요청이 승인되었습니다."
-        };
+            ConnectionState = "연결 중...";
+            _logSink.Write($"서버 연결 시도: {HostAddress}:{Port}");
+            SyncLogs();
 
-        var session = await _sessionClient.ApplyJoinAckAsync(ack, HostAddress, Port);
-        IsConnected = true;
-        ConnectionState = "연결됨";
-        SessionSummary = $"{session.SessionName} / {session.DisplayAddress}";
-        LastServerMessage = ack.Message;
-        LastErrorMessage = "오류 없음";
+            // TCP 연결
+            await _tcpClient.ConnectAsync(HostAddress, Port);
 
-        ChatMessages.Insert(0, $"[시스템] {DisplayName} 님이 세션에 참가했습니다.");
-        _logSink.Write($"세션 참가 요청 생성: {joinRequest.DisplayName} -> {joinRequest.TargetAddress}:{joinRequest.TargetPort}");
-        SyncLogs();
+            // Join 패킷 전송
+            var joinRequest = _sessionClient.CreateJoinRequest(HostAddress, Port, DisplayName);
+            await _tcpClient.SendAsync(joinRequest);
+
+            _logSink.Write($"세션 참가 요청 전송: {DisplayName} -> {HostAddress}:{Port}");
+            SyncLogs();
+        }
+        catch (Exception ex)
+        {
+            ApplyJoinError(_sessionClient.CreateJoinError(HostAddress, Port, ex.Message));
+        }
     }
 
     private async Task DisconnectAsync()
     {
-        var leavePacket = _sessionClient.CreateLeaveRequest(DisplayName, "사용자 요청으로 연결 종료");
-        await _sessionClient.DisconnectAsync(leavePacket.Reason);
+        try
+        {
+            // Leave 패킷 전송
+            var leavePacket = _sessionClient.CreateLeaveRequest(DisplayName, "사용자 요청으로 연결 종료");
+            await _tcpClient.SendAsync(leavePacket);
+        }
+        catch { }
 
-        IsConnected = false;
-        ConnectionState = "연결 종료";
-        SessionSummary = "아직 참가한 세션이 없습니다.";
-        LastServerMessage = "세션 종료 요청을 전송했습니다.";
-        LastErrorMessage = "오류 없음";
-        RenderStatus = "화면 프레임을 아직 받지 않았습니다.";
-        DownloadStatus = "다운로드 대기 중";
+        await _tcpClient.DisconnectAsync();
+        await _sessionClient.DisconnectAsync("사용자 요청으로 연결 종료");
 
-        ChatMessages.Insert(0, $"[시스템] {DisplayName} 님이 세션에서 나갔습니다.");
-        _logSink.Write($"세션 이탈 요청 생성: {leavePacket.SenderId}, reason={leavePacket.Reason}");
-        SyncLogs();
+        RunOnUiThread(() =>
+        {
+            IsConnected = false;
+            ConnectionState = "연결 종료";
+            SessionSummary = "아직 참가한 세션이 없습니다.";
+            LastServerMessage = "세션 종료 요청을 전송했습니다.";
+            LastErrorMessage = "오류 없음";
+            RenderStatus = "화면 프레임을 아직 받지 않았습니다.";
+            DownloadStatus = "다운로드 대기 중";
+
+            ChatMessages.Insert(0, $"[시스템] {DisplayName} 님이 세션에서 나갔습니다.");
+            _logSink.Write("세션 연결을 종료했습니다.");
+            SyncLogs();
+        });
     }
 
-    private void SendChat()
+    private async Task SendChatAsync()
     {
         var trimmedMessage = ChatInput.Trim();
         if (string.IsNullOrWhiteSpace(trimmedMessage))
@@ -206,50 +219,200 @@ public sealed class ClientViewModel : ObservableObject
             return;
         }
 
-        ChatMessages.Insert(0, $"{DisplayName}: {trimmedMessage}");
-        LastServerMessage = "채팅 메시지를 전송했습니다.";
-        _logSink.Write($"채팅 전송: {trimmedMessage}");
-        ChatInput = string.Empty;
-        SyncLogs();
-    }
-
-    private void SimulateScreenRender()
-    {
-        var packet = new ScreenPacket
+        var chatPacket = new ChatPacket
         {
-            FrameIndex = 1,
-            FrameDescription = "Professor sample preview frame",
-            Width = 1280,
-            Height = 720,
-            Encoding = ScreenEncodings.Png,
-            Content = Encoding.UTF8.GetBytes("preview-bytes")
+            SenderId = DisplayName,
+            Sender = DisplayName,
+            Message = trimmedMessage,
+            SessionId = _sessionClient.CurrentSession?.SessionId
         };
 
-        packet.DataLength = packet.ContentLength;
-        RenderStatus = _screenRenderer.Render(packet);
-        _logSink.Write("화면 수신 상태를 테스트하기 위한 프레임 메타데이터를 반영했습니다.");
-        SyncLogs();
+        try
+        {
+            await _tcpClient.SendAsync(chatPacket);
+            _logSink.Write($"채팅 전송: {trimmedMessage}");
+            ChatInput = string.Empty;
+            SyncLogs();
+        }
+        catch (Exception ex)
+        {
+            _logSink.Write($"채팅 전송 실패: {ex.Message}");
+            SyncLogs();
+        }
     }
 
-    private async Task SimulateFileReceiveAsync()
+    /// <summary>
+    /// 서버로부터 수신한 패킷을 타입별로 처리합니다.
+    /// </summary>
+    private async Task OnPacketReceivedAsync(PacketType packetType, byte[] payload)
     {
-        var content = Encoding.UTF8.GetBytes("EduStream received sample file");
-        var packet = new FilePacket
+        switch (packetType)
         {
-            FileName = "received-sample.txt",
-            FileSize = content.LongLength,
-            Content = content,
-            Checksum = ChecksumUtility.ComputeSha256(content)
-        };
+            case PacketType.Ack:
+                var ackPacket = JsonSerializer.Deserialize<AckPacket>(payload);
+                if (ackPacket is not null)
+                {
+                    await HandleAckAsync(ackPacket);
+                }
+                break;
 
-        packet.DataLength = packet.ContentLength;
+            case PacketType.Error:
+                var errorPacket = JsonSerializer.Deserialize<ErrorPacket>(payload);
+                if (errorPacket is not null)
+                {
+                    HandleError(errorPacket);
+                }
+                break;
 
-        var path = await _fileReceiver.SaveAsync(packet, Path.Combine(Path.GetTempPath(), "EduStreamClient"));
-        DownloadedFiles.Insert(0, Path.GetFileName(path));
-        DownloadStatus = $"{Path.GetFileName(path)} 저장 완료";
-        LastServerMessage = "파일 수신 상태를 갱신했습니다.";
-        _logSink.Write($"샘플 파일 저장 완료: {path}");
-        SyncLogs();
+            case PacketType.Chat:
+                var chatPacket = JsonSerializer.Deserialize<ChatPacket>(payload);
+                if (chatPacket is not null)
+                {
+                    HandleChat(chatPacket);
+                }
+                break;
+
+            case PacketType.Heartbeat:
+                // 서버 하트비트 수신 — 응답 전송
+                var heartbeatResponse = new HeartbeatPacket
+                {
+                    SenderId = DisplayName,
+                    SessionId = _sessionClient.CurrentSession?.SessionId
+                };
+                try
+                {
+                    await _tcpClient.SendAsync(heartbeatResponse);
+                }
+                catch { }
+                break;
+
+            case PacketType.Screen:
+                var screenPacket = JsonSerializer.Deserialize<ScreenPacket>(payload);
+                if (screenPacket is not null)
+                {
+                    HandleScreen(screenPacket);
+                }
+                break;
+
+            case PacketType.File:
+                var filePacket = JsonSerializer.Deserialize<FilePacket>(payload);
+                if (filePacket is not null)
+                {
+                    await HandleFileAsync(filePacket);
+                }
+                break;
+
+            default:
+                _logSink.Write($"알 수 없는 패킷 타입 수신: {packetType}");
+                break;
+        }
+    }
+
+    private async Task HandleAckAsync(AckPacket packet)
+    {
+        RunOnUiThread(() =>
+        {
+            LastServerMessage = packet.Message;
+
+            if (packet.AckCode == AckCodes.SessionJoined)
+            {
+                _ = _sessionClient.ApplyJoinAckAsync(packet, HostAddress, Port);
+                IsConnected = true;
+                ConnectionState = "연결됨";
+                SessionSummary = $"{_sessionClient.CurrentSession?.SessionName} / {HostAddress}:{Port}";
+                LastErrorMessage = "오류 없음";
+                ChatMessages.Insert(0, $"[시스템] {DisplayName} 님이 세션에 참가했습니다.");
+            }
+            else if (packet.AckCode == AckCodes.SessionLeft)
+            {
+                IsConnected = false;
+                ConnectionState = "연결 종료";
+                SessionSummary = "아직 참가한 세션이 없습니다.";
+            }
+
+            _logSink.Write($"서버 응답 수신: {packet.AckCode} - {packet.Message}");
+            SyncLogs();
+        });
+
+        await Task.CompletedTask;
+    }
+
+    private void HandleError(ErrorPacket packet)
+    {
+        RunOnUiThread(() =>
+        {
+            LastErrorMessage = $"{packet.ErrorCode}: {packet.Message}";
+            LastServerMessage = packet.Message;
+            _logSink.Write($"서버 오류 수신: {packet.ErrorCode} - {packet.Message}");
+            SyncLogs();
+        });
+    }
+
+    private void HandleChat(ChatPacket packet)
+    {
+        RunOnUiThread(() =>
+        {
+            var prefix = packet.IsSystemMessage ? "[시스템]" : packet.Sender;
+            ChatMessages.Insert(0, $"{prefix}: {packet.Message}");
+            _logSink.Write($"채팅 수신: {packet.Sender}");
+            SyncLogs();
+        });
+    }
+
+    private void HandleScreen(ScreenPacket packet)
+    {
+        RunOnUiThread(() =>
+        {
+            RenderStatus = _screenRenderer.Render(packet);
+            _logSink.Write($"화면 프레임 수신: #{packet.FrameIndex}, {packet.Width}x{packet.Height}");
+            SyncLogs();
+        });
+    }
+
+    private async Task HandleFileAsync(FilePacket packet)
+    {
+        try
+        {
+            var path = await _fileReceiver.SaveAsync(packet, Path.Combine(Path.GetTempPath(), "EduStreamClient"));
+
+            RunOnUiThread(() =>
+            {
+                DownloadedFiles.Insert(0, Path.GetFileName(path));
+                DownloadStatus = $"{Path.GetFileName(path)} 저장 완료";
+                LastServerMessage = "파일 수신이 완료되었습니다.";
+                _logSink.Write($"파일 저장 완료: {path}");
+                SyncLogs();
+            });
+        }
+        catch (Exception ex)
+        {
+            RunOnUiThread(() =>
+            {
+                DownloadStatus = $"파일 저장 실패: {ex.Message}";
+                _logSink.Write($"파일 저장 실패: {ex.Message}");
+                SyncLogs();
+            });
+        }
+    }
+
+    private Task OnDisconnectedAsync(string reason)
+    {
+        RunOnUiThread(() =>
+        {
+            if (IsConnected)
+            {
+                IsConnected = false;
+                ConnectionState = "연결 끊김";
+                LastServerMessage = reason;
+                ChatMessages.Insert(0, $"[시스템] 서버와의 연결이 끊어졌습니다.");
+                _logSink.Write($"서버 연결 끊김: {reason}");
+                SyncLogs();
+
+                _ = _sessionClient.DisconnectAsync(reason);
+            }
+        });
+
+        return Task.CompletedTask;
     }
 
     private void ApplyJoinError(ErrorPacket error)
@@ -267,6 +430,18 @@ public sealed class ClientViewModel : ObservableObject
         foreach (var entry in _logSink.Snapshot().Reverse())
         {
             ActivityLogs.Add(entry);
+        }
+    }
+
+    private static void RunOnUiThread(Action action)
+    {
+        if (Application.Current?.Dispatcher is { } dispatcher && !dispatcher.CheckAccess())
+        {
+            dispatcher.Invoke(action);
+        }
+        else
+        {
+            action();
         }
     }
 }

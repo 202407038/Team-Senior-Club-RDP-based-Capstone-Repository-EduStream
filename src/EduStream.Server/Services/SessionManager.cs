@@ -141,6 +141,26 @@ public sealed class SessionManager
                     }
                     break;
 
+                case PacketType.Screen:
+                    // 화면 패킷은 모든 클라이언트에게 브로드캐스트
+                    var screenPacket = JsonSerializer.Deserialize<ScreenPacket>(payload);
+                    if (screenPacket is not null)
+                    {
+                        await _tcpServer.BroadcastAsync(screenPacket);
+                        _logSink.Write($"화면 브로드캐스트: 프레임#{screenPacket.FrameIndex}");
+                    }
+                    break;
+
+                case PacketType.File:
+                    // 파일 패킷은 모든 클라이언트에게 브로드캐스트
+                    var filePacket = JsonSerializer.Deserialize<FilePacket>(payload);
+                    if (filePacket is not null)
+                    {
+                        await _tcpServer.BroadcastAsync(filePacket);
+                        _logSink.Write($"파일 브로드캐스트: {filePacket.FileName}");
+                    }
+                    break;
+
                 case PacketType.Heartbeat:
                     // 클라이언트 하트비트 수신 — 연결 유지 확인용
                     break;
