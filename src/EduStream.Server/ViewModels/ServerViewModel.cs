@@ -196,7 +196,7 @@ public sealed class ServerViewModel : ObservableObject
         var frame = _screenCapturer.CapturePreviewFrame();
         frame.DataLength = frame.Content.Length;
         await _sessionManager.BroadcastPacketAsync(frame);
-        LatestScreenStatus = $"{frame.FrameDescription} is ready to broadcast.";
+        LatestScreenStatus = $"{frame.FrameDescription} 전송 완료 ({frame.Width}x{frame.Height}, {frame.ContentLength} bytes, {frame.CapturedAt:HH:mm:ss})";
         SyncLogs();
     }
 
