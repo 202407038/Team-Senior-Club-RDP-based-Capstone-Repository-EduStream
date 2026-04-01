@@ -170,7 +170,6 @@ public sealed class ServerViewModel : ObservableObject
 
     private void OnParticipantsChanged()
     {
-        // UI 스레드에서 실행되도록 Dispatcher를 통해 갱신
         System.Windows.Application.Current?.Dispatcher?.Invoke(() =>
         {
             ParticipantCount = _sessionManager.ParticipantNames.Count;
@@ -206,7 +205,7 @@ public sealed class ServerViewModel : ObservableObject
         var frame = _screenCapturer.CapturePreviewFrame();
         frame.DataLength = frame.Content.Length;
         await _sessionManager.BroadcastPacketAsync(frame);
-        LatestScreenStatus = $"{frame.FrameDescription} 전송 완료 ({frame.Width}x{frame.Height}, {frame.ContentLength} bytes, {frame.CapturedAt:HH:mm:ss})";
+        LatestScreenStatus = $"{frame.FrameDescription} is ready to broadcast ({frame.Width}x{frame.Height}, {frame.ContentLength} bytes, {frame.CapturedAt:HH:mm:ss}).";
         SyncLogs();
     }
 

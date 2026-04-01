@@ -78,9 +78,10 @@ public sealed class RdpHost
 
         if (_hostSurface is not null)
         {
+            // WindowsFormsHost already acts as the parent window, so avoid forcing
+            // UIParentWindowHandle because availability differs across RDP OCX versions.
             ocx.DesktopWidth = Math.Max((int)_hostSurface.ActualWidth, 640);
             ocx.DesktopHeight = Math.Max((int)_hostSurface.ActualHeight, 360);
-            ocx.UIParentWindowHandle = (int)_rdpControl.Handle;
         }
 
         try
