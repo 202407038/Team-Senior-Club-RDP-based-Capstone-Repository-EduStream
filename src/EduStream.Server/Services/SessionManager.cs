@@ -41,6 +41,8 @@ public sealed class SessionManager
     /// </summary>
     public IReadOnlyCollection<string> ParticipantNames => _participants.Keys.ToList().AsReadOnly();
 
+    public int ParticipantCount => _participants.Count;
+
     public Task<SessionInfo> OpenSessionAsync(string sessionName, int port)
     {
         lock (_sessionLock)
@@ -119,6 +121,11 @@ public sealed class SessionManager
                     {
                         var response = HandleJoin(clientId, joinPacket);
                         await _tcpServer.SendToClientAsync(clientId, response);
+
+                        if (response is ErrorPacket)
+                        {
+                            await _tcpServer.DisconnectClientAsync(clientId);
+                        }
                     }
                     break;
 

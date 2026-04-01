@@ -123,6 +123,14 @@ public sealed class TcpServerService
         }
     }
 
+    /// <summary>
+    /// 특정 클라이언트 연결을 강제로 정리합니다.
+    /// </summary>
+    public Task DisconnectClientAsync(string clientId)
+    {
+        return RemoveClientAsync(clientId);
+    }
+
     private async Task AcceptClientsAsync(CancellationToken ct)
     {
         while (!ct.IsCancellationRequested)

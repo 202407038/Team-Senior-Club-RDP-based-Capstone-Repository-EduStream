@@ -46,7 +46,7 @@ public sealed class HeartbeatService
             {
                 await Task.Delay(_interval, ct);
 
-                if (_tcpServer.ConnectedClientCount == 0)
+                if (!_sessionManager.IsSessionOpen || _sessionManager.ParticipantCount == 0)
                     continue;
 
                 var heartbeat = _sessionManager.CreateHeartbeat();
