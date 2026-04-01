@@ -4,6 +4,7 @@ using System.IO;
 using System.Windows.Forms;
 using EduStream.Core.Models;
 using EduStream.Core.Protocols;
+using EduStream.Core.Utils;
 
 namespace EduStream.Server.Services;
 
@@ -85,15 +86,19 @@ public sealed class ScreenCapturer
         bitmap.Save(stream, ImageFormat.Png);
 
         var content = stream.ToArray();
-        return new ScreenPacket
+        var packet = new ScreenPacket
         {
             FrameIndex = frameIndex,
             FrameDescription = description,
+            CapturedAt = DateTimeOffset.UtcNow,
             Width = bitmap.Width,
             Height = bitmap.Height,
             Encoding = ScreenEncodings.Png,
             Content = content,
             DataLength = content.Length
         };
+
+        ScreenTransferUtility.ValidatePacketMetadata(packet);
+        return packet;
     }
 }

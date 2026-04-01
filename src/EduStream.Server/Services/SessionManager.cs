@@ -3,6 +3,7 @@ using System.Text.Json;
 using EduStream.Core.Logging;
 using EduStream.Core.Models;
 using EduStream.Core.Protocols;
+using EduStream.Core.Utils;
 
 namespace EduStream.Server.Services;
 
@@ -153,6 +154,7 @@ public sealed class SessionManager
                     var screenPacket = JsonSerializer.Deserialize<ScreenPacket>(payload);
                     if (screenPacket is not null)
                     {
+                        ScreenTransferUtility.ValidatePacketMetadata(screenPacket);
                         await _tcpServer.BroadcastAsync(screenPacket);
                         _logSink.Write($"화면 브로드캐스트: 프레임#{screenPacket.FrameIndex}");
                     }
