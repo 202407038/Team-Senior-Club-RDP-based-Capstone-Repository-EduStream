@@ -17,4 +17,7 @@ public static class ErrorCodes
     public const string InvalidFileSize = "INVALID_FILE_SIZE";
     public const string EmptyChunkPayload = "EMPTY_CHUNK_PAYLOAD";
     public const string AlreadyJoined = "ALREADY_JOINED";
+    public const string InvalidFrameDimensions = "INVALID_FRAME_DIMENSIONS";
+    public const string InvalidScreenEncoding = "INVALID_SCREEN_ENCODING";
+    public const string EmptyScreenPayload = "EMPTY_SCREEN_PAYLOAD";
 }
