@@ -166,10 +166,8 @@ public sealed class ClientViewModel : ObservableObject
             _logSink.Write($"서버 연결 시도: {HostAddress}:{Port}");
             SyncLogs();
 
-            // TCP 연결
             await _tcpClient.ConnectAsync(HostAddress, Port);
 
-            // Join 패킷 전송
             var joinRequest = _sessionClient.CreateJoinRequest(HostAddress, Port, DisplayName);
             await _tcpClient.SendAsync(joinRequest);
 
@@ -186,11 +184,12 @@ public sealed class ClientViewModel : ObservableObject
     {
         try
         {
-            // Leave 패킷 전송
             var leavePacket = _sessionClient.CreateLeaveRequest(DisplayName, "사용자 요청으로 연결 종료");
             await _tcpClient.SendAsync(leavePacket);
         }
-        catch { }
+        catch
+        {
+        }
 
         await _tcpClient.DisconnectAsync();
         await _sessionClient.DisconnectAsync("사용자 요청으로 연결 종료");
@@ -241,9 +240,6 @@ public sealed class ClientViewModel : ObservableObject
         }
     }
 
-    /// <summary>
-    /// 서버로부터 수신한 패킷을 타입별로 처리합니다.
-    /// </summary>
     private async Task OnPacketReceivedAsync(PacketType packetType, byte[] payload)
     {
         switch (packetType)
@@ -254,6 +250,7 @@ public sealed class ClientViewModel : ObservableObject
                 {
                     await HandleAckAsync(ackPacket);
                 }
+
                 break;
 
             case PacketType.Error:
@@ -262,6 +259,7 @@ public sealed class ClientViewModel : ObservableObject
                 {
                     await HandleErrorAsync(errorPacket);
                 }
+
                 break;
 
             case PacketType.Chat:
@@ -270,20 +268,24 @@ public sealed class ClientViewModel : ObservableObject
                 {
                     HandleChat(chatPacket);
                 }
+
                 break;
 
             case PacketType.Heartbeat:
-                // 서버 하트비트 수신 — 응답 전송
                 var heartbeatResponse = new HeartbeatPacket
                 {
                     SenderId = DisplayName,
                     SessionId = _sessionClient.CurrentSession?.SessionId
                 };
+
                 try
                 {
                     await _tcpClient.SendAsync(heartbeatResponse);
                 }
-                catch { }
+                catch
+                {
+                }
+
                 break;
 
             case PacketType.Screen:
@@ -292,6 +294,7 @@ public sealed class ClientViewModel : ObservableObject
                 {
                     HandleScreen(screenPacket);
                 }
+
                 break;
 
             case PacketType.File:
@@ -300,6 +303,7 @@ public sealed class ClientViewModel : ObservableObject
                 {
                     await HandleFileAsync(filePacket);
                 }
+
                 break;
 
             default:
@@ -310,16 +314,21 @@ public sealed class ClientViewModel : ObservableObject
 
     private async Task HandleAckAsync(AckPacket packet)
     {
+        SessionInfo? joinedSession = null;
+        if (packet.AckCode == AckCodes.SessionJoined)
+        {
+            joinedSession = await _sessionClient.ApplyJoinAckAsync(packet, HostAddress, Port);
+        }
+
         RunOnUiThread(() =>
         {
             LastServerMessage = packet.Message;
 
             if (packet.AckCode == AckCodes.SessionJoined)
             {
-                _ = _sessionClient.ApplyJoinAckAsync(packet, HostAddress, Port);
                 IsConnected = true;
                 ConnectionState = "연결됨";
-                SessionSummary = $"{_sessionClient.CurrentSession?.SessionName} / {HostAddress}:{Port}";
+                SessionSummary = $"{joinedSession?.SessionName} / {HostAddress}:{Port}";
                 LastErrorMessage = "오류 없음";
                 ChatMessages.Insert(0, $"[시스템] {DisplayName} 님이 세션에 참가했습니다.");
             }
@@ -333,8 +342,6 @@ public sealed class ClientViewModel : ObservableObject
             _logSink.Write($"서버 응답 수신: {packet.AckCode} - {packet.Message}");
             SyncLogs();
         });
-
-        await Task.CompletedTask;
     }
 
     private async Task HandleErrorAsync(ErrorPacket packet)
@@ -384,6 +391,7 @@ public sealed class ClientViewModel : ObservableObject
             RunOnUiThread(() =>
             {
                 RenderStatus = $"화면 수신 실패: {ex.Message}";
+                LastErrorMessage = $"화면 수신 실패: {ex.Message}";
                 _logSink.Write($"화면 수신 실패: {ex.Message}");
                 SyncLogs();
             });
@@ -410,6 +418,7 @@ public sealed class ClientViewModel : ObservableObject
             RunOnUiThread(() =>
             {
                 DownloadStatus = $"파일 저장 실패: {ex.Message}";
+                LastErrorMessage = $"파일 저장 실패: {ex.Message}";
                 _logSink.Write($"파일 저장 실패: {ex.Message}");
                 SyncLogs();
             });
@@ -425,7 +434,7 @@ public sealed class ClientViewModel : ObservableObject
                 IsConnected = false;
                 ConnectionState = "연결 끊김";
                 LastServerMessage = reason;
-                ChatMessages.Insert(0, $"[시스템] 서버와의 연결이 끊어졌습니다.");
+                ChatMessages.Insert(0, "[시스템] 서버와의 연결이 끊어졌습니다.");
                 _logSink.Write($"서버 연결 끊김: {reason}");
                 SyncLogs();
 

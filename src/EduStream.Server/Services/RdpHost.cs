@@ -1,5 +1,6 @@
 using System.Windows.Forms;
 using System.Windows.Forms.Integration;
+using System.Reflection;
 using EduStream.Core.Logging;
 using EduStream.Server.Controls;
 
@@ -34,7 +35,7 @@ public sealed class RdpHost
             try
             {
                 dynamic ocx = _rdpControl.ActiveXControl;
-                return (int)ocx.Connected != 0;
+                return TryGetIntProperty(ocx, "Connected") != 0;
             }
             catch
             {
@@ -71,34 +72,33 @@ public sealed class RdpHost
             DisconnectInternal();
         }
 
-        dynamic ocx = _rdpControl.ActiveXControl;
-        ocx.Server = serverAddress.Trim();
-        ocx.UserName = userName?.Trim() ?? string.Empty;
-        ocx.ColorDepth = 32;
+        var ocx = _rdpControl.ActiveXControl;
+        TrySetProperty(ocx, "Server", serverAddress.Trim());
+        TrySetProperty(ocx, "UserName", userName?.Trim() ?? string.Empty);
+        TrySetProperty(ocx, "ColorDepth", 32);
 
         if (_hostSurface is not null)
         {
-            // WindowsFormsHost already acts as the parent window, so avoid forcing
-            // UIParentWindowHandle because availability differs across RDP OCX versions.
-            ocx.DesktopWidth = Math.Max((int)_hostSurface.ActualWidth, 640);
-            ocx.DesktopHeight = Math.Max((int)_hostSurface.ActualHeight, 360);
+            TrySetProperty(ocx, "DesktopWidth", Math.Max((int)_hostSurface.ActualWidth, 640));
+            TrySetProperty(ocx, "DesktopHeight", Math.Max((int)_hostSurface.ActualHeight, 360));
         }
 
-        try
+        var advancedSettings =
+            TryGetProperty(ocx, "AdvancedSettings9") ??
+            TryGetProperty(ocx, "AdvancedSettings8") ??
+            TryGetProperty(ocx, "AdvancedSettings7") ??
+            TryGetProperty(ocx, "AdvancedSettings6") ??
+            TryGetProperty(ocx, "AdvancedSettings2");
+
+        if (advancedSettings is not null)
         {
-            dynamic advancedSettings = ocx.AdvancedSettings9;
-            advancedSettings.SmartSizing = true;
-            advancedSettings.EnableCredSspSupport = true;
-            advancedSettings.ClearTextPassword = password ?? string.Empty;
-        }
-        catch
-        {
-            dynamic advancedSettings = ocx.AdvancedSettings2;
-            advancedSettings.ClearTextPassword = password ?? string.Empty;
+            TrySetProperty(advancedSettings, "SmartSizing", true);
+            TrySetProperty(advancedSettings, "EnableCredSspSupport", true);
+            TrySetProperty(advancedSettings, "ClearTextPassword", password ?? string.Empty);
         }
 
         _logSink.Write($"Starting RDP connection to {serverAddress} as {userName}.");
-        ocx.Connect();
+        InvokeMember(ocx, "Connect");
         return Task.CompletedTask;
     }
 
@@ -129,10 +129,10 @@ public sealed class RdpHost
 
         try
         {
-            dynamic ocx = _rdpControl.ActiveXControl;
-            if ((int)ocx.Connected != 0)
+            var ocx = _rdpControl.ActiveXControl;
+            if (TryGetIntProperty(ocx, "Connected") != 0)
             {
-                ocx.Disconnect();
+                InvokeMember(ocx, "Disconnect");
                 _logSink.Write("RDP connection closed.");
             }
         }
@@ -140,5 +140,62 @@ public sealed class RdpHost
         {
             _logSink.Write($"RDP disconnect failed: {ex.Message}");
         }
+    }
+
+    private static void TrySetProperty(object target, string name, object? value)
+    {
+        try
+        {
+            InvokeMember(target, name, BindingFlags.SetProperty, value);
+        }
+        catch
+        {
+            // RDP ActiveX control versions expose slightly different COM surfaces.
+        }
+    }
+
+    private static object? TryGetProperty(object target, string name)
+    {
+        try
+        {
+            return InvokeMember(target, name, BindingFlags.GetProperty);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static int TryGetIntProperty(object target, string name)
+    {
+        try
+        {
+            var value = TryGetProperty(target, name);
+            if (value is null)
+            {
+                return 0;
+            }
+
+            return Convert.ToInt32(value);
+        }
+        catch
+        {
+            return 0;
+        }
+    }
+
+    private static object? InvokeMember(object target, string name)
+    {
+        return InvokeMember(target, name, BindingFlags.InvokeMethod);
+    }
+
+    private static object? InvokeMember(object target, string name, BindingFlags flags, object? value = null)
+    {
+        return target.GetType().InvokeMember(
+            name,
+            BindingFlags.Instance | BindingFlags.Public | flags,
+            binder: null,
+            target,
+            value is null ? null : [value]);
     }
 }
