@@ -260,7 +260,7 @@ public sealed class ClientViewModel : ObservableObject
                 var errorPacket = JsonSerializer.Deserialize<ErrorPacket>(payload);
                 if (errorPacket is not null)
                 {
-                    HandleError(errorPacket);
+                    await HandleErrorAsync(errorPacket);
                 }
                 break;
 
@@ -337,15 +337,22 @@ public sealed class ClientViewModel : ObservableObject
         await Task.CompletedTask;
     }
 
-    private void HandleError(ErrorPacket packet)
+    private async Task HandleErrorAsync(ErrorPacket packet)
     {
         RunOnUiThread(() =>
         {
             LastErrorMessage = $"{packet.ErrorCode}: {packet.Message}";
             LastServerMessage = packet.Message;
+            ConnectionState = "연결 실패";
             _logSink.Write($"서버 오류 수신: {packet.ErrorCode} - {packet.Message}");
             SyncLogs();
         });
+
+        if (!IsConnected)
+        {
+            await _tcpClient.DisconnectAsync();
+            await _sessionClient.DisconnectAsync(packet.Message);
+        }
     }
 
     private void HandleChat(ChatPacket packet)
