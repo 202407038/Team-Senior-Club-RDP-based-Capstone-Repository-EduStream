@@ -368,12 +368,26 @@ public sealed class ClientViewModel : ObservableObject
 
     private void HandleScreen(ScreenPacket packet)
     {
-        RunOnUiThread(() =>
+        try
         {
-            RenderStatus = _screenRenderer.Render(packet);
-            _logSink.Write($"화면 프레임 수신: #{packet.FrameIndex}, {packet.Width}x{packet.Height}");
-            SyncLogs();
-        });
+            var renderStatus = _screenRenderer.Render(packet);
+            RunOnUiThread(() =>
+            {
+                RenderStatus = renderStatus;
+                LastServerMessage = "화면 프레임을 수신했습니다.";
+                _logSink.Write($"화면 프레임 수신: #{packet.FrameIndex}, {packet.Width}x{packet.Height}");
+                SyncLogs();
+            });
+        }
+        catch (Exception ex)
+        {
+            RunOnUiThread(() =>
+            {
+                RenderStatus = $"화면 수신 실패: {ex.Message}";
+                _logSink.Write($"화면 수신 실패: {ex.Message}");
+                SyncLogs();
+            });
+        }
     }
 
     private async Task HandleFileAsync(FilePacket packet)

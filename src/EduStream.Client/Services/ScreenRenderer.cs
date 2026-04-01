@@ -1,5 +1,6 @@
 using EduStream.Core.Models;
 using EduStream.Core.Protocols;
+using EduStream.Core.Utils;
 
 namespace EduStream.Client.Services;
 
@@ -11,17 +12,13 @@ public sealed class ScreenRenderer
     public string Render(ScreenPacket packet)
     {
         ArgumentNullException.ThrowIfNull(packet);
-
-        if (packet.ContentLength == 0)
-        {
-            return $"프레임 #{packet.FrameIndex}에 표시할 데이터가 없습니다.";
-        }
+        ScreenTransferUtility.ValidatePacketMetadata(packet);
 
         if (packet.Encoding == ScreenEncodings.Png)
         {
-            return $"프레임 #{packet.FrameIndex} 수신 완료 ({packet.Width}x{packet.Height}, PNG, {packet.ContentLength} bytes)";
+            return $"프레임 #{packet.FrameIndex} 수신 완료 ({packet.Width}x{packet.Height}, PNG, {packet.ContentLength} bytes, {packet.CapturedAt:HH:mm:ss})";
         }
 
-        return $"프레임 #{packet.FrameIndex} 수신 완료 ({packet.Encoding}, {packet.ContentLength} bytes)";
+        return $"프레임 #{packet.FrameIndex} 수신 완료 ({packet.Encoding}, {packet.ContentLength} bytes, {packet.CapturedAt:HH:mm:ss})";
     }
 }

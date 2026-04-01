@@ -63,6 +63,7 @@ public sealed class SessionClient
         {
             SessionId = CurrentSession?.SessionId,
             SenderId = senderId,
+            DisplayName = senderId,
             Reason = reason
         };
     }
