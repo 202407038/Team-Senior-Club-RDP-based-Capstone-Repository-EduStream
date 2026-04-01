@@ -23,6 +23,22 @@ public sealed class FileDistributor
 
     public async Task<FilePacket> BuildFilePacketAsync(string filePath)
     {
+        if (string.IsNullOrWhiteSpace(filePath))
+        {
+            throw new ArgumentException("파일 경로가 비어 있습니다.", nameof(filePath));
+        }
+
+        if (!File.Exists(filePath))
+        {
+            throw new FileNotFoundException("전송할 파일을 찾을 수 없습니다.", filePath);
+        }
+
+        var fileInfo = new FileInfo(filePath);
+        if (fileInfo.Length == 0)
+        {
+            throw new InvalidOperationException("전송할 파일이 비어 있습니다.");
+        }
+
         var content = await File.ReadAllBytesAsync(filePath);
         var packet = new FilePacket
         {
@@ -39,6 +55,22 @@ public sealed class FileDistributor
 
     public async Task<IReadOnlyList<FilePacket>> BuildFilePacketsAsync(string filePath, int chunkSize = FileTransferRules.DefaultChunkSize)
     {
+        if (string.IsNullOrWhiteSpace(filePath))
+        {
+            throw new ArgumentException("파일 경로가 비어 있습니다.", nameof(filePath));
+        }
+
+        if (!File.Exists(filePath))
+        {
+            throw new FileNotFoundException("전송할 파일을 찾을 수 없습니다.", filePath);
+        }
+
+        var fileInfo = new FileInfo(filePath);
+        if (fileInfo.Length == 0)
+        {
+            throw new InvalidOperationException("전송할 파일이 비어 있습니다.");
+        }
+
         var content = await File.ReadAllBytesAsync(filePath);
         FileTransferUtility.ValidateChunkSize(chunkSize);
         var checksum = ChecksumUtility.ComputeSha256(content);
