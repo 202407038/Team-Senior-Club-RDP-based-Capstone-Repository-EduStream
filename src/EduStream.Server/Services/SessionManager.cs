@@ -24,6 +24,12 @@ public sealed class SessionManager
     /// </summary>
     public event Action? ParticipantsChanged;
 
+    /// <summary>
+    /// 클라이언트로부터 채팅 메시지를 수신했을 때 발생합니다.
+    /// (sender, message)
+    /// </summary>
+    public event Action<string, string>? ChatReceived;
+
     public SessionManager(ILogSink logSink, TcpServerService tcpServer)
     {
         _logSink = logSink;
@@ -145,6 +151,10 @@ public sealed class SessionManager
                     if (chatPacket is not null)
                     {
                         await _tcpServer.BroadcastAsync(chatPacket);
+                        var sender = string.IsNullOrWhiteSpace(chatPacket.Sender)
+                            ? chatPacket.SenderId
+                            : chatPacket.Sender;
+                        ChatReceived?.Invoke(sender, chatPacket.Message);
                         _logSink.Write($"채팅 브로드캐스트: {chatPacket.SenderId}");
                     }
                     break;

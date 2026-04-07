@@ -17,7 +17,7 @@ public sealed class PacketSerializer : IPacketSerializer
 
     public byte[] Serialize<TPacket>(TPacket packet) where TPacket : BasePacket
     {
-        var json = JsonSerializer.Serialize(packet, JsonOptions);
+        var json = JsonSerializer.Serialize(packet, packet.GetType(), JsonOptions);
         return Encoding.UTF8.GetBytes(json);
     }
 

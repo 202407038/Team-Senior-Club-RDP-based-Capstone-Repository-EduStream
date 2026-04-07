@@ -43,6 +43,7 @@ public sealed class ServerViewModel : ObservableObject
         _fileDistributor = new FileDistributor(serializer, _logSink);
 
         _sessionManager.ParticipantsChanged += OnParticipantsChanged;
+        _sessionManager.ChatReceived += OnChatReceived;
 
         OpenSessionCommand = new RelayCommand(() => _ = OpenSessionAsync(), () => !IsSessionOpen);
         CloseSessionCommand = new RelayCommand(() => _ = CloseSessionAsync(), () => IsSessionOpen);
@@ -156,6 +157,15 @@ public sealed class ServerViewModel : ObservableObject
         StartRdpPreviewCommand.RaiseCanExecuteChanged();
         StopRdpPreviewCommand.RaiseCanExecuteChanged();
         SyncLogs();
+    }
+
+    private void OnChatReceived(string sender, string message)
+    {
+        System.Windows.Application.Current?.Dispatcher?.Invoke(() =>
+        {
+            ChatMessages.Insert(0, $"{sender}: {message}");
+            SyncLogs();
+        });
     }
 
     private void OnParticipantsChanged()
