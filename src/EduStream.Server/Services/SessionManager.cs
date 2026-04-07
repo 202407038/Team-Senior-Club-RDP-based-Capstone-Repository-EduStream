@@ -151,7 +151,10 @@ public sealed class SessionManager
                     if (chatPacket is not null)
                     {
                         await _tcpServer.BroadcastAsync(chatPacket);
-                        ChatReceived?.Invoke(chatPacket.Sender ?? chatPacket.SenderId, chatPacket.Message);
+                        var sender = string.IsNullOrWhiteSpace(chatPacket.Sender)
+                            ? chatPacket.SenderId
+                            : chatPacket.Sender;
+                        ChatReceived?.Invoke(sender, chatPacket.Message);
                         _logSink.Write($"채팅 브로드캐스트: {chatPacket.SenderId}");
                     }
                     break;
