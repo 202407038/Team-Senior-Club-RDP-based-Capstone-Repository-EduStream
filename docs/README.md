@@ -1,6 +1,6 @@
 # EduStream 문서 허브
 
-이 디렉터리는 `README.md`에 모두 담기에는 길고, 협업 과정에서 자주 갱신될 문서를 분리해서 관리하기 위한 공간입니다.
+이 디렉터리는 `README.md`에 모두 넣기엔 길고, 작업 과정에서 자주 갱신되는 문서를 분리해 관리하기 위한 공간입니다.
 
 프로젝트를 처음 받는 팀원은 아래 순서로 읽는 것을 권장합니다.
 
@@ -8,8 +8,8 @@
 2. `docs/TEAM_DEVELOPMENT_GUIDE.md`
 3. `docs/ARCHITECTURE_GUIDE.md`
 4. `docs/IMPLEMENTATION_PLAYBOOK.md`
-5. `docs/USER_WORKFLOW_SCENARIOS.md`
-6. `docs/SPRINT_7DAY_IMPLEMENTATION_GUIDE.md`
+5. `docs/SPRINT_7DAY_IMPLEMENTATION_GUIDE.md`
+6. `docs/USER_WORKFLOW_SCENARIOS.md`
 
 ## 문서 목록
 
@@ -17,40 +17,40 @@
 
 - 브랜치 전략
 - 커밋 메시지 규칙
-- Pull Request 작성 및 리뷰 절차
-- 코딩 규칙
-- 협업 중 충돌을 줄이기 위한 기본 원칙
+- PR 작성 및 리뷰 기준
+- 작업 시작 전 `git pull --all --prune` 규칙
+- 충돌 방지 규칙
 
 ### 2. [아키텍처 가이드](./ARCHITECTURE_GUIDE.md)
 
-- 프로젝트 구조와 각 계층의 책임
-- 프로젝트 간 참조 방향
-- 서비스, ViewModel, 모델 분리 원칙
+- 프로젝트 구조와 계층 책임
+- 참조 방향
+- ViewModel / Service / Model 분리 원칙
 - 현재 사용 기술과 도입 예정 기술 설명
 
 ### 3. [구현 플레이북](./IMPLEMENTATION_PLAYBOOK.md)
 
-- 5인 기준 권장 작업 분담
-- 인원이 부족할 때의 축소 운영 방법
-- 각 작업 단위를 시작하고 끝내는 절차
-- 기능별 권장 개발 순서
+- 5명 기준 상세 역할 분담
+- 담당별 주요 파일
+- 기능별 권장 구현 순서
+- 인원 부족 시 축소 운영 방식
 
 ### 4. [사용자 워크플로우 시나리오](./USER_WORKFLOW_SCENARIOS.md)
 
-- 현재 프로젝트 기준 대표 사용자 흐름
-- 교수자/수강생 중심 사용 절차
-- 화면 공유, 파일 전송, 채팅, 세션 종료 시나리오
-- 향후 테스트 케이스 및 예외 흐름 확장 기준
+- 교수자/수강생 기준 핵심 사용 시나리오
+- 화면 공유, 파일 전송, 채팅, 세션 종료 흐름
+- 향후 테스트 케이스 확장 기준
 
 ### 5. [7일 스프린트 상세 구현 가이드](./SPRINT_7DAY_IMPLEMENTATION_GUIDE.md)
 
-- 5명 기준 7일 구현 계획
-- 무리하지 않는 일일 목표
-- 세션/채팅/파일/화면 우선순위
-- 작업 시작 전 `git pull --all --prune` 규칙 포함
+- 5명 기준 7일 작업표
+- 역할별 Day 1~7 상세 목표
+- 기존보다 확장된 작업량 기준
+- 시연 가능한 데모를 목표로 한 구현 우선순위
 
 ## 문서 운영 원칙
 
-- 설계가 바뀌면 UML과 코드만 바꾸지 말고 관련 문서도 함께 수정합니다.
-- 구현 완료 전 항목은 "현재 사용 중"과 "도입 예정"을 구분해서 기록합니다.
-- 브랜치 전략, 커밋 규칙, 의존성 규칙이 바뀌면 이 디렉터리의 문서를 먼저 갱신합니다.
+- 공통 규칙이 바뀌면 `TEAM_DEVELOPMENT_GUIDE.md`를 먼저 수정합니다.
+- 역할 분담과 구현 순서가 바뀌면 `IMPLEMENTATION_PLAYBOOK.md`를 수정합니다.
+- 주간 목표와 일정이 바뀌면 `SPRINT_7DAY_IMPLEMENTATION_GUIDE.md`를 수정합니다.
+- UML/코드/문서가 어긋나면 반드시 함께 정리합니다.
