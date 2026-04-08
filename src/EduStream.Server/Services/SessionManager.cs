@@ -146,16 +146,33 @@ public sealed class SessionManager
                     break;
 
                 case PacketType.Chat:
-                    // 채팅은 모든 클라이언트에게 브로드캐스트
                     var chatPacket = JsonSerializer.Deserialize<ChatPacket>(payload);
                     if (chatPacket is not null)
                     {
+                        // 참가자 검증
+                        if (!_clientDisplayNames.ContainsKey(clientId))
+                        {
+                            var errorPacket = CreateError(ErrorCodes.NotParticipant,
+                                "세션에 참여하지 않은 상태에서는 채팅을 보낼 수 없습니다.",
+                                true, chatPacket);
+                            await _tcpServer.SendToClientAsync(clientId, errorPacket);
+                            _logSink.Write($"비참가자 채팅 시도 차단: clientId={clientId}");
+                            break;
+                        }
+
+                        // 빈 메시지 검증
+                        if (string.IsNullOrWhiteSpace(chatPacket.Message))
+                        {
+                            _logSink.Write($"빈 메시지 무시: clientId={clientId}");
+                            break;
+                        }
+
                         await _tcpServer.BroadcastAsync(chatPacket);
                         var sender = string.IsNullOrWhiteSpace(chatPacket.Sender)
                             ? chatPacket.SenderId
                             : chatPacket.Sender;
                         ChatReceived?.Invoke(sender, chatPacket.Message);
-                        _logSink.Write($"채팅 브로드캐스트: {chatPacket.SenderId}");
+                        _logSink.Write($"채팅 브로드캐스트: {sender}");
                     }
                     break;
 

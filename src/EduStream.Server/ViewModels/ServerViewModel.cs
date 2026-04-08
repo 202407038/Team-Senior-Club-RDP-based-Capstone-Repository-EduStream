@@ -225,8 +225,10 @@ public sealed class ServerViewModel : ObservableObject
     {
         var packet = new ChatPacket
         {
+            SenderId = "Server",
             Sender = "Professor",
-            Message = ChatInput
+            Message = ChatInput,
+            SessionId = _sessionManager.CurrentSession?.SessionId
         };
 
         packet.DataLength = ChatInput.Length;
