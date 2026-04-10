@@ -16,6 +16,9 @@ public static class ErrorCodes
     public const string InvalidFileName = "INVALID_FILE_NAME";
     public const string InvalidFileSize = "INVALID_FILE_SIZE";
     public const string EmptyChunkPayload = "EMPTY_CHUNK_PAYLOAD";
+    public const string FileChunkPending = "FILE_CHUNK_PENDING";
+    public const string FileChunkMetadataMismatch = "FILE_CHUNK_METADATA_MISMATCH";
+    public const string FileAssemblyFailed = "FILE_ASSEMBLY_FAILED";
     public const string AlreadyJoined = "ALREADY_JOINED";
     public const string InvalidFrameDimensions = "INVALID_FRAME_DIMENSIONS";
     public const string InvalidScreenEncoding = "INVALID_SCREEN_ENCODING";
