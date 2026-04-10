@@ -22,4 +22,5 @@ public static class ErrorCodes
     public const string EmptyScreenPayload = "EMPTY_SCREEN_PAYLOAD";
     public const string NotParticipant = "NOT_PARTICIPANT";
     public const string EmptyMessage = "EMPTY_MESSAGE";
+    public const string MessageTooLong = "MESSAGE_TOO_LONG";
 }
