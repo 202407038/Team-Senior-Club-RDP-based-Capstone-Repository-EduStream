@@ -171,6 +171,7 @@ public sealed class ServerViewModel : ObservableObject
 
     private void OnParticipantsChanged()
     {
+        // UI 스레드에서 실행되도록 Dispatcher를 통해 갱신
         System.Windows.Application.Current?.Dispatcher?.Invoke(() =>
         {
             ParticipantCount = _sessionManager.ParticipantNames.Count;

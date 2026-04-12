@@ -13,7 +13,7 @@ namespace EduStream.Client.Services;
 /// </summary>
 public sealed class TcpClientService : IDisposable
 {
-    private const int MaxPacketSize = 10 * 1024 * 1024;
+    private const int MaxPacketSize = 10 * 1024 * 1024; // 10MB
 
     private readonly ILogSink _logSink;
     private readonly IPacketSerializer _serializer;
@@ -23,8 +23,15 @@ public sealed class TcpClientService : IDisposable
     private NetworkStream? _stream;
     private CancellationTokenSource? _cts;
 
+    /// <summary>
+    /// 서버로부터 패킷을 수신했을 때 발생합니다.
+    /// (packetType, raw payload)
+    /// </summary>
     public event Func<PacketType, byte[], Task>? PacketReceived;
 
+    /// <summary>
+    /// 서버 연결이 끊어졌을 때 발생합니다.
+    /// </summary>
     public event Func<string, Task>? Disconnected;
 
     public TcpClientService(ILogSink logSink, IPacketSerializer serializer)
@@ -35,6 +42,9 @@ public sealed class TcpClientService : IDisposable
 
     public bool IsConnected => _tcpClient?.Connected == true;
 
+    /// <summary>
+    /// 서버에 TCP 연결을 수립하고 수신 루프를 시작합니다.
+    /// </summary>
     public async Task ConnectAsync(string host, int port)
     {
         _cts = new CancellationTokenSource();
@@ -48,6 +58,9 @@ public sealed class TcpClientService : IDisposable
         _ = ReceiveLoopAsync(_cts.Token);
     }
 
+    /// <summary>
+    /// 서버 연결을 종료합니다.
+    /// </summary>
     public async Task DisconnectAsync()
     {
         _cts?.Cancel();
@@ -62,6 +75,9 @@ public sealed class TcpClientService : IDisposable
         await Task.CompletedTask;
     }
 
+    /// <summary>
+    /// 서버에 패킷을 전송합니다.
+    /// </summary>
     public async Task SendAsync(BasePacket packet)
     {
         if (_stream is null)
@@ -90,6 +106,7 @@ public sealed class TcpClientService : IDisposable
         {
             while (!ct.IsCancellationRequested && _stream is not null)
             {
+                // 4바이트 길이 헤더 읽기
                 var headerBuf = new byte[4];
                 await ReadExactAsync(_stream, headerBuf, ct);
                 var length = BitConverter.ToInt32(headerBuf, 0);
@@ -100,9 +117,11 @@ public sealed class TcpClientService : IDisposable
                     break;
                 }
 
+                // 본문 읽기
                 var payload = new byte[length];
                 await ReadExactAsync(_stream, payload, ct);
 
+                // MessageType 추출
                 var packetType = ExtractPacketType(payload);
 
                 if (PacketReceived is not null)
@@ -111,9 +130,7 @@ public sealed class TcpClientService : IDisposable
                 }
             }
         }
-        catch (OperationCanceledException)
-        {
-        }
+        catch (OperationCanceledException) { }
         catch (Exception ex)
         {
             _logSink.Write($"서버 수신 오류: {ex.Message}");
@@ -137,9 +154,7 @@ public sealed class TcpClientService : IDisposable
                 return (PacketType)mt.GetInt32();
             }
         }
-        catch
-        {
-        }
+        catch { }
 
         return PacketType.Unknown;
     }
@@ -151,10 +166,7 @@ public sealed class TcpClientService : IDisposable
         {
             var read = await stream.ReadAsync(buffer.AsMemory(offset, buffer.Length - offset), ct);
             if (read == 0)
-            {
                 throw new IOException("연결이 종료되었습니다.");
-            }
-
             offset += read;
         }
     }
