@@ -393,7 +393,29 @@ public sealed class ClientViewModel : ObservableObject
     {
         try
         {
-            var path = await _fileReceiver.SaveAsync(packet, Path.Combine(Path.GetTempPath(), "EduStreamClient"));
+            var result = await _fileReceiver.TrySaveAsync(packet, Path.Combine(Path.GetTempPath(), "EduStreamClient"));
+
+            if (result.Pending)
+            {
+                RunOnUiThread(() =>
+                {
+                    DownloadStatus = "파일 청크 수신 중";
+                    LastServerMessage = "파일을 수신 중입니다.";
+                    _logSink.Write($"파일 청크 수신 중: transfer={packet.TransferId}, chunk={packet.ChunkIndex + 1}/{packet.TotalChunks}");
+                    SyncLogs();
+                });
+
+                return;
+            }
+
+            if (!result.Success || string.IsNullOrWhiteSpace(result.FilePath))
+            {
+                var code = string.IsNullOrWhiteSpace(result.ErrorCode) ? "UNKNOWN_ERROR" : result.ErrorCode;
+                var message = string.IsNullOrWhiteSpace(result.ErrorMessage) ? "알 수 없는 파일 수신 오류" : result.ErrorMessage;
+                throw new InvalidOperationException($"{code}: {message}");
+            }
+
+            var path = result.FilePath;
 
             RunOnUiThread(() =>
             {
