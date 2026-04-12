@@ -1,3 +1,4 @@
+using EduStream.Core.Factories;
 using EduStream.Core.Logging;
 using EduStream.Core.Models;
 using EduStream.Core.Protocols;
@@ -48,13 +49,11 @@ public sealed class SessionClient
 
     public ErrorPacket CreateJoinError(string hostAddress, int port, string message)
     {
-        return new ErrorPacket
-        {
-            SenderId = "Client",
-            ErrorCode = ErrorCodes.JoinRejected,
-            Message = $"{hostAddress}:{port} 연결 실패 - {message}",
-            IsRecoverable = true
-        };
+        return PacketFactory.CreateError(
+            senderId: "Client",
+            errorCode: ErrorCodes.JoinRejected,
+            message: $"{hostAddress}:{port} 연결 실패 - {message}",
+            isRecoverable: true);
     }
 
     public SessionLeavePacket CreateLeaveRequest(string senderId, string reason)
