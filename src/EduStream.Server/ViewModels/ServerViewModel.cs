@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using System.IO;
 using System.Windows.Forms.Integration;
 using EduStream.Core.Common;
+using EduStream.Core.Factories;
 using EduStream.Core.Logging;
 using EduStream.Core.Models;
 using EduStream.Core.Serialization;
@@ -223,13 +224,11 @@ public sealed class ServerViewModel : ObservableObject
 
     private async Task SendChatAsync()
     {
-        var packet = new ChatPacket
-        {
-            Sender = "Professor",
-            Message = ChatInput
-        };
-
-        packet.DataLength = ChatInput.Length;
+        var packet = PacketFactory.CreateChat(
+            senderId: "Professor",
+            sender: "Professor",
+            message: ChatInput,
+            sessionId: _sessionManager.CurrentSession?.SessionId);
         await _sessionManager.BroadcastPacketAsync(packet);
 
         ChatMessages.Insert(0, $"Professor: {ChatInput}");
