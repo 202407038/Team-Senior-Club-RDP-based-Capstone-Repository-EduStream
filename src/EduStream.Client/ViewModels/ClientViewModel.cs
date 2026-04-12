@@ -4,6 +4,7 @@ using System.Text.Json;
 using System.Windows;
 using EduStream.Client.Services;
 using EduStream.Core.Common;
+using EduStream.Core.Factories;
 using EduStream.Core.Logging;
 using EduStream.Core.Models;
 using EduStream.Core.Protocols;
@@ -219,13 +220,11 @@ public sealed class ClientViewModel : ObservableObject
             return;
         }
 
-        var chatPacket = new ChatPacket
-        {
-            SenderId = DisplayName,
-            Sender = DisplayName,
-            Message = trimmedMessage,
-            SessionId = _sessionClient.CurrentSession?.SessionId
-        };
+        var chatPacket = PacketFactory.CreateChat(
+            senderId: DisplayName,
+            sender: DisplayName,
+            message: trimmedMessage,
+            sessionId: _sessionClient.CurrentSession?.SessionId);
 
         try
         {
