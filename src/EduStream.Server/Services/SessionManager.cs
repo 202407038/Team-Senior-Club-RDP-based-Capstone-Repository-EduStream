@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Text.Json;
+using EduStream.Core.Factories;
 using EduStream.Core.Logging;
 using EduStream.Core.Models;
 using EduStream.Core.Protocols;
@@ -278,13 +279,12 @@ public sealed class SessionManager
         _logSink.Write($"세션 참여 처리: {packet.DisplayName}, 현재 인원={CurrentSession.ParticipantCount}");
         ParticipantsChanged?.Invoke();
 
-        return new AckPacket
-        {
-            SessionId = CurrentSession.SessionId,
-            SenderId = "Server",
-            AckCode = AckCodes.SessionJoined,
-            Message = $"{packet.DisplayName}님이 세션에 참여했습니다."
-        };
+        return PacketFactory.CreateAck(
+            senderId: "Server",
+            ackCode: AckCodes.SessionJoined,
+            message: $"{packet.DisplayName}님이 세션에 참여했습니다.",
+            sessionId: CurrentSession.SessionId,
+            correlationId: packet.CorrelationId);
     }
 
     private BasePacket HandleLeave(string clientId, SessionLeavePacket packet)
@@ -312,25 +312,22 @@ public sealed class SessionManager
         _logSink.Write($"세션 이탈 처리: {displayName}, 현재 인원={CurrentSession.ParticipantCount}");
         ParticipantsChanged?.Invoke();
 
-        return new AckPacket
-        {
-            SessionId = CurrentSession.SessionId,
-            SenderId = "Server",
-            AckCode = AckCodes.SessionLeft,
-            Message = "세션 이탈이 처리되었습니다."
-        };
+        return PacketFactory.CreateAck(
+            senderId: "Server",
+            ackCode: AckCodes.SessionLeft,
+            message: "세션 이탈이 처리되었습니다.",
+            sessionId: CurrentSession.SessionId,
+            correlationId: packet.CorrelationId);
     }
 
     private static ErrorPacket CreateError(string errorCode, string message, bool isRecoverable, BasePacket requestPacket)
     {
-        return new ErrorPacket
-        {
-            SessionId = requestPacket.SessionId,
-            SenderId = "Server",
-            CorrelationId = requestPacket.CorrelationId,
-            ErrorCode = errorCode,
-            Message = message,
-            IsRecoverable = isRecoverable
-        };
+        return PacketFactory.CreateError(
+            senderId: "Server",
+            errorCode: errorCode,
+            message: message,
+            isRecoverable: isRecoverable,
+            sessionId: requestPacket.SessionId,
+            correlationId: requestPacket.CorrelationId);
     }
 }

@@ -8,6 +8,22 @@ namespace EduStream.Core.Utils;
 /// </summary>
 public static class ScreenTransferUtility
 {
+    public static void ValidateCaptureSettings(ScreenCaptureSettings settings)
+    {
+        ArgumentNullException.ThrowIfNull(settings);
+
+        if (settings.TargetFrameIntervalMilliseconds < ScreenTransferRules.MinimumFrameIntervalMilliseconds ||
+            settings.TargetFrameIntervalMilliseconds > ScreenTransferRules.MaximumFrameIntervalMilliseconds)
+        {
+            throw new InvalidOperationException(ErrorCodes.InvalidFrameInterval);
+        }
+
+        if (settings.Encoding != ScreenEncodings.Png)
+        {
+            throw new InvalidOperationException(ErrorCodes.InvalidScreenEncoding);
+        }
+    }
+
     public static void ValidatePacketMetadata(ScreenPacket packet)
     {
         ArgumentNullException.ThrowIfNull(packet);
