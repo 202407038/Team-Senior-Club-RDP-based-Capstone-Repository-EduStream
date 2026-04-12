@@ -73,6 +73,12 @@ public sealed class SessionManager
 
     public async Task CloseSessionAsync()
     {
+        // 연결 정리 전에 클라이언트들에게 세션 종료 알림
+        if (_participants.Count > 0)
+        {
+            await BroadcastSystemMessageAsync("교수자가 세션을 종료했습니다. 연결이 해제됩니다.");
+        }
+
         lock (_sessionLock)
         {
             if (CurrentSession is not null)
@@ -136,6 +142,10 @@ public sealed class SessionManager
                         {
                             await _tcpServer.DisconnectClientAsync(clientId);
                         }
+                        else
+                        {
+                            await BroadcastSystemMessageAsync($"{joinPacket.DisplayName}님이 세션에 참여했습니다.");
+                        }
                     }
                     break;
 
@@ -143,8 +153,14 @@ public sealed class SessionManager
                     var leavePacket = JsonSerializer.Deserialize<SessionLeavePacket>(payload);
                     if (leavePacket is not null)
                     {
+                        var leaveName = GetDisplayName(clientId, leavePacket.DisplayName);
                         var response = HandleLeave(clientId, leavePacket);
                         await _tcpServer.SendToClientAsync(clientId, response);
+
+                        if (response is AckPacket && !string.IsNullOrWhiteSpace(leaveName))
+                        {
+                            await BroadcastSystemMessageAsync($"{leaveName}님이 세션에서 나갔습니다.");
+                        }
                     }
                     break;
 
@@ -208,9 +224,10 @@ public sealed class SessionManager
 
             _logSink.Write($"연결 끊김으로 세션 이탈: {displayName} (clientId={clientId})");
             ParticipantsChanged?.Invoke();
-        }
 
-        await Task.CompletedTask;
+            // 나머지 참여자에게 퇴장 알림
+            await BroadcastSystemMessageAsync($"{displayName}님의 연결이 끊어졌습니다.");
+        }
     }
 
     private async Task HandleChatAsync(string clientId, ChatPacket chatPacket)
@@ -318,6 +335,31 @@ public sealed class SessionManager
             message: "세션 이탈이 처리되었습니다.",
             sessionId: CurrentSession.SessionId,
             correlationId: packet.CorrelationId);
+    }
+
+    private string? GetDisplayName(string clientId, string? packetDisplayName)
+    {
+        if (!string.IsNullOrWhiteSpace(packetDisplayName))
+            return packetDisplayName;
+
+        _clientDisplayNames.TryGetValue(clientId, out var name);
+        return name;
+    }
+
+    private async Task BroadcastSystemMessageAsync(string message)
+    {
+        var systemChat = new ChatPacket
+        {
+            SenderId = "Server",
+            Sender = "System",
+            Message = message,
+            IsSystemMessage = true,
+            SessionId = CurrentSession?.SessionId
+        };
+
+        await _tcpServer.BroadcastAsync(systemChat);
+        ChatReceived?.Invoke("System", message);
+        _logSink.Write($"시스템 메시지 브로드캐스트: {message}");
     }
 
     private static ErrorPacket CreateError(string errorCode, string message, bool isRecoverable, BasePacket requestPacket)
