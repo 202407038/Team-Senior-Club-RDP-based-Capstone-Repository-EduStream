@@ -14,6 +14,8 @@ namespace EduStream.Server.Services;
 /// </summary>
 public sealed class SessionManager
 {
+    private const int MaxChatMessageLength = 500;
+
     private readonly ILogSink _logSink;
     private readonly TcpServerService _tcpServer;
     private readonly ConcurrentDictionary<string, string> _participants = new(); // displayName → clientId
@@ -147,16 +149,10 @@ public sealed class SessionManager
                     break;
 
                 case PacketType.Chat:
-                    // 채팅은 모든 클라이언트에게 브로드캐스트
                     var chatPacket = JsonSerializer.Deserialize<ChatPacket>(payload);
                     if (chatPacket is not null)
                     {
-                        await _tcpServer.BroadcastAsync(chatPacket);
-                        var sender = string.IsNullOrWhiteSpace(chatPacket.Sender)
-                            ? chatPacket.SenderId
-                            : chatPacket.Sender;
-                        ChatReceived?.Invoke(sender, chatPacket.Message);
-                        _logSink.Write($"채팅 브로드캐스트: {chatPacket.SenderId}");
+                        await HandleChatAsync(clientId, chatPacket);
                     }
                     break;
 
@@ -215,6 +211,48 @@ public sealed class SessionManager
         }
 
         await Task.CompletedTask;
+    }
+
+    private async Task HandleChatAsync(string clientId, ChatPacket chatPacket)
+    {
+        // 1) 참가자 검증
+        if (!_clientDisplayNames.TryGetValue(clientId, out var verifiedName))
+        {
+            var errorPacket = CreateError(ErrorCodes.NotParticipant,
+                "세션에 참여하지 않은 상태에서는 채팅을 보낼 수 없습니다.",
+                true, chatPacket);
+            await _tcpServer.SendToClientAsync(clientId, errorPacket);
+            _logSink.Write($"비참가자 채팅 시도 차단: clientId={clientId}");
+            return;
+        }
+
+        // 2) 빈 메시지 검증
+        if (string.IsNullOrWhiteSpace(chatPacket.Message))
+        {
+            _logSink.Write($"빈 메시지 무시: {verifiedName} (clientId={clientId})");
+            return;
+        }
+
+        // 3) 메시지 길이 제한
+        if (chatPacket.Message.Length > MaxChatMessageLength)
+        {
+            var errorPacket = CreateError(ErrorCodes.MessageTooLong,
+                $"메시지는 {MaxChatMessageLength}자 이하여야 합니다. (현재 {chatPacket.Message.Length}자)",
+                true, chatPacket);
+            await _tcpServer.SendToClientAsync(clientId, errorPacket);
+            _logSink.Write($"메시지 길이 초과: {verifiedName}, {chatPacket.Message.Length}자");
+            return;
+        }
+
+        // 4) 송신자 이름을 서버 매핑 기준으로 강제 보정 (변조 방지)
+        chatPacket.Sender = verifiedName;
+
+        // 5) 브로드캐스트
+        var targetCount = _participants.Count;
+        await _tcpServer.BroadcastAsync(chatPacket);
+
+        ChatReceived?.Invoke(verifiedName, chatPacket.Message);
+        _logSink.Write($"채팅 브로드캐스트: {verifiedName} → {targetCount}명에게 전달");
     }
 
     private BasePacket HandleJoin(string clientId, SessionJoinPacket packet)

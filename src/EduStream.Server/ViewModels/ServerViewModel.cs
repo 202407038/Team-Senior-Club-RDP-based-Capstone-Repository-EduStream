@@ -223,7 +223,7 @@ public sealed class ServerViewModel : ObservableObject
     private async Task SendChatAsync()
     {
         var packet = PacketFactory.CreateChat(
-            senderId: "Professor",
+            senderId: "Server",
             sender: "Professor",
             message: ChatInput,
             sessionId: _sessionManager.CurrentSession?.SessionId);
