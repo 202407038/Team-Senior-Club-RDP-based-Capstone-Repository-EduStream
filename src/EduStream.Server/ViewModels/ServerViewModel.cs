@@ -19,7 +19,7 @@ public sealed class ServerViewModel : ObservableObject
     private readonly TcpServerService _tcpServer;
     private readonly SessionManager _sessionManager;
     private readonly HeartbeatService _heartbeatService;
-    private readonly ScreenCapturer _screenCapturer;
+    private readonly ScreenShareService _screenShareService;
     private readonly RdpHost _rdpHost;
     private readonly FileDistributor _fileDistributor;
     private string _sessionName = "Capstone Live Class";
@@ -39,7 +39,7 @@ public sealed class ServerViewModel : ObservableObject
         _tcpServer = new TcpServerService(_logSink, serializer);
         _sessionManager = new SessionManager(_logSink, _tcpServer);
         _heartbeatService = new HeartbeatService(_sessionManager, _tcpServer, _logSink);
-        _screenCapturer = new ScreenCapturer();
+        _screenShareService = new ScreenShareService(_sessionManager, _logSink);
         _rdpHost = rdpHost ?? new RdpHost(_logSink);
         _fileDistributor = new FileDistributor(serializer, _logSink);
 
@@ -204,10 +204,8 @@ public sealed class ServerViewModel : ObservableObject
 
     private async Task StartScreenShareAsync()
     {
-        var frame = _screenCapturer.CapturePreviewFrame();
-        frame.DataLength = frame.Content.Length;
-        await _sessionManager.BroadcastPacketAsync(frame);
-        LatestScreenStatus = $"{frame.FrameDescription} 전송 완료 ({frame.Width}x{frame.Height}, {frame.ContentLength} bytes, {frame.CapturedAt:HH:mm:ss})";
+        var frame = await _screenShareService.CaptureAndBroadcastPreviewAsync();
+        LatestScreenStatus = _screenShareService.BuildLatestStatus(frame);
         SyncLogs();
     }
 
