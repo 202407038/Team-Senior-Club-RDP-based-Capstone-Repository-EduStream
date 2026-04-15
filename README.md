@@ -56,17 +56,18 @@ EduStream은 교수자 화면을 여러 수강생에게 실시간으로 전달�
 
 ### 개발 시작 전 동기화
 
-모든 개발 팀원은 작업을 시작하기 전에 아래 명령을 먼저 실행합니다.
+모든 개발 팀원은 작업을 시작하기 전에 아래 순서로 원격 최신 상태를 먼저 확인합니다.
 
 ```bash
-git pull --all --prune
+git fetch --all --prune
+git status --short --branch
 ```
 
 권장 순서:
 
 ```bash
 git checkout main
-git pull --all --prune
+git pull --ff-only origin main
 git checkout -b feature/<작업명>
 ```
 
@@ -267,4 +268,5 @@ docs: add collaboration workflow guide
 - 공통 통신 모델은 `EduStream.Core`에 둡니다.
 - 비동기 I/O는 `async`/`await`를 우선 사용합니다.
 - 구현 완료 전 문서에는 "도입 예정"과 "현재 사용 중"을 구분해 적습니다.
+- 7일 스프린트 문서는 기존 문서 대비 2배 작업량 기준으로 유지하되, 역할 분담은 섞지 않습니다.
 - 상세 규칙은 `docs/` 문서를 기준으로 따릅니다.
