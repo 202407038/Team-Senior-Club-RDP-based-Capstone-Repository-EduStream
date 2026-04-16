@@ -49,7 +49,7 @@ public sealed class TcpServerService
         _cts = new CancellationTokenSource();
         _listener = new TcpListener(IPAddress.Any, port);
         _listener.Start();
-        _logSink.Write($"TCP 서버 시작: 포트={port}");
+        _logSink.Write($"[Tcp] 서버 시작: 포트={port}");
 
         _ = AcceptClientsAsync(_cts.Token);
     }
@@ -68,7 +68,7 @@ public sealed class TcpServerService
         }
         _clients.Clear();
 
-        _logSink.Write("TCP 서버 중지 완료");
+        _logSink.Write("[Tcp] 서버 중지");
         await Task.CompletedTask;
     }
 
@@ -107,7 +107,7 @@ public sealed class TcpServerService
     {
         if (!_clients.TryGetValue(clientId, out var connection))
         {
-            _logSink.Write($"클라이언트를 찾을 수 없음: {clientId}");
+            _logSink.Write($"[Tcp] 클라이언트 찾을 수 없음: {clientId}");
             return;
         }
 
@@ -142,7 +142,7 @@ public sealed class TcpServerService
                 var connection = new ClientConnection(tcpClient);
                 _clients.TryAdd(clientId, connection);
 
-                _logSink.Write($"클라이언트 연결: {clientId} ({tcpClient.Client.RemoteEndPoint})");
+                _logSink.Write($"[Tcp] 클라이언트 연결: {clientId} ({tcpClient.Client.RemoteEndPoint})");
                 _ = ReceiveFromClientAsync(clientId, connection, ct);
             }
             catch (OperationCanceledException)
@@ -151,7 +151,7 @@ public sealed class TcpServerService
             }
             catch (Exception ex)
             {
-                _logSink.Write($"클라이언트 수락 오류: {ex.Message}");
+                _logSink.Write($"[Tcp] 수락 오류: {ex.GetType().Name}: {ex.Message}");
             }
         }
     }
@@ -171,7 +171,7 @@ public sealed class TcpServerService
 
                 if (length <= 0 || length > MaxPacketSize)
                 {
-                    _logSink.Write($"잘못된 패킷 크기: {length} (clientId={clientId})");
+                    _logSink.Write($"[Tcp] 잘못된 패킷 크기: {length} (clientId={clientId})");
                     break;
                 }
 
@@ -188,7 +188,7 @@ public sealed class TcpServerService
         catch (OperationCanceledException) { }
         catch (Exception ex)
         {
-            _logSink.Write($"클라이언트 수신 오류: {clientId}, {ex.Message}");
+            _logSink.Write($"[Tcp] 수신 오류: clientId={clientId}, {ex.GetType().Name}: {ex.Message}");
         }
         finally
         {
@@ -201,7 +201,7 @@ public sealed class TcpServerService
         if (_clients.TryRemove(clientId, out var connection))
         {
             connection.Dispose();
-            _logSink.Write($"클라이언트 제거: {clientId}");
+            _logSink.Write($"[Tcp] 클라이언트 제거: {clientId}");
 
             if (ClientDisconnected is not null)
             {

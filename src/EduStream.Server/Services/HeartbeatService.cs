@@ -27,7 +27,7 @@ public sealed class HeartbeatService
     {
         _cts = new CancellationTokenSource();
         _ = RunAsync(_cts.Token);
-        _logSink.Write($"하트비트 서비스 시작 (간격={_interval.TotalSeconds}초)");
+        _logSink.Write($"[Heartbeat] 시작: 간격={_interval.TotalSeconds}초");
     }
 
     public void Stop()
@@ -35,7 +35,7 @@ public sealed class HeartbeatService
         _cts?.Cancel();
         _cts?.Dispose();
         _cts = null;
-        _logSink.Write("하트비트 서비스 중지");
+        _logSink.Write("[Heartbeat] 중지");
     }
 
     private async Task RunAsync(CancellationToken ct)
@@ -58,7 +58,7 @@ public sealed class HeartbeatService
             }
             catch (Exception ex)
             {
-                _logSink.Write($"하트비트 전송 오류: {ex.Message}");
+                _logSink.Write($"[Heartbeat] 전송 오류: {ex.GetType().Name}: {ex.Message}");
             }
         }
     }
