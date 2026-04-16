@@ -57,6 +57,12 @@ public sealed class SessionManager
     {
         lock (_sessionLock)
         {
+            if (CurrentSession is not null)
+            {
+                throw new InvalidOperationException(
+                    $"세션이 이미 열려 있습니다. 이름={CurrentSession.SessionName}, 포트={CurrentSession.Port}");
+            }
+
             CurrentSession = new SessionInfo
             {
                 SessionName = sessionName,
