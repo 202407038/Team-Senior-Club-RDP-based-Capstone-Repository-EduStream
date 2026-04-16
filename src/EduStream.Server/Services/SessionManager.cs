@@ -88,10 +88,8 @@ public sealed class SessionManager
             CurrentSession = null;
         }
 
-        _participants.Clear();
-        _clientDisplayNames.Clear();
+        ClearParticipants();
         await _tcpServer.StopAsync();
-        ParticipantsChanged?.Invoke();
     }
 
     /// <summary>
@@ -213,21 +211,12 @@ public sealed class SessionManager
     /// </summary>
     private async Task OnClientDisconnectedAsync(string clientId)
     {
-        if (_clientDisplayNames.TryRemove(clientId, out var displayName))
-        {
-            _participants.TryRemove(displayName, out _);
+        var displayName = RemoveParticipant(clientId);
+        if (displayName is null)
+            return;
 
-            if (CurrentSession is not null)
-            {
-                CurrentSession.ParticipantCount = _participants.Count;
-            }
-
-            _logSink.Write($"연결 끊김으로 세션 이탈: {displayName} (clientId={clientId})");
-            ParticipantsChanged?.Invoke();
-
-            // 나머지 참여자에게 퇴장 알림
-            await BroadcastSystemMessageAsync($"{displayName}님의 연결이 끊어졌습니다.");
-        }
+        _logSink.Write($"연결 끊김으로 세션 이탈: {displayName} (clientId={clientId})");
+        await BroadcastSystemMessageAsync($"{displayName}님의 연결이 끊어졌습니다.");
     }
 
     private async Task HandleChatAsync(string clientId, ChatPacket chatPacket)
@@ -285,16 +274,12 @@ public sealed class SessionManager
         }
 
         // 중복 참여 체크
-        if (!_participants.TryAdd(packet.DisplayName, clientId))
+        if (!TryAddParticipant(clientId, packet.DisplayName))
         {
             return CreateError(ErrorCodes.AlreadyJoined, $"{packet.DisplayName}은(는) 이미 참여 중입니다.", true, packet);
         }
 
-        _clientDisplayNames.TryAdd(clientId, packet.DisplayName);
-        CurrentSession.ParticipantCount = _participants.Count;
-
         _logSink.Write($"세션 참여 처리: {packet.DisplayName}, 현재 인원={CurrentSession.ParticipantCount}");
-        ParticipantsChanged?.Invoke();
 
         return PacketFactory.CreateAck(
             senderId: "Server",
@@ -311,23 +296,8 @@ public sealed class SessionManager
             return CreateError(ErrorCodes.SessionNotOpen, "현재 열려 있는 세션이 없습니다.", false, packet);
         }
 
-        var displayName = packet.DisplayName;
-
-        // DisplayName이 비어있으면 clientId로 조회
-        if (string.IsNullOrWhiteSpace(displayName))
-        {
-            _clientDisplayNames.TryGetValue(clientId, out displayName);
-        }
-
-        if (!string.IsNullOrWhiteSpace(displayName))
-        {
-            _participants.TryRemove(displayName, out _);
-            _clientDisplayNames.TryRemove(clientId, out _);
-        }
-
-        CurrentSession.ParticipantCount = _participants.Count;
-        _logSink.Write($"세션 이탈 처리: {displayName}, 현재 인원={CurrentSession.ParticipantCount}");
-        ParticipantsChanged?.Invoke();
+        var displayName = RemoveParticipant(clientId);
+        _logSink.Write($"세션 이탈 처리: {displayName ?? "(unknown)"}, 현재 인원={CurrentSession.ParticipantCount}");
 
         return PacketFactory.CreateAck(
             senderId: "Server",
@@ -344,6 +314,42 @@ public sealed class SessionManager
 
         _clientDisplayNames.TryGetValue(clientId, out var name);
         return name;
+    }
+
+    private bool TryAddParticipant(string clientId, string displayName)
+    {
+        if (!_participants.TryAdd(displayName, clientId))
+            return false;
+
+        _clientDisplayNames.TryAdd(clientId, displayName);
+        UpdateParticipantCount();
+        ParticipantsChanged?.Invoke();
+        return true;
+    }
+
+    private string? RemoveParticipant(string clientId)
+    {
+        if (!_clientDisplayNames.TryRemove(clientId, out var displayName))
+            return null;
+
+        _participants.TryRemove(displayName, out _);
+        UpdateParticipantCount();
+        ParticipantsChanged?.Invoke();
+        return displayName;
+    }
+
+    private void ClearParticipants()
+    {
+        _participants.Clear();
+        _clientDisplayNames.Clear();
+        UpdateParticipantCount();
+        ParticipantsChanged?.Invoke();
+    }
+
+    private void UpdateParticipantCount()
+    {
+        if (CurrentSession is not null)
+            CurrentSession.ParticipantCount = _participants.Count;
     }
 
     private async Task BroadcastSystemMessageAsync(string message)
