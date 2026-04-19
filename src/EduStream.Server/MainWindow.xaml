@@ -42,6 +42,8 @@
                             <Button Margin="0,0,10,10" Padding="18,10" Command="{Binding OpenSessionCommand}" Content="Open Session" />
                             <Button Margin="0,0,10,10" Padding="18,10" Command="{Binding CloseSessionCommand}" Content="Close Session" />
                             <Button Margin="0,0,10,10" Padding="18,10" Command="{Binding StartScreenShareCommand}" Content="Send Preview Frame" />
+                            <Button Margin="0,0,10,10" Padding="18,10" Command="{Binding StartAutoScreenShareCommand}" Content="Start Auto Share" />
+                            <Button Margin="0,0,10,10" Padding="18,10" Command="{Binding StopAutoScreenShareCommand}" Content="Stop Auto Share" />
                             <Button Margin="0,0,10,10" Padding="18,10" Command="{Binding SendSampleFileCommand}" Content="Send Sample File" />
                         </WrapPanel>
 
@@ -49,6 +51,16 @@
                             <StackPanel>
                                 <TextBlock FontWeight="SemiBold" Text="Screen Sharing Status" />
                                 <TextBlock Margin="0,8,0,0" Text="{Binding LatestScreenStatus}" />
+                                <UniformGrid Margin="0,12,0,0" Columns="2">
+                                    <StackPanel Margin="0,0,12,0">
+                                        <TextBlock FontWeight="SemiBold" Text="Loop Status" />
+                                        <TextBlock Margin="0,6,0,0" Text="{Binding ScreenLoopStatus}" TextWrapping="Wrap" />
+                                    </StackPanel>
+                                    <StackPanel Margin="12,0,0,0">
+                                        <TextBlock FontWeight="SemiBold" Text="Broadcast Frames" />
+                                        <TextBlock Margin="0,6,0,0" Text="{Binding ScreenFrameCount}" />
+                                    </StackPanel>
+                                </UniformGrid>
                             </StackPanel>
                         </Border>
 
