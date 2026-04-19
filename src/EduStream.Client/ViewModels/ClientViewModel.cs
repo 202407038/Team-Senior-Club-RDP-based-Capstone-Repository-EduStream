@@ -272,12 +272,9 @@ public sealed class ClientViewModel : ObservableObject
                 break;
 
             case PacketType.Heartbeat:
-                // 서버 하트비트 수신 — 응답 전송
-                var heartbeatResponse = new HeartbeatPacket
-                {
-                    SenderId = DisplayName,
-                    SessionId = _sessionClient.CurrentSession?.SessionId
-                };
+                var heartbeatResponse = PacketFactory.CreateHeartbeat(
+                    senderId: DisplayName,
+                    sessionId: _sessionClient.CurrentSession?.SessionId);
                 try
                 {
                     await _tcpClient.SendAsync(heartbeatResponse);
