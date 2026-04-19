@@ -32,6 +32,9 @@ public sealed class ServerViewModel : ObservableObject
     private string _rdpStatus = "RDP preview is idle.";
     private bool _isSessionOpen;
     private int _participantCount;
+    private bool _isScreenShareActive;
+    private int _screenFrameCount;
+    private string _screenLoopStatus = "자동 송신 중지";
 
     public ServerViewModel(RdpHost? rdpHost = null)
     {
@@ -45,10 +48,13 @@ public sealed class ServerViewModel : ObservableObject
 
         _sessionManager.ParticipantsChanged += OnParticipantsChanged;
         _sessionManager.ChatReceived += OnChatReceived;
+        _screenShareService.StatusChanged += OnScreenShareStatusChanged;
 
         OpenSessionCommand = new RelayCommand(() => _ = OpenSessionAsync(), () => !IsSessionOpen);
         CloseSessionCommand = new RelayCommand(() => _ = CloseSessionAsync(), () => IsSessionOpen);
         StartScreenShareCommand = new RelayCommand(() => _ = StartScreenShareAsync(), () => IsSessionOpen);
+        StartAutoScreenShareCommand = new RelayCommand(() => _ = StartAutoScreenShareAsync(), () => IsSessionOpen && !IsScreenShareActive);
+        StopAutoScreenShareCommand = new RelayCommand(() => _ = StopAutoScreenShareAsync(), () => IsScreenShareActive);
         SendSampleFileCommand = new RelayCommand(() => _ = SendSampleFileAsync(), () => IsSessionOpen);
         SendChatCommand = new RelayCommand(() => _ = SendChatAsync(), () => IsSessionOpen && !string.IsNullOrWhiteSpace(ChatInput));
         StartRdpPreviewCommand = new RelayCommand(() => _ = StartRdpPreviewAsync(), () => IsSessionOpen && _rdpHost.IsAttached);
@@ -115,6 +121,31 @@ public sealed class ServerViewModel : ObservableObject
         private set => SetProperty(ref _participantCount, value);
     }
 
+    public bool IsScreenShareActive
+    {
+        get => _isScreenShareActive;
+        private set
+        {
+            if (SetProperty(ref _isScreenShareActive, value))
+            {
+                StartAutoScreenShareCommand.RaiseCanExecuteChanged();
+                StopAutoScreenShareCommand.RaiseCanExecuteChanged();
+            }
+        }
+    }
+
+    public int ScreenFrameCount
+    {
+        get => _screenFrameCount;
+        private set => SetProperty(ref _screenFrameCount, value);
+    }
+
+    public string ScreenLoopStatus
+    {
+        get => _screenLoopStatus;
+        private set => SetProperty(ref _screenLoopStatus, value);
+    }
+
     public bool IsSessionOpen
     {
         get => _isSessionOpen;
@@ -125,6 +156,8 @@ public sealed class ServerViewModel : ObservableObject
                 OpenSessionCommand.RaiseCanExecuteChanged();
                 CloseSessionCommand.RaiseCanExecuteChanged();
                 StartScreenShareCommand.RaiseCanExecuteChanged();
+                StartAutoScreenShareCommand.RaiseCanExecuteChanged();
+                StopAutoScreenShareCommand.RaiseCanExecuteChanged();
                 SendSampleFileCommand.RaiseCanExecuteChanged();
                 SendChatCommand.RaiseCanExecuteChanged();
                 StartRdpPreviewCommand.RaiseCanExecuteChanged();
@@ -143,6 +176,10 @@ public sealed class ServerViewModel : ObservableObject
     public RelayCommand CloseSessionCommand { get; }
 
     public RelayCommand StartScreenShareCommand { get; }
+
+    public RelayCommand StartAutoScreenShareCommand { get; }
+
+    public RelayCommand StopAutoScreenShareCommand { get; }
 
     public RelayCommand SendSampleFileCommand { get; }
 
@@ -184,6 +221,7 @@ public sealed class ServerViewModel : ObservableObject
         await _sessionManager.OpenSessionAsync(SessionName, Port);
         _heartbeatService.Start();
         IsSessionOpen = true;
+        ScreenLoopStatus = "자동 송신 중지";
         RdpStatus = _rdpHost.IsAttached
             ? "RDP preview is ready. Enter credentials and start the connection."
             : "RDP preview host is not attached yet.";
@@ -192,12 +230,16 @@ public sealed class ServerViewModel : ObservableObject
 
     private async Task CloseSessionAsync()
     {
+        await _screenShareService.StopContinuousBroadcastAsync();
         _heartbeatService.Stop();
         await _rdpHost.StopHostAsync();
         await _sessionManager.CloseSessionAsync();
         IsSessionOpen = false;
         ParticipantCount = 0;
+        IsScreenShareActive = false;
+        ScreenFrameCount = 0;
         LatestScreenStatus = "Session closed.";
+        ScreenLoopStatus = "자동 송신 중지";
         RdpStatus = "RDP preview stopped.";
         SyncLogs();
     }
@@ -206,6 +248,22 @@ public sealed class ServerViewModel : ObservableObject
     {
         var frame = await _screenShareService.CaptureAndBroadcastPreviewAsync();
         LatestScreenStatus = _screenShareService.BuildLatestStatus(frame);
+        SyncLogs();
+    }
+
+    private async Task StartAutoScreenShareAsync()
+    {
+        await _screenShareService.StartContinuousBroadcastAsync();
+        IsScreenShareActive = _screenShareService.IsStreaming;
+        ScreenLoopStatus = _screenShareService.LatestStatus;
+        SyncLogs();
+    }
+
+    private async Task StopAutoScreenShareAsync()
+    {
+        await _screenShareService.StopContinuousBroadcastAsync();
+        IsScreenShareActive = _screenShareService.IsStreaming;
+        ScreenLoopStatus = _screenShareService.LatestStatus;
         SyncLogs();
     }
 
@@ -264,5 +322,17 @@ public sealed class ServerViewModel : ObservableObject
         {
             ActivityLogs.Add(entry);
         }
+    }
+
+    private void OnScreenShareStatusChanged()
+    {
+        System.Windows.Application.Current?.Dispatcher?.Invoke(() =>
+        {
+            IsScreenShareActive = _screenShareService.IsStreaming;
+            ScreenFrameCount = _screenShareService.BroadcastFrameCount;
+            ScreenLoopStatus = _screenShareService.LatestStatus;
+            LatestScreenStatus = _screenShareService.LatestStatus;
+            SyncLogs();
+        });
     }
 }
