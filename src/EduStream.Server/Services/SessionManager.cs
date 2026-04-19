@@ -105,11 +105,9 @@ public sealed class SessionManager
 
     public HeartbeatPacket CreateHeartbeat()
     {
-        return new HeartbeatPacket
-        {
-            SessionId = CurrentSession?.SessionId,
-            SenderId = "Server"
-        };
+        return PacketFactory.CreateHeartbeat(
+            senderId: "Server",
+            sessionId: CurrentSession?.SessionId);
     }
 
     /// <summary>
@@ -348,14 +346,11 @@ public sealed class SessionManager
 
     private async Task BroadcastSystemMessageAsync(string message)
     {
-        var systemChat = new ChatPacket
-        {
-            SenderId = "Server",
-            Sender = "System",
-            Message = message,
-            IsSystemMessage = true,
-            SessionId = CurrentSession?.SessionId
-        };
+        var systemChat = PacketFactory.CreateSystemChat(
+            message: message,
+            sessionId: CurrentSession?.SessionId);
+
+        systemChat.SenderId = "Server";
 
         await _tcpServer.BroadcastAsync(systemChat);
         ChatReceived?.Invoke("System", message);

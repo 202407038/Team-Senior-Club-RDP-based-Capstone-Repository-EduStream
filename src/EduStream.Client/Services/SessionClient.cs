@@ -23,13 +23,11 @@ public sealed class SessionClient
 
     public SessionJoinPacket CreateJoinRequest(string hostAddress, int port, string displayName)
     {
-        return new SessionJoinPacket
-        {
-            SenderId = displayName,
-            DisplayName = displayName,
-            TargetAddress = hostAddress,
-            TargetPort = port
-        };
+        return PacketFactory.CreateSessionJoin(
+            senderId: displayName,
+            displayName: displayName,
+            targetAddress: hostAddress,
+            targetPort: port);
     }
 
     public Task<SessionInfo> ApplyJoinAckAsync(AckPacket packet, string hostAddress, int port)
@@ -58,13 +56,11 @@ public sealed class SessionClient
 
     public SessionLeavePacket CreateLeaveRequest(string senderId, string reason)
     {
-        return new SessionLeavePacket
-        {
-            SessionId = CurrentSession?.SessionId,
-            SenderId = senderId,
-            DisplayName = senderId,
-            Reason = reason
-        };
+        return PacketFactory.CreateSessionLeave(
+            senderId: senderId,
+            displayName: senderId,
+            reason: reason,
+            sessionId: CurrentSession?.SessionId);
     }
 
     public Task DisconnectAsync(string reason = "사용자 종료")
