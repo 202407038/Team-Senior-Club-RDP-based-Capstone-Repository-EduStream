@@ -282,6 +282,16 @@ public sealed class SessionManager
             return CreateError(ErrorCodes.DisplayNameRequired, "참여자 이름은 비워둘 수 없습니다.", true, packet);
         }
 
+        if (_clientDisplayNames.TryGetValue(clientId, out var existingDisplayName))
+        {
+            _logSink.Write($"중복 참가 요청 차단: clientId={clientId}, 기존 이름={existingDisplayName}, 요청 이름={packet.DisplayName}");
+            return CreateError(
+                ErrorCodes.ClientAlreadyJoined,
+                $"{existingDisplayName} 이름으로 이미 세션에 참여 중입니다.",
+                true,
+                packet);
+        }
+
         // 중복 참여 체크
         if (!_participants.TryAdd(packet.DisplayName, clientId))
         {
@@ -309,20 +319,29 @@ public sealed class SessionManager
             return CreateError(ErrorCodes.SessionNotOpen, "현재 열려 있는 세션이 없습니다.", false, packet);
         }
 
-        var displayName = packet.DisplayName;
-
-        // DisplayName이 비어있으면 clientId로 조회
-        if (string.IsNullOrWhiteSpace(displayName))
+        if (!_clientDisplayNames.TryGetValue(clientId, out var displayName))
         {
-            _clientDisplayNames.TryGetValue(clientId, out displayName);
+            _logSink.Write($"비참가자 이탈 요청 차단: clientId={clientId}, 요청 이름={packet.DisplayName}");
+            return CreateError(
+                ErrorCodes.NotParticipant,
+                "세션에 참여하지 않은 상태에서는 이탈 요청을 보낼 수 없습니다.",
+                true,
+                packet);
         }
 
-        if (!string.IsNullOrWhiteSpace(displayName))
+        if (!string.IsNullOrWhiteSpace(packet.DisplayName) &&
+            !string.Equals(packet.DisplayName, displayName, StringComparison.Ordinal))
         {
-            _participants.TryRemove(displayName, out _);
-            _clientDisplayNames.TryRemove(clientId, out _);
+            _logSink.Write($"이탈 요청 이름 불일치: clientId={clientId}, 매핑 이름={displayName}, 요청 이름={packet.DisplayName}");
+            return CreateError(
+                ErrorCodes.NotParticipant,
+                "현재 연결의 참여자 이름과 이탈 요청 정보가 일치하지 않습니다.",
+                true,
+                packet);
         }
 
+        _participants.TryRemove(displayName, out _);
+        _clientDisplayNames.TryRemove(clientId, out _);
         CurrentSession.ParticipantCount = _participants.Count;
         _logSink.Write($"세션 이탈 처리: {displayName}, 현재 인원={CurrentSession.ParticipantCount}");
         ParticipantsChanged?.Invoke();
