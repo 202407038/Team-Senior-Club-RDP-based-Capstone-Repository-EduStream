@@ -32,9 +32,13 @@ public sealed class ClientViewModel : ObservableObject
     private string _connectionState = "연결 전";
     private string _sessionSummary = "아직 참가한 세션이 없습니다.";
     private string _lastServerMessage = "서버 응답을 기다리는 중입니다.";
+    private string _lastSuccessMessage = "아직 성공한 작업이 없습니다.";
     private string _lastErrorMessage = "오류 없음";
+    private string _chatStatus = "채팅 대기 중";
     private string _renderStatus = "화면 프레임을 아직 받지 않았습니다.";
+    private string _screenDetail = "프레임 메타데이터를 아직 받지 않았습니다.";
     private string _downloadStatus = "다운로드 대기 중";
+    private string _fileTransferDetail = "파일 수신 이벤트가 없습니다.";
     private string _chatInput = string.Empty;
     private bool _isConnected;
 
@@ -91,10 +95,22 @@ public sealed class ClientViewModel : ObservableObject
         private set => SetProperty(ref _lastServerMessage, value);
     }
 
+    public string LastSuccessMessage
+    {
+        get => _lastSuccessMessage;
+        private set => SetProperty(ref _lastSuccessMessage, value);
+    }
+
     public string LastErrorMessage
     {
         get => _lastErrorMessage;
         private set => SetProperty(ref _lastErrorMessage, value);
+    }
+
+    public string ChatStatus
+    {
+        get => _chatStatus;
+        private set => SetProperty(ref _chatStatus, value);
     }
 
     public string RenderStatus
@@ -103,10 +119,22 @@ public sealed class ClientViewModel : ObservableObject
         private set => SetProperty(ref _renderStatus, value);
     }
 
+    public string ScreenDetail
+    {
+        get => _screenDetail;
+        private set => SetProperty(ref _screenDetail, value);
+    }
+
     public string DownloadStatus
     {
         get => _downloadStatus;
         private set => SetProperty(ref _downloadStatus, value);
+    }
+
+    public string FileTransferDetail
+    {
+        get => _fileTransferDetail;
+        private set => SetProperty(ref _fileTransferDetail, value);
     }
 
     public string ChatInput
@@ -202,9 +230,13 @@ public sealed class ClientViewModel : ObservableObject
             ConnectionState = "연결 종료";
             SessionSummary = "아직 참가한 세션이 없습니다.";
             LastServerMessage = "세션 종료 요청을 전송했습니다.";
+            LastSuccessMessage = "세션 종료 요청을 정상적으로 보냈습니다.";
             LastErrorMessage = "오류 없음";
+            ChatStatus = "채팅 대기 중";
             RenderStatus = "화면 프레임을 아직 받지 않았습니다.";
+            ScreenDetail = "프레임 메타데이터를 아직 받지 않았습니다.";
             DownloadStatus = "다운로드 대기 중";
+            FileTransferDetail = "파일 수신 이벤트가 없습니다.";
 
             ChatMessages.Insert(0, $"[시스템] {DisplayName} 님이 세션에서 나갔습니다.");
             _logSink.Write("세션 연결을 종료했습니다.");
@@ -230,12 +262,17 @@ public sealed class ClientViewModel : ObservableObject
         {
             await _tcpClient.SendAsync(chatPacket);
             _logSink.Write($"채팅 전송: {trimmedMessage}");
+            LastServerMessage = "채팅 메시지를 서버로 전송했습니다.";
+            LastSuccessMessage = "채팅 전송 성공";
+            ChatStatus = $"최근 전송: {trimmedMessage}";
             ChatInput = string.Empty;
             SyncLogs();
         }
         catch (Exception ex)
         {
             _logSink.Write($"채팅 전송 실패: {ex.Message}");
+            LastErrorMessage = $"CHAT_SEND_FAILED: {ex.Message}";
+            ChatStatus = "채팅 전송 실패";
             SyncLogs();
         }
     }
@@ -316,7 +353,9 @@ public sealed class ClientViewModel : ObservableObject
                 IsConnected = true;
                 ConnectionState = "연결됨";
                 SessionSummary = $"{_sessionClient.CurrentSession?.SessionName} / {HostAddress}:{Port}";
+                LastSuccessMessage = "세션 참가 성공";
                 LastErrorMessage = "오류 없음";
+                ChatStatus = "채팅 가능";
                 ChatMessages.Insert(0, $"[시스템] {DisplayName} 님이 세션에 참가했습니다.");
             }
             else if (packet.AckCode == AckCodes.SessionLeft)
@@ -324,6 +363,8 @@ public sealed class ClientViewModel : ObservableObject
                 IsConnected = false;
                 ConnectionState = "연결 종료";
                 SessionSummary = "아직 참가한 세션이 없습니다.";
+                LastSuccessMessage = "세션 이탈 처리 완료";
+                ChatStatus = "채팅 대기 중";
             }
 
             _logSink.Write($"서버 응답 수신: {packet.AckCode} - {packet.Message}");
@@ -339,7 +380,10 @@ public sealed class ClientViewModel : ObservableObject
         {
             LastErrorMessage = $"{packet.ErrorCode}: {packet.Message}";
             LastServerMessage = packet.Message;
-            ConnectionState = "연결 실패";
+            if (!IsConnected)
+            {
+                ConnectionState = "연결 실패";
+            }
             _logSink.Write($"서버 오류 수신: {packet.ErrorCode} - {packet.Message}");
             SyncLogs();
         });
@@ -357,6 +401,9 @@ public sealed class ClientViewModel : ObservableObject
         {
             var prefix = packet.IsSystemMessage ? "[시스템]" : packet.Sender;
             ChatMessages.Insert(0, $"{prefix}: {packet.Message}");
+            ChatStatus = packet.IsSystemMessage
+                ? $"시스템 안내 수신: {packet.Message}"
+                : $"최근 수신: {packet.Sender} - {packet.Message}";
             _logSink.Write($"채팅 수신: {packet.Sender}");
             SyncLogs();
         });
@@ -371,6 +418,8 @@ public sealed class ClientViewModel : ObservableObject
             {
                 RenderStatus = renderStatus;
                 LastServerMessage = "화면 프레임을 수신했습니다.";
+                LastSuccessMessage = $"화면 프레임 #{packet.FrameIndex} 수신 성공";
+                ScreenDetail = $"{packet.Width}x{packet.Height} / {packet.Encoding} / {packet.ContentLength} bytes / {packet.CapturedAt:HH:mm:ss}";
                 _logSink.Write($"화면 프레임 수신: #{packet.FrameIndex}, {packet.Width}x{packet.Height}");
                 SyncLogs();
             });
@@ -380,6 +429,8 @@ public sealed class ClientViewModel : ObservableObject
             RunOnUiThread(() =>
             {
                 RenderStatus = $"화면 수신 실패: {ex.Message}";
+                ScreenDetail = "프레임 메타데이터 검증 실패";
+                LastErrorMessage = $"SCREEN_RENDER_FAILED: {ex.Message}";
                 _logSink.Write($"화면 수신 실패: {ex.Message}");
                 SyncLogs();
             });
@@ -397,6 +448,7 @@ public sealed class ClientViewModel : ObservableObject
                 RunOnUiThread(() =>
                 {
                     DownloadStatus = "파일 청크 수신 중";
+                    FileTransferDetail = $"{packet.FileName} / 청크 {packet.ChunkIndex + 1} of {packet.TotalChunks}";
                     LastServerMessage = "파일을 수신 중입니다.";
                     _logSink.Write($"파일 청크 수신 중: transfer={packet.TransferId}, chunk={packet.ChunkIndex + 1}/{packet.TotalChunks}");
                     SyncLogs();
@@ -419,6 +471,8 @@ public sealed class ClientViewModel : ObservableObject
                 DownloadedFiles.Insert(0, Path.GetFileName(path));
                 DownloadStatus = $"{Path.GetFileName(path)} 저장 완료";
                 LastServerMessage = "파일 수신이 완료되었습니다.";
+                LastSuccessMessage = $"{Path.GetFileName(path)} 저장 성공";
+                FileTransferDetail = $"{packet.FileName} / 총 {packet.TotalChunks}개 청크 / 저장 위치 {path}";
                 _logSink.Write($"파일 저장 완료: {path}");
                 SyncLogs();
             });
@@ -428,6 +482,8 @@ public sealed class ClientViewModel : ObservableObject
             RunOnUiThread(() =>
             {
                 DownloadStatus = $"파일 저장 실패: {ex.Message}";
+                FileTransferDetail = $"{packet.FileName} 저장 실패";
+                LastErrorMessage = $"FILE_RECEIVE_FAILED: {ex.Message}";
                 _logSink.Write($"파일 저장 실패: {ex.Message}");
                 SyncLogs();
             });
@@ -443,6 +499,7 @@ public sealed class ClientViewModel : ObservableObject
                 IsConnected = false;
                 ConnectionState = "연결 끊김";
                 LastServerMessage = reason;
+                ChatStatus = "채팅 대기 중";
                 ChatMessages.Insert(0, $"[시스템] 서버와의 연결이 끊어졌습니다.");
                 _logSink.Write($"서버 연결 끊김: {reason}");
                 SyncLogs();
@@ -458,7 +515,9 @@ public sealed class ClientViewModel : ObservableObject
     {
         ConnectionState = "연결 실패";
         LastServerMessage = "세션 참가 요청이 거절되었습니다.";
+        LastSuccessMessage = "아직 성공한 작업이 없습니다.";
         LastErrorMessage = $"{error.ErrorCode}: {error.Message}";
+        ChatStatus = "채팅 대기 중";
         _logSink.Write($"세션 참가 실패: {error.ErrorCode}, {error.Message}");
         SyncLogs();
     }
