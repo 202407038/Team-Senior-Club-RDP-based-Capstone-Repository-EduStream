@@ -99,6 +99,7 @@ public sealed class SessionManager
     /// </summary>
     public async Task BroadcastPacketAsync(BasePacket packet)
     {
+        ValidateOutboundPacket(packet);
         _logSink.Write($"패킷 브로드캐스트: {packet.MessageType}, 길이={packet.DataLength}");
         await _tcpServer.BroadcastAsync(packet);
     }
@@ -371,5 +372,15 @@ public sealed class SessionManager
             isRecoverable: isRecoverable,
             sessionId: requestPacket.SessionId,
             correlationId: requestPacket.CorrelationId);
+    }
+
+    private static void ValidateOutboundPacket(BasePacket packet)
+    {
+        ArgumentNullException.ThrowIfNull(packet);
+
+        if (packet is FilePacket filePacket)
+        {
+            FileTransferUtility.ValidatePacketMetadata(filePacket);
+        }
     }
 }
