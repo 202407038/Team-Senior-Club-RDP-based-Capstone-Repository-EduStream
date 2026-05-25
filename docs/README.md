@@ -10,6 +10,7 @@
 4. `docs/IMPLEMENTATION_PLAYBOOK.md`
 5. `docs/SPRINT_7DAY_IMPLEMENTATION_GUIDE.md`
 6. `docs/USER_WORKFLOW_SCENARIOS.md`
+7. `docs/PROJECT_HISTORY_TIMELINE.md`
 
 ## 문서 목록
 
@@ -47,6 +48,12 @@
 - 역할별 Day 1~7 상세 목표
 - 기존 문서 대비 2배 확장된 작업량 기준
 - 시연 가능한 데모를 목표로 한 구현 우선순위
+
+### 6. [프로젝트 전체 작업 기록](./PROJECT_HISTORY_TIMELINE.md)
+
+- 프로젝트 시작일부터 현재까지의 날짜 기반 작업 기록
+- 파트별 라벨로 분류한 전체 변경 흐름
+- `main` 히스토리와 최신 오픈 PR 기준 요약
 
 ## 문서 운영 원칙
 
