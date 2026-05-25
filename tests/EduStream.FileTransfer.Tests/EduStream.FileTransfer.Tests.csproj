@@ -23,6 +23,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\EduStream.Core\EduStream.Core.csproj" />
     <ProjectReference Include="..\..\src\EduStream.Client\EduStream.Client.csproj" />
+    <ProjectReference Include="..\..\src\EduStream.Server\EduStream.Server.csproj" />
   </ItemGroup>
 
 </Project>
