@@ -120,6 +120,8 @@
                                 <RowDefinition Height="Auto" />
                                 <RowDefinition Height="14" />
                                 <RowDefinition Height="Auto" />
+                                <RowDefinition Height="14" />
+                                <RowDefinition Height="Auto" />
                             </Grid.RowDefinitions>
 
                             <TextBlock Grid.Row="0" Grid.Column="0" FontWeight="SemiBold" Text="현재 상태" />
@@ -133,6 +135,9 @@
 
                             <TextBlock Grid.Row="6" Grid.Column="0" FontWeight="SemiBold" Text="최근 오류" />
                             <TextBlock Grid.Row="6" Grid.Column="1" Foreground="#FFB02A37" Text="{Binding LastErrorMessage}" TextWrapping="Wrap" />
+
+                            <TextBlock Grid.Row="8" Grid.Column="0" FontWeight="SemiBold" Text="최근 성공" />
+                            <TextBlock Grid.Row="8" Grid.Column="1" Foreground="#FF1D6F42" Text="{Binding LastSuccessMessage}" TextWrapping="Wrap" />
                         </Grid>
                     </StackPanel>
                 </Border>
@@ -159,6 +164,12 @@
                                 <RowDefinition Height="Auto" />
                                 <RowDefinition Height="14" />
                                 <RowDefinition Height="Auto" />
+                                <RowDefinition Height="14" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="14" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="14" />
+                                <RowDefinition Height="Auto" />
                             </Grid.RowDefinitions>
 
                             <TextBlock Grid.Row="0" Grid.Column="0" FontWeight="SemiBold" Text="화면 수신 상태" />
@@ -166,6 +177,15 @@
 
                             <TextBlock Grid.Row="2" Grid.Column="0" FontWeight="SemiBold" Text="다운로드 상태" />
                             <TextBlock Grid.Row="2" Grid.Column="1" Text="{Binding DownloadStatus}" TextWrapping="Wrap" />
+
+                            <TextBlock Grid.Row="4" Grid.Column="0" FontWeight="SemiBold" Text="화면 상세" />
+                            <TextBlock Grid.Row="4" Grid.Column="1" Text="{Binding ScreenDetail}" TextWrapping="Wrap" />
+
+                            <TextBlock Grid.Row="6" Grid.Column="0" FontWeight="SemiBold" Text="파일 상세" />
+                            <TextBlock Grid.Row="6" Grid.Column="1" Text="{Binding FileTransferDetail}" TextWrapping="Wrap" />
+
+                            <TextBlock Grid.Row="8" Grid.Column="0" FontWeight="SemiBold" Text="채팅 상태" />
+                            <TextBlock Grid.Row="8" Grid.Column="1" Text="{Binding ChatStatus}" TextWrapping="Wrap" />
                         </Grid>
 
                         <TextBlock Margin="0,18,0,0" FontWeight="SemiBold" Text="다운로드된 파일" />
