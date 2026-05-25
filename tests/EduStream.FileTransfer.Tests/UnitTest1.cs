@@ -246,6 +246,66 @@ public sealed class FileReceiverDay6Tests
         Assert.Equal(ErrorCodes.FileChunkMetadataMismatch, secondResult.ErrorCode);
     }
 
+    [Fact]
+    public async Task ChunkedFile_InvalidChunkIndex_ShouldFailBeforeSaving()
+    {
+        var receiver = new FileReceiver();
+        var targetDirectory = CreateIsolatedDirectory();
+        var content = Encoding.UTF8.GetBytes("invalid-chunk-index-day4");
+        var packet = CreatePacket(
+            content: content,
+            fileName: "invalid-index.txt",
+            transferId: Guid.NewGuid(),
+            chunkIndex: 2,
+            totalChunks: 2,
+            checksum: ChecksumUtility.ComputeSha256(content),
+            fileSize: content.Length);
+
+        var result = await receiver.TrySaveAsync(packet, targetDirectory);
+
+        Assert.False(result.Success);
+        Assert.False(result.Pending);
+        Assert.Equal(ErrorCodes.InvalidChunkIndex, result.ErrorCode);
+        Assert.Empty(Directory.GetFiles(targetDirectory));
+    }
+
+    [Fact]
+    public async Task ChunkedFile_ChecksumMismatch_ShouldFailWithoutSavingFile()
+    {
+        var receiver = new FileReceiver();
+        var targetDirectory = CreateIsolatedDirectory();
+        var fullContent = Encoding.UTF8.GetBytes("checksum-mismatch-day4");
+        var transferId = Guid.NewGuid();
+        var wrongChecksum = ChecksumUtility.ComputeSha256(Encoding.UTF8.GetBytes("different-content"));
+
+        var firstPacket = CreatePacket(
+            content: fullContent[..9],
+            fileName: "checksum.txt",
+            transferId: transferId,
+            chunkIndex: 0,
+            totalChunks: 2,
+            checksum: wrongChecksum,
+            fileSize: fullContent.Length);
+
+        var secondPacket = CreatePacket(
+            content: fullContent[9..],
+            fileName: "checksum.txt",
+            transferId: transferId,
+            chunkIndex: 1,
+            totalChunks: 2,
+            checksum: wrongChecksum,
+            fileSize: fullContent.Length);
+
+        var firstResult = await receiver.TrySaveAsync(firstPacket, targetDirectory);
+        var secondResult = await receiver.TrySaveAsync(secondPacket, targetDirectory);
+
+        Assert.True(firstResult.Pending);
+        Assert.False(secondResult.Success);
+        Assert.False(secondResult.Pending);
+        Assert.Equal(ErrorCodes.ChecksumMismatch, secondResult.ErrorCode);
+        Assert.False(File.Exists(Path.Combine(targetDirectory, "checksum.txt")));
+    }
+
     private static string CreateIsolatedDirectory()
     {
         var path = Path.Combine(Path.GetTempPath(), "EduStream-Day6-Tests", Guid.NewGuid().ToString("N"));
