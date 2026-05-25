@@ -8,6 +8,7 @@ public static class ErrorCodes
     public const string SessionNotOpen = "SESSION_NOT_OPEN";
     public const string DisplayNameRequired = "DISPLAY_NAME_REQUIRED";
     public const string JoinRejected = "JOIN_REJECTED";
+    public const string ClientAlreadyJoined = "CLIENT_ALREADY_JOINED";
     public const string ChecksumMismatch = "CHECKSUM_MISMATCH";
     public const string ChecksumRequired = "CHECKSUM_REQUIRED";
     public const string InvalidChunkSize = "INVALID_CHUNK_SIZE";
