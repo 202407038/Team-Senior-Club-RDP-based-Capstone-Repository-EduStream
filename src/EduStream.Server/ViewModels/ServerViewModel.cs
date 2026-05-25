@@ -5,6 +5,7 @@ using EduStream.Core.Common;
 using EduStream.Core.Factories;
 using EduStream.Core.Logging;
 using EduStream.Core.Models;
+using EduStream.Core.Protocols;
 using EduStream.Core.Serialization;
 using EduStream.Server.Services;
 
@@ -270,11 +271,25 @@ public sealed class ServerViewModel : ObservableObject
     private async Task SendSampleFileAsync()
     {
         var tempFile = Path.Combine(Path.GetTempPath(), "edustream-sample-note.txt");
-        await File.WriteAllTextAsync(tempFile, "EduStream sample lecture note");
-        var packet = await _fileDistributor.BuildFilePacketAsync(tempFile);
-        await _sessionManager.BroadcastPacketAsync(packet);
+        var sampleContent = string.Join(
+            Environment.NewLine,
+            Enumerable.Range(1, 2400).Select(index => $"Lecture sample line {index:D4}: chunked transfer verification payload."));
+        await File.WriteAllTextAsync(tempFile, sampleContent);
 
-        SharedFiles.Insert(0, $"{packet.FileName} ({packet.FileSize} byte)");
+        var packets = await _fileDistributor.BuildFilePacketsAsync(
+            tempFile,
+            senderId: "Server",
+            sessionId: _sessionManager.CurrentSession?.SessionId,
+            chunkSize: FileTransferRules.MinChunkSize);
+
+        foreach (var packet in packets)
+        {
+            await _sessionManager.BroadcastPacketAsync(packet);
+        }
+
+        var firstPacket = packets[0];
+        SharedFiles.Insert(0, $"{firstPacket.FileName} ({firstPacket.FileSize} byte, {packets.Count} chunks)");
+        _logSink.Write($"샘플 파일 청크 전송 완료: {firstPacket.FileName}, 청크 수={packets.Count}");
         SyncLogs();
     }
 

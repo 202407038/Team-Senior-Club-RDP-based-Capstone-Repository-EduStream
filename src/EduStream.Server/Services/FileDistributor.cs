@@ -1,4 +1,5 @@
 using System.IO;
+using EduStream.Core.Factories;
 using EduStream.Core.Logging;
 using EduStream.Core.Models;
 using EduStream.Core.Protocols;
@@ -55,6 +56,15 @@ public sealed class FileDistributor
 
     public async Task<IReadOnlyList<FilePacket>> BuildFilePacketsAsync(string filePath, int chunkSize = FileTransferRules.DefaultChunkSize)
     {
+        return await BuildFilePacketsAsync(filePath, "Server", null, chunkSize);
+    }
+
+    public async Task<IReadOnlyList<FilePacket>> BuildFilePacketsAsync(
+        string filePath,
+        string senderId,
+        Guid? sessionId,
+        int chunkSize = FileTransferRules.DefaultChunkSize)
+    {
         if (string.IsNullOrWhiteSpace(filePath))
         {
             throw new ArgumentException("파일 경로가 비어 있습니다.", nameof(filePath));
@@ -85,16 +95,16 @@ public sealed class FileDistributor
             var chunk = new byte[length];
             Array.Copy(content, offset, chunk, 0, length);
 
-            var packet = new FilePacket
-            {
-                FileName = Path.GetFileName(filePath),
-                FileSize = content.LongLength,
-                Checksum = checksum,
-                TransferId = transferId,
-                ChunkIndex = index,
-                TotalChunks = totalChunks,
-                Content = chunk
-            };
+            var packet = PacketFactory.CreateFileChunk(
+                senderId: senderId,
+                fileName: Path.GetFileName(filePath),
+                fileSize: content.LongLength,
+                checksum: checksum,
+                transferId: transferId,
+                chunkIndex: index,
+                totalChunks: totalChunks,
+                content: chunk,
+                sessionId: sessionId);
 
             FileTransferUtility.ValidatePacketMetadata(packet);
             packet.DataLength = _serializer.Serialize(packet).Length;
