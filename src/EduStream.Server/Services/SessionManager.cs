@@ -73,7 +73,7 @@ public sealed class SessionManager
         }
 
         _tcpServer.Start(port);
-        _logSink.Write($"세션을 개설했습니다. 이름={sessionName}, 포트={port}");
+        _logSink.Write($"[Session] 개설: 이름={sessionName}, 포트={port}");
         return Task.FromResult(CurrentSession);
     }
 
@@ -89,7 +89,7 @@ public sealed class SessionManager
         {
             if (CurrentSession is not null)
             {
-                _logSink.Write($"세션을 종료했습니다. 이름={CurrentSession.SessionName}");
+                _logSink.Write($"[Session] 종료: 이름={CurrentSession.SessionName}");
             }
             CurrentSession = null;
         }
@@ -103,7 +103,7 @@ public sealed class SessionManager
     /// </summary>
     public async Task BroadcastPacketAsync(BasePacket packet)
     {
-        _logSink.Write($"패킷 브로드캐스트: {packet.MessageType}, 길이={packet.DataLength}");
+        _logSink.Write($"[Packet] 브로드캐스트: 타입={packet.MessageType}, 길이={packet.DataLength}");
         await _tcpServer.BroadcastAsync(packet);
     }
 
@@ -125,7 +125,7 @@ public sealed class SessionManager
             var basePacket = JsonSerializer.Deserialize<JsonElement>(payload);
             if (!basePacket.TryGetProperty("MessageType", out var messageTypeElement))
             {
-                _logSink.Write($"MessageType 없는 패킷 수신: clientId={clientId}");
+                _logSink.Write($"[Packet] MessageType 누락: clientId={clientId}");
                 return;
             }
 
@@ -181,7 +181,7 @@ public sealed class SessionManager
                     {
                         ScreenTransferUtility.ValidatePacketMetadata(screenPacket);
                         await _tcpServer.BroadcastAsync(screenPacket);
-                        _logSink.Write($"화면 브로드캐스트: 프레임#{screenPacket.FrameIndex}");
+                        _logSink.Write($"[Screen] 브로드캐스트: 프레임#{screenPacket.FrameIndex}");
                     }
                     break;
 
@@ -191,7 +191,7 @@ public sealed class SessionManager
                     if (filePacket is not null)
                     {
                         await _tcpServer.BroadcastAsync(filePacket);
-                        _logSink.Write($"파일 브로드캐스트: {filePacket.FileName}");
+                        _logSink.Write($"[File] 브로드캐스트: {filePacket.FileName}");
                     }
                     break;
 
@@ -200,13 +200,13 @@ public sealed class SessionManager
                     break;
 
                 default:
-                    _logSink.Write($"처리되지 않은 패킷 타입: {messageType}, clientId={clientId}");
+                    _logSink.Write($"[Packet] 미처리 타입: {messageType}, clientId={clientId}");
                     break;
             }
         }
         catch (Exception ex)
         {
-            _logSink.Write($"패킷 처리 오류: clientId={clientId}, {ex.Message}");
+            _logSink.Write($"[Packet] 처리 오류: clientId={clientId}, {ex.GetType().Name}: {ex.Message}");
         }
     }
 
@@ -219,7 +219,7 @@ public sealed class SessionManager
         if (displayName is null)
             return;
 
-        _logSink.Write($"연결 끊김으로 세션 이탈: {displayName} (clientId={clientId})");
+        _logSink.Write($"[Session] 연결 끊김 이탈: {displayName} (clientId={clientId})");
         await BroadcastSystemMessageAsync($"{displayName}님의 연결이 끊어졌습니다.");
     }
 
@@ -232,14 +232,14 @@ public sealed class SessionManager
                 "세션에 참여하지 않은 상태에서는 채팅을 보낼 수 없습니다.",
                 true, chatPacket);
             await _tcpServer.SendToClientAsync(clientId, errorPacket);
-            _logSink.Write($"비참가자 채팅 시도 차단: clientId={clientId}");
+            _logSink.Write($"[Chat] 비참가자 차단: clientId={clientId}");
             return;
         }
 
         // 2) 빈 메시지 검증
         if (string.IsNullOrWhiteSpace(chatPacket.Message))
         {
-            _logSink.Write($"빈 메시지 무시: {verifiedName} (clientId={clientId})");
+            _logSink.Write($"[Chat] 빈 메시지 무시: {verifiedName} (clientId={clientId})");
             return;
         }
 
@@ -250,7 +250,7 @@ public sealed class SessionManager
                 $"메시지는 {MaxChatMessageLength}자 이하여야 합니다. (현재 {chatPacket.Message.Length}자)",
                 true, chatPacket);
             await _tcpServer.SendToClientAsync(clientId, errorPacket);
-            _logSink.Write($"메시지 길이 초과: {verifiedName}, {chatPacket.Message.Length}자");
+            _logSink.Write($"[Chat] 길이 초과: {verifiedName}, {chatPacket.Message.Length}자");
             return;
         }
 
@@ -262,7 +262,7 @@ public sealed class SessionManager
         await _tcpServer.BroadcastAsync(chatPacket);
 
         ChatReceived?.Invoke(verifiedName, chatPacket.Message);
-        _logSink.Write($"채팅 브로드캐스트: {verifiedName} → {targetCount}명에게 전달");
+        _logSink.Write($"[Chat] 브로드캐스트: {verifiedName} → {targetCount}명");
     }
 
     private BasePacket HandleJoin(string clientId, SessionJoinPacket packet)
@@ -283,7 +283,7 @@ public sealed class SessionManager
             return CreateError(ErrorCodes.AlreadyJoined, $"{packet.DisplayName}은(는) 이미 참여 중입니다.", true, packet);
         }
 
-        _logSink.Write($"세션 참여 처리: {packet.DisplayName}, 현재 인원={CurrentSession.ParticipantCount}");
+        _logSink.Write($"[Session] 참여: {packet.DisplayName}, 현재 인원={CurrentSession.ParticipantCount}");
 
         return PacketFactory.CreateAck(
             senderId: "Server",
@@ -301,7 +301,7 @@ public sealed class SessionManager
         }
 
         var displayName = RemoveParticipant(clientId);
-        _logSink.Write($"세션 이탈 처리: {displayName ?? "(unknown)"}, 현재 인원={CurrentSession.ParticipantCount}");
+        _logSink.Write($"[Session] 이탈: {displayName ?? "(unknown)"}, 현재 인원={CurrentSession.ParticipantCount}");
 
         return PacketFactory.CreateAck(
             senderId: "Server",
@@ -366,7 +366,7 @@ public sealed class SessionManager
 
         await _tcpServer.BroadcastAsync(systemChat);
         ChatReceived?.Invoke("System", message);
-        _logSink.Write($"시스템 메시지 브로드캐스트: {message}");
+        _logSink.Write($"[Chat] 시스템 브로드캐스트: {message}");
     }
 
     private static ErrorPacket CreateError(string errorCode, string message, bool isRecoverable, BasePacket requestPacket)
