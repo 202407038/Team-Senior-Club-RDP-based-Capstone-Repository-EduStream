@@ -75,6 +75,51 @@ public sealed class FileReceiverDay6Tests
     }
 
     [Fact]
+    public async Task MediumFile_ChunkProgress_ShouldStayPendingUntilFinalChunk()
+    {
+        var sourceDirectory = CreateIsolatedDirectory();
+        var targetDirectory = CreateIsolatedDirectory();
+        var sourcePath = Path.Combine(sourceDirectory, "medium-progress.bin");
+        var sourceBytes = Enumerable.Range(0, 192 * 1024).Select(i => (byte)(i % 239)).ToArray();
+        await File.WriteAllBytesAsync(sourcePath, sourceBytes);
+
+        var distributor = new FileDistributor(new PacketSerializer(), new InMemoryLogSink());
+        var receiver = new FileReceiver();
+        var packets = await distributor.BuildFilePacketsAsync(sourcePath, FileTransferRules.MinChunkSize);
+
+        Assert.True(packets.Count > 1);
+
+        var pendingCount = 0;
+        FileReceiveResult? finalResult = null;
+
+        for (var index = 0; index < packets.Count; index++)
+        {
+            var result = await receiver.TrySaveAsync(packets[index], targetDirectory);
+
+            if (index < packets.Count - 1)
+            {
+                Assert.False(result.Success);
+                Assert.True(result.Pending);
+                Assert.Equal(ErrorCodes.FileChunkPending, result.ErrorCode);
+                pendingCount++;
+                continue;
+            }
+
+            finalResult = result;
+        }
+
+        Assert.Equal(packets.Count - 1, pendingCount);
+        Assert.NotNull(finalResult);
+        Assert.True(finalResult!.Success);
+        Assert.False(finalResult.Pending);
+        Assert.NotNull(finalResult.FilePath);
+        Assert.True(File.Exists(finalResult.FilePath));
+
+        var savedBytes = await File.ReadAllBytesAsync(finalResult.FilePath!);
+        Assert.Equal(ChecksumUtility.ComputeSha256(sourceBytes), ChecksumUtility.ComputeSha256(savedBytes));
+    }
+
+    [Fact]
     public async Task ChunkedFile_InvalidChunkIndex_ShouldFailWithErrorCode()
     {
         var receiver = new FileReceiver();
