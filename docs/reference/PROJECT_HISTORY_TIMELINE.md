@@ -2,13 +2,13 @@
 
 ## 1. 문서 목적
 
-이 문서는 EduStream 프로젝트가 시작된 2026-03-16부터 2026-04-22 현재까지의 작업 내역을 날짜 기준으로 정리한 전체 기록 문서입니다.
+이 문서는 EduStream 프로젝트가 시작된 2026-03-16부터 새 저장소 이식 시점까지의 작업 내역을 날짜 기준으로 정리한 기록 문서입니다.
 
 정리 기준은 아래와 같습니다.
 
-- 기준 소스: `main` 브랜치 커밋 히스토리
+- 기준 소스: 기존 저장소의 `main` 브랜치와 새 저장소 이식 시 반영한 오픈 PR
 - 포함 범위: 코드, 문서, 테스트, 협업 규칙, 구조 변경
-- 추가 범위: 2026-04-22 기준 원격에 올라간 오픈 PR 3건 포함
+- 추가 범위: 새 저장소 이식 전 열려 있던 PR 통합 내용 포함
 - 분류 방식: 날짜 순 정렬 + 파트 라벨 부여
 
 사용 파트 라벨:
@@ -272,18 +272,18 @@
 
 ---
 
-## 5. 2026-04-22 현재 상태 요약
+## 5. 새 저장소 이식 후 상태 요약
 
-- `main`에는 프로젝트 기반, 공통 프로토콜, TCP 통신, 채팅, 파일 수신/검증, 화면 프리뷰/공유, RDP 프리뷰, 클라이언트 상태 UI, 테스트 기반까지 반영돼 있습니다.
-- 스프린트 문서 기준으로 추가 보강 중인 항목은 세션 예외 흐름 안정화, 서버 데모 파일 청크 송신, 클라이언트 상태 패널 고도화입니다.
-- 해당 보강 작업은 2026-04-22 기준 오픈 PR `#54`, `#55`, `#56`으로 원격에 올라가 있습니다.
+- 새 저장소 `main`에는 기존 저장소의 오픈 PR 9개와 파일 전송 Day 6 추가 테스트가 통합돼 있습니다.
+- 프로젝트 기반, 공통 프로토콜, TCP 통신, 채팅, 파일 수신/검증, 화면 프리뷰/공유, RDP 프리뷰, 클라이언트 상태 UI, 테스트 기반까지 반영돼 있습니다.
+- 이후 구현 상태와 일정은 [현재 상태와 로드맵](../work/STATUS_AND_ROADMAP.md)을 기준으로 관리합니다.
 
 ---
 
 ## 6. 참고
 
-- 메인 개요: [README.md](../README.md)
-- 문서 허브: [docs/README.md](./README.md)
-- 팀 규칙: [TEAM_DEVELOPMENT_GUIDE.md](./TEAM_DEVELOPMENT_GUIDE.md)
-- 구현 기준: [IMPLEMENTATION_PLAYBOOK.md](./IMPLEMENTATION_PLAYBOOK.md)
-- 스프린트 기준: [SPRINT_7DAY_IMPLEMENTATION_GUIDE.md](./SPRINT_7DAY_IMPLEMENTATION_GUIDE.md)
+- 메인 개요: [README.md](../../README.md)
+- 문서 안내: [docs/README.md](../README.md)
+- 작업 방식: [DEVELOPMENT_GUIDE.md](../work/DEVELOPMENT_GUIDE.md)
+- 구현 기록: [IMPLEMENTATION_PLAYBOOK.md](../archive/IMPLEMENTATION_PLAYBOOK.md)
+- 스프린트 기록: [SPRINT_7DAY_IMPLEMENTATION_GUIDE.md](../archive/SPRINT_7DAY_IMPLEMENTATION_GUIDE.md)

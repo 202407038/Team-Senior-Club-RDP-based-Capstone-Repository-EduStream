@@ -1,10 +1,10 @@
-# 팀 개발 가이드
+# 개발 작업 방식
 
 ## 1. 목적
 
-이 문서는 EduStream 팀이 같은 기준으로 브랜치를 만들고, 커밋하고, PR을 작성하고, 리뷰하고, 머지하기 위한 공통 규칙을 정리한 문서입니다.
+이 문서는 EduStream 팀이 같은 기준으로 브랜치를 만들고, 커밋하고, PR을 작성하고, 리뷰하기 위한 공통 규칙을 정리한 문서입니다.
 
-이번 버전에서는 작업 시작 전 동기화 절차와 브랜치/PR 분리 기준을 더 강하게 명시했습니다. 스프린트 작업량이 커졌기 때문에, 개발 흐름을 느슨하게 두면 충돌과 중복 구현이 바로 늘어납니다.
+규칙의 목적은 절차를 복잡하게 만드는 것이 아니라, 같은 파일을 여러 명이 동시에 건드리면서 생기는 충돌과 중복 구현을 줄이는 것입니다.
 
 ## 2. 작업 시작 전 필수 절차
 
@@ -29,7 +29,7 @@ git checkout -b feature/<작업명>
 git pull --ff-only origin <현재브랜치>
 ```
 
-이 절차는 예외 없이 적용합니다.
+작업 전에 현재 브랜치와 원격 상태를 확인하는 것이 기본입니다.
 
 ## 3. 브랜치 전략
 
@@ -60,7 +60,7 @@ git pull --ff-only origin <현재브랜치>
 
 - 역할이 다르면 브랜치도 다르게 쪼갭니다.
 - 코어 변경과 UI 변경은 같은 브랜치에 넣지 않습니다.
-- 문서 수정은 코드 변경 브랜치에 섞지 않습니다.
+- 큰 문서 정리는 코드 변경 브랜치에 섞지 않습니다.
 - 하나의 브랜치는 하나의 명확한 목적만 가집니다.
 
 ## 4. 커밋 메시지 규칙
@@ -115,6 +115,48 @@ refactor: apply packet factory to session flows
 - 기대 효과 또는 해결한 문제
 - 검증 방법
 - 포함 파일 또는 영향 범위
+
+권장 형식:
+
+```markdown
+**작업 목적**
+
+---
+
+- ...
+
+**주요 변경 사항**
+
+---
+
+1. **...**
+- ...
+
+**검증 방법**
+
+---
+
+- `dotnet build EduStream.sln`
+  - 결과: **성공**
+
+**포함 파일**
+
+---
+
+- `src/...`
+
+**기대 효과**
+
+---
+
+- ...
+
+**커밋 목록**
+
+---
+
+- `type: summary`
+```
 
 ### PR 분리 원칙
 
@@ -184,16 +226,16 @@ refactor: apply packet factory to session flows
 - 서비스는 UI를 직접 몰라야 합니다.
 - 기능이 커지면 팩토리/유틸/검증 계층으로 내려줍니다.
 
-## 8. 하루 작업 절차
+## 8. 작업 절차
 
 1. 원격 동기화
 2. 작업 브랜치 확인 또는 새 브랜치 생성
-3. 오늘 작업 범위 확인
+3. 이번 주 목표와 담당 범위 확인
 4. 구현
 5. 로컬 빌드
 6. 커밋
 7. 푸시
-8. PR 생성
+8. PR 생성 또는 작업 내용 공유
 
 ## 9. 충돌 방지 규칙
 
@@ -215,6 +257,6 @@ refactor: apply packet factory to session flows
 ## 11. 관련 문서
 
 - `README.md`
-- `docs/ARCHITECTURE_GUIDE.md`
-- `docs/IMPLEMENTATION_PLAYBOOK.md`
-- `docs/SPRINT_7DAY_IMPLEMENTATION_GUIDE.md`
+- `docs/work/STATUS_AND_ROADMAP.md`
+- `docs/reference/ARCHITECTURE_GUIDE.md`
+- `docs/reference/PROJECT_HISTORY_TIMELINE.md`
