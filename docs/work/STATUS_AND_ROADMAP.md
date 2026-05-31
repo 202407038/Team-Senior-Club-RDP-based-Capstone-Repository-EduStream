@@ -29,8 +29,8 @@
 - ~~세션 open / close 흐름 구현~~ 완료
 - ~~join / leave 기본 흐름 구현~~ 완료
 - ~~disconnect 처리 흐름 구현~~ 완료
-- 다중 클라이언트 기준 안정성 검증
-- heartbeat timeout 정책 정리
+- ~~다중 클라이언트 기준 안정성 검증~~ 완료
+- ~~heartbeat timeout 정책 정리~~ 완료
 
 ### 3. 화면 송신
 

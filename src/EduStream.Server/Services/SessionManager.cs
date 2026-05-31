@@ -20,6 +20,7 @@ public sealed class SessionManager
     private readonly TcpServerService _tcpServer;
     private readonly ConcurrentDictionary<string, string> _participants = new(); // displayName → clientId
     private readonly ConcurrentDictionary<string, string> _clientDisplayNames = new(); // clientId → displayName
+    private readonly ConcurrentDictionary<string, DateTimeOffset> _clientLastSeen = new(); // clientId → 마지막 수신 시각
     private readonly object _sessionLock = new();
 
     /// <summary>
@@ -52,6 +53,24 @@ public sealed class SessionManager
     public IReadOnlyCollection<string> ParticipantNames => _participants.Keys.ToList().AsReadOnly();
 
     public int ParticipantCount => _participants.Count;
+
+    /// <summary>
+    /// 마지막 수신 시각이 지정한 임계를 넘어선 클라이언트 ID 목록을 반환합니다.
+    /// HeartbeatService가 비활성 클라이언트를 끊을 때 사용합니다.
+    /// </summary>
+    public IReadOnlyCollection<string> GetStaleClientIds(TimeSpan timeout)
+    {
+        var threshold = DateTimeOffset.UtcNow - timeout;
+        var stale = new List<string>();
+        foreach (var (clientId, lastSeen) in _clientLastSeen)
+        {
+            if (lastSeen < threshold)
+            {
+                stale.Add(clientId);
+            }
+        }
+        return stale;
+    }
 
     public Task<SessionInfo> OpenSessionAsync(string sessionName, int port)
     {
@@ -120,6 +139,10 @@ public sealed class SessionManager
     /// </summary>
     private async Task OnPacketReceivedAsync(string clientId, byte[] payload)
     {
+        // 어떤 종류의 패킷이든 수신한 시점을 기록해 두면 HeartbeatService가
+        // 응답 없는 클라이언트만 골라서 끊을 수 있습니다.
+        _clientLastSeen[clientId] = DateTimeOffset.UtcNow;
+
         try
         {
             // BasePacket으로 먼저 역직렬화하여 MessageType 확인
@@ -216,6 +239,8 @@ public sealed class SessionManager
     /// </summary>
     private async Task OnClientDisconnectedAsync(string clientId)
     {
+        _clientLastSeen.TryRemove(clientId, out _);
+
         var displayName = RemoveParticipant(clientId);
         if (displayName is null)
             return;
@@ -378,6 +403,7 @@ public sealed class SessionManager
     {
         _participants.Clear();
         _clientDisplayNames.Clear();
+        _clientLastSeen.Clear();
         UpdateParticipantCount();
         ParticipantsChanged?.Invoke();
     }
