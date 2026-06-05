@@ -13,12 +13,11 @@ namespace EduStream.Server.Services;
 /// </summary>
 public sealed class FileDistributor
 {
-    private readonly PacketSerializer _serializer;
     private readonly ILogSink _logSink;
 
     public FileDistributor(PacketSerializer serializer, ILogSink logSink)
     {
-        _serializer = serializer;
+        ArgumentNullException.ThrowIfNull(serializer);
         _logSink = logSink;
     }
 
@@ -41,15 +40,17 @@ public sealed class FileDistributor
         }
 
         var content = await File.ReadAllBytesAsync(filePath);
-        var packet = new FilePacket
-        {
-            FileName = Path.GetFileName(filePath),
-            FileSize = content.LongLength,
-            Content = content,
-            Checksum = ChecksumUtility.ComputeSha256(content)
-        };
+        var packet = PacketFactory.CreateFileChunk(
+            senderId: "Server",
+            fileName: Path.GetFileName(filePath),
+            fileSize: content.LongLength,
+            checksum: ChecksumUtility.ComputeSha256(content),
+            transferId: Guid.NewGuid(),
+            chunkIndex: 0,
+            totalChunks: 1,
+            content: content);
 
-        packet.DataLength = _serializer.Serialize(packet).Length;
+        FileTransferUtility.ValidatePacketMetadata(packet);
         _logSink.Write($"파일 패킷 생성: {packet.FileName}, 크기={packet.FileSize} byte");
         return packet;
     }
@@ -107,7 +108,6 @@ public sealed class FileDistributor
                 sessionId: sessionId);
 
             FileTransferUtility.ValidatePacketMetadata(packet);
-            packet.DataLength = _serializer.Serialize(packet).Length;
             packets.Add(packet);
         }
 

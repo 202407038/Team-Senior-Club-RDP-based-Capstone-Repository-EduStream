@@ -15,6 +15,10 @@ public abstract class BasePacket
 
     public string SenderId { get; set; } = string.Empty;
 
+    /// <summary>
+    /// 패킷 본문(payload)의 바이트 길이입니다. 직렬화된 패킷 전체 길이가 아니라
+    /// 파일/화면 본문 또는 텍스트 메시지의 UTF-8 바이트 길이를 기록합니다.
+    /// </summary>
     public int DataLength { get; set; }
 
     public Guid CorrelationId { get; init; } = Guid.NewGuid();
