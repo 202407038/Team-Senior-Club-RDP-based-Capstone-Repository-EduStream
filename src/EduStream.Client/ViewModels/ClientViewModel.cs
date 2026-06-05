@@ -447,10 +447,10 @@ public sealed class ClientViewModel : ObservableObject
             {
                 RunOnUiThread(() =>
                 {
-                    DownloadStatus = "파일 청크 수신 중";
-                    FileTransferDetail = $"{packet.FileName} / 청크 {packet.ChunkIndex + 1} of {packet.TotalChunks}";
+                    DownloadStatus = result.StatusMessage;
+                    FileTransferDetail = BuildFileTransferDetail(packet, result);
                     LastServerMessage = "파일을 수신 중입니다.";
-                    _logSink.Write($"파일 청크 수신 중: transfer={packet.TransferId}, chunk={packet.ChunkIndex + 1}/{packet.TotalChunks}");
+                    _logSink.Write($"파일 청크 수신 중: transfer={packet.TransferId}, progress={result.ReceivedChunkCount}/{result.TotalChunks}");
                     SyncLogs();
                 });
 
@@ -469,10 +469,10 @@ public sealed class ClientViewModel : ObservableObject
             RunOnUiThread(() =>
             {
                 DownloadedFiles.Insert(0, Path.GetFileName(path));
-                DownloadStatus = $"{Path.GetFileName(path)} 저장 완료";
+                DownloadStatus = result.StatusMessage;
                 LastServerMessage = "파일 수신이 완료되었습니다.";
-                LastSuccessMessage = $"{Path.GetFileName(path)} 저장 성공";
-                FileTransferDetail = $"{packet.FileName} / 총 {packet.TotalChunks}개 청크 / 저장 위치 {path}";
+                LastSuccessMessage = result.StatusMessage;
+                FileTransferDetail = $"{BuildFileTransferDetail(packet, result)} / 저장 위치 {path}";
                 _logSink.Write($"파일 저장 완료: {path}");
                 SyncLogs();
             });
@@ -488,6 +488,16 @@ public sealed class ClientViewModel : ObservableObject
                 SyncLogs();
             });
         }
+    }
+
+    private static string BuildFileTransferDetail(FilePacket packet, FileReceiveResult result)
+    {
+        if (result.TotalChunks > 0)
+        {
+            return $"{packet.FileName} / {result.ReceivedChunkCount} of {result.TotalChunks} chunks / {result.ProgressPercent}%";
+        }
+
+        return $"{packet.FileName} / 청크 {packet.ChunkIndex + 1} of {packet.TotalChunks}";
     }
 
     private Task OnDisconnectedAsync(string reason)

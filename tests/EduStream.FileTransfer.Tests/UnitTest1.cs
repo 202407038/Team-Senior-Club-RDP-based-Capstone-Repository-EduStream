@@ -35,6 +35,9 @@ public sealed class FileReceiverDay6Tests
         Assert.NotNull(last);
         Assert.True(last!.Success);
         Assert.False(last.Pending);
+        Assert.Equal(100, last.ProgressPercent);
+        Assert.Equal(packets.Count, last.ReceivedChunkCount);
+        Assert.Equal(packets.Count, last.TotalChunks);
         Assert.NotNull(last.FilePath);
         Assert.True(File.Exists(last.FilePath));
         Assert.Equal(sourceText, await File.ReadAllTextAsync(last.FilePath!));
@@ -101,6 +104,10 @@ public sealed class FileReceiverDay6Tests
                 Assert.False(result.Success);
                 Assert.True(result.Pending);
                 Assert.Equal(ErrorCodes.FileChunkPending, result.ErrorCode);
+                Assert.Equal(index + 1, result.ReceivedChunkCount);
+                Assert.Equal(packets.Count, result.TotalChunks);
+                Assert.True(result.ProgressPercent > 0);
+                Assert.True(result.ProgressPercent < 100);
                 pendingCount++;
                 continue;
             }
@@ -112,6 +119,9 @@ public sealed class FileReceiverDay6Tests
         Assert.NotNull(finalResult);
         Assert.True(finalResult!.Success);
         Assert.False(finalResult.Pending);
+        Assert.Equal(100, finalResult.ProgressPercent);
+        Assert.Equal(packets.Count, finalResult.ReceivedChunkCount);
+        Assert.Equal(packets.Count, finalResult.TotalChunks);
         Assert.NotNull(finalResult.FilePath);
         Assert.True(File.Exists(finalResult.FilePath));
 
@@ -200,6 +210,9 @@ public sealed class FileReceiverDay6Tests
 
             Assert.True(result.Success);
             Assert.False(result.Pending);
+            Assert.Equal(100, result.ProgressPercent);
+            Assert.Equal(1, result.ReceivedChunkCount);
+            Assert.Equal(1, result.TotalChunks);
             Assert.NotNull(result.FilePath);
             Assert.True(File.Exists(result.FilePath));
             Assert.Equal(text, await File.ReadAllTextAsync(result.FilePath!));
@@ -348,6 +361,7 @@ public sealed class FileReceiverDay6Tests
         Assert.False(secondResult.Success);
         Assert.False(secondResult.Pending);
         Assert.Equal(ErrorCodes.ChecksumMismatch, secondResult.ErrorCode);
+        Assert.Equal("청크 조립 후 체크섬 검증에 실패했습니다.", secondResult.StatusMessage);
         Assert.False(File.Exists(Path.Combine(targetDirectory, "checksum.txt")));
     }
 
