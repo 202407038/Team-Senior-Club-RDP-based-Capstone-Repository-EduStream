@@ -90,6 +90,13 @@ public sealed class ScreenShareService
     public async Task<ScreenPacket> CaptureAndBroadcastPreviewAsync()
     {
         var frame = _capturer.CapturePreviewFrame();
+
+        if (IsPlaceholderFrame(frame))
+        {
+            _logSink.Write($"화면 캡처 fallback: #{frame.FrameIndex}, 플레이스홀더 프레임 사용");
+            UpdateStatus($"화면 캡처 fallback: 프레임#{frame.FrameIndex} 플레이스홀더 사용");
+        }
+
         await BroadcastFrameAsync(frame);
         return frame;
     }
@@ -100,6 +107,7 @@ public sealed class ScreenShareService
         {
             if (_streamTask is not null && !_streamTask.IsCompleted)
             {
+                _logSink.Write("화면 자동 송신이 이미 실행 중입니다.");
                 return Task.CompletedTask;
             }
 
@@ -108,6 +116,7 @@ public sealed class ScreenShareService
             _latestStatus = $"화면 자동 송신 시작 ({Settings.TargetFrameIntervalMilliseconds}ms 간격)";
         }
 
+        _logSink.Write(_latestStatus);
         StatusChanged?.Invoke();
         return Task.CompletedTask;
     }
@@ -125,10 +134,12 @@ public sealed class ScreenShareService
 
         if (cts is null || streamTask is null)
         {
+            _logSink.Write("화면 자동 송신 중지 요청: 실행 중인 송신이 없습니다.");
             UpdateStatus("화면 자동 송신이 실행 중이 아닙니다.");
             return;
         }
 
+        _logSink.Write("화면 자동 송신 중지 요청");
         cts.Cancel();
 
         try
@@ -139,6 +150,7 @@ public sealed class ScreenShareService
         {
         }
 
+        _logSink.Write("화면 자동 송신 중지 완료");
         UpdateStatus("화면 자동 송신 중지");
     }
 
@@ -153,7 +165,17 @@ public sealed class ScreenShareService
         {
             while (!cancellationToken.IsCancellationRequested)
             {
-                await CaptureAndBroadcastPreviewAsync();
+                try
+                {
+                    await CaptureAndBroadcastPreviewAsync();
+                }
+                catch (Exception ex)
+                {
+                    // 프레임 단위 실패는 루프를 중단하지 않고 다음 주기로 넘깁니다.
+                    _logSink.Write($"화면 프레임 송신 실패(루프 유지): {ex.GetType().Name}: {ex.Message}");
+                    UpdateStatus($"화면 프레임 송신 실패(루프 유지): {ex.Message}");
+                }
+
                 await Task.Delay(Settings.TargetFrameIntervalMilliseconds, cancellationToken);
             }
         }
@@ -182,17 +204,30 @@ public sealed class ScreenShareService
     {
         frame.DataLength = frame.Content.Length;
 
-        await _sessionManager.BroadcastPacketAsync(frame);
-        _logSink.Write($"화면 프레임 전송: #{frame.FrameIndex}, {frame.Width}x{frame.Height}, {frame.Encoding}");
-
-        lock (_streamLock)
+        try
         {
-            _broadcastFrameCount++;
-            _lastBroadcastedAt = frame.CapturedAt;
-            _latestStatus = BuildLatestStatus(frame);
-        }
+            await _sessionManager.BroadcastPacketAsync(frame);
+            _logSink.Write($"화면 프레임 전송: #{frame.FrameIndex}, {frame.Width}x{frame.Height}, {frame.Encoding}");
 
-        StatusChanged?.Invoke();
+            lock (_streamLock)
+            {
+                _broadcastFrameCount++;
+                _lastBroadcastedAt = frame.CapturedAt;
+                _latestStatus = BuildLatestStatus(frame);
+            }
+
+            StatusChanged?.Invoke();
+        }
+        catch (Exception ex)
+        {
+            _logSink.Write($"화면 프레임 전송 실패: #{frame.FrameIndex}, {ex.GetType().Name}: {ex.Message}");
+            UpdateStatus($"화면 프레임 전송 실패: #{frame.FrameIndex}, {ex.Message}");
+        }
+    }
+
+    private static bool IsPlaceholderFrame(ScreenPacket frame)
+    {
+        return frame.FrameDescription.Contains("placeholder", StringComparison.OrdinalIgnoreCase);
     }
 
     private void UpdateStatus(string status)
