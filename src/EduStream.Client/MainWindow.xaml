@@ -3,87 +3,269 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:local="clr-namespace:EduStream.Client"
         mc:Ignorable="d"
         Title="EduStream Client"
-        Height="720"
-        Width="1180"
-        MinHeight="640"
-        MinWidth="960">
-    <Grid Margin="20">
-        <Border Padding="20" CornerRadius="12" Background="#FFF0F5FB" BorderBrush="#FFC8DBEF" BorderThickness="1">
+        Height="820"
+        Width="1360"
+        MinHeight="720"
+        MinWidth="1100"
+        Background="#121212"
+        WindowStartupLocation="CenterScreen">
+
+    <Window.Resources>
+        <Style x:Key="PanelCard" TargetType="Border">
+            <Setter Property="Background" Value="#1A1A1A" />
+            <Setter Property="BorderBrush" Value="#2E2E2E" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="10" />
+            <Setter Property="Padding" Value="14" />
+        </Style>
+
+        <Style x:Key="FieldLabel" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="#B0B0B0" />
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="Margin" Value="0,0,0,6" />
+        </Style>
+
+        <Style x:Key="DarkTextBox" TargetType="TextBox">
+            <Setter Property="Padding" Value="10,8" />
+            <Setter Property="Background" Value="#2D2D2D" />
+            <Setter Property="Foreground" Value="White" />
+            <Setter Property="BorderThickness" Value="0" />
+        </Style>
+
+        <Style x:Key="PrimaryButton" TargetType="Button">
+            <Setter Property="Height" Value="38" />
+            <Setter Property="Background" Value="#BB86FC" />
+            <Setter Property="Foreground" Value="#121212" />
+            <Setter Property="FontWeight" Value="Bold" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Cursor" Value="Hand" />
+        </Style>
+
+        <Style x:Key="SecondaryButton" TargetType="Button">
+            <Setter Property="Height" Value="38" />
+            <Setter Property="Background" Value="#333333" />
+            <Setter Property="Foreground" Value="#CF6679" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Cursor" Value="Hand" />
+        </Style>
+
+        <Style x:Key="GhostButton" TargetType="Button">
+            <Setter Property="Padding" Value="12,6" />
+            <Setter Property="Background" Value="#252525" />
+            <Setter Property="Foreground" Value="#03DAC6" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Cursor" Value="Hand" />
+        </Style>
+    </Window.Resources>
+
+    <Grid Margin="16">
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="*" />
+            <ColumnDefinition Width="16" />
+            <ColumnDefinition Width="400" />
+        </Grid.ColumnDefinitions>
+
+        <!-- Remote display -->
+        <Border Grid.Column="0"
+                Background="#000000"
+                CornerRadius="12"
+                BorderBrush="#333333"
+                BorderThickness="1">
             <Grid>
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="2*" />
-                    <ColumnDefinition Width="16" />
-                    <ColumnDefinition Width="*" />
-                </Grid.ColumnDefinitions>
+                <Viewbox Stretch="Uniform">
+                    <Image Source="{Binding DisplaySource}" />
+                </Viewbox>
 
-                <StackPanel>
-                    <TextBlock FontSize="28" FontWeight="Bold" Text="학생용 수신 대시보드" />
-                    <TextBlock Margin="0,8,0,0"
-                               Foreground="#FF4C5F73"
-                               Text="세션 참여, 채팅, 파일 수신, 화면 렌더링을 단계적으로 구현하기 위한 기본 뷰입니다."
-                               TextWrapping="Wrap" />
+                <Border Background="#CC0A0A0A">
+                    <Border.Style>
+                        <Style TargetType="Border">
+                            <Setter Property="Visibility" Value="Visible" />
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding HasRemoteFrame}" Value="True">
+                                    <Setter Property="Visibility" Value="Collapsed" />
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </Border.Style>
+                    <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" MaxWidth="420">
+                        <TextBlock Text="{Binding PlaceholderTitle}"
+                                   Foreground="#666666"
+                                   FontSize="26"
+                                   FontWeight="Bold"
+                                   HorizontalAlignment="Center"
+                                   TextAlignment="Center" />
+                        <TextBlock Margin="0,12,0,0"
+                                   Text="{Binding PlaceholderSubtitle}"
+                                   Foreground="#444444"
+                                   FontSize="14"
+                                   TextWrapping="Wrap"
+                                   TextAlignment="Center" />
+                    </StackPanel>
+                </Border>
 
-                    <UniformGrid Margin="0,20,0,0" Columns="2">
-                        <StackPanel Margin="0,0,12,0">
-                            <TextBlock FontWeight="SemiBold" Text="서버 IP" />
-                            <TextBox Margin="0,6,0,0" Padding="10,8" Text="{Binding HostAddress, UpdateSourceTrigger=PropertyChanged}" />
-                        </StackPanel>
-                        <StackPanel Margin="12,0,0,0">
-                            <TextBlock FontWeight="SemiBold" Text="포트" />
-                            <TextBox Margin="0,6,0,0" Padding="10,8" Text="{Binding Port, UpdateSourceTrigger=PropertyChanged}" />
-                        </StackPanel>
-                    </UniformGrid>
-
-                    <WrapPanel Margin="0,20,0,0">
-                        <Button Margin="0,0,10,10" Padding="18,10" Command="{Binding JoinSessionCommand}" Content="세션 참여" />
-                        <Button Margin="0,0,10,10" Padding="18,10" Command="{Binding DisconnectCommand}" Content="연결 종료" />
-                        <Button Margin="0,0,10,10" Padding="18,10" Command="{Binding SimulateScreenRenderCommand}" Content="화면 수신 테스트" />
-                        <Button Margin="0,0,10,10" Padding="18,10" Command="{Binding SimulateFileReceiveCommand}" Content="파일 수신 테스트" />
-                    </WrapPanel>
-
-                    <Border Margin="0,14,0,0" Padding="16" Background="White" BorderBrush="#FFC8DBEF" BorderThickness="1" CornerRadius="10">
-                        <StackPanel>
-                            <TextBlock FontWeight="SemiBold" Text="연결 상태" />
-                            <TextBlock Margin="0,8,0,0" Text="{Binding ConnectionState}" />
-                            <TextBlock Margin="0,12,0,0" FontWeight="SemiBold" Text="화면 렌더링 상태" />
-                            <TextBlock Margin="0,8,0,0" Text="{Binding RenderStatus}" />
-                            <TextBlock Margin="0,12,0,0" FontWeight="SemiBold" Text="다운로드 상태" />
-                            <TextBlock Margin="0,8,0,0" Text="{Binding DownloadStatus}" />
-                        </StackPanel>
-                    </Border>
-
-                    <TextBlock Margin="0,20,0,0" FontWeight="SemiBold" Text="실시간 채팅" />
-                    <DockPanel Margin="0,8,0,0">
-                        <Button DockPanel.Dock="Right" Width="110" Margin="12,0,0,0" Command="{Binding SendChatCommand}" Content="질문 전송" />
-                        <TextBox Padding="10,8" Text="{Binding ChatInput, UpdateSourceTrigger=PropertyChanged}" />
-                    </DockPanel>
-                    <ListBox Margin="0,10,0,0" Height="160" ItemsSource="{Binding ChatMessages}" />
-                </StackPanel>
-
-                <Grid Grid.Column="2">
-                    <Grid.RowDefinitions>
-                        <RowDefinition Height="*" />
-                        <RowDefinition Height="12" />
-                        <RowDefinition Height="*" />
-                    </Grid.RowDefinitions>
-
-                    <Border Padding="16" Background="White" BorderBrush="#FFC8DBEF" BorderThickness="1" CornerRadius="10">
-                        <StackPanel>
-                            <TextBlock FontWeight="SemiBold" Text="다운로드 파일 목록" />
-                            <ListBox Margin="0,10,0,0" ItemsSource="{Binding DownloadedFiles}" />
-                        </StackPanel>
-                    </Border>
-
-                    <Border Grid.Row="2" Padding="16" Background="White" BorderBrush="#FFC8DBEF" BorderThickness="1" CornerRadius="10">
-                        <StackPanel>
-                            <TextBlock FontWeight="SemiBold" Text="활동 로그" />
-                            <ListBox Margin="0,10,0,0" ItemsSource="{Binding ActivityLogs}" />
-                        </StackPanel>
-                    </Border>
-                </Grid>
+                <Border VerticalAlignment="Top"
+                        HorizontalAlignment="Left"
+                        Margin="16"
+                        Padding="10,6"
+                        Background="#CC000000"
+                        CornerRadius="8">
+                    <TextBlock Foreground="#03DAC6" FontWeight="SemiBold" Text="{Binding RenderStatus}" />
+                </Border>
             </Grid>
         </Border>
+
+        <!-- Sidebar -->
+        <ScrollViewer Grid.Column="2" VerticalScrollBarVisibility="Auto">
+            <StackPanel>
+                <StackPanel Margin="0,0,0,16">
+                    <TextBlock Text="EDUSTREAM" Foreground="#BB86FC" FontSize="24" FontWeight="ExtraBold" />
+                    <TextBlock Margin="0,4,0,0" Foreground="#888888" Text="수강생 클라이언트" />
+                </StackPanel>
+
+                <!-- Connection -->
+                <Border Style="{StaticResource PanelCard}" Margin="0,0,0,12">
+                    <StackPanel>
+                        <TextBlock Foreground="White" FontWeight="SemiBold" Text="세션 연결" />
+
+                        <TextBlock Style="{StaticResource FieldLabel}" Margin="0,14,0,6" Text="표시 이름" />
+                        <TextBox Style="{StaticResource DarkTextBox}"
+                                 IsEnabled="{Binding IsConnected, Converter={x:Static local:InverseBooleanConverter.Instance}}"
+                                 Text="{Binding DisplayName, UpdateSourceTrigger=PropertyChanged}" />
+
+                        <Grid Margin="0,12,0,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="2*" />
+                                <ColumnDefinition Width="8" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Grid.Column="0">
+                                <TextBlock Style="{StaticResource FieldLabel}" Text="호스트" />
+                                <TextBox Style="{StaticResource DarkTextBox}"
+                                         IsEnabled="{Binding IsConnected, Converter={x:Static local:InverseBooleanConverter.Instance}}"
+                                         Text="{Binding HostAddress, UpdateSourceTrigger=PropertyChanged}" />
+                            </StackPanel>
+                            <StackPanel Grid.Column="2">
+                                <TextBlock Style="{StaticResource FieldLabel}" Text="포트" />
+                                <TextBox Style="{StaticResource DarkTextBox}"
+                                         IsEnabled="{Binding IsConnected, Converter={x:Static local:InverseBooleanConverter.Instance}}"
+                                         Text="{Binding Port, UpdateSourceTrigger=PropertyChanged}" />
+                            </StackPanel>
+                        </Grid>
+
+                        <UniformGrid Margin="0,14,0,0" Columns="2">
+                            <Button Style="{StaticResource PrimaryButton}"
+                                    Margin="0,0,6,0"
+                                    Content="세션 참여"
+                                    Command="{Binding JoinSessionCommand}" />
+                            <Button Style="{StaticResource SecondaryButton}"
+                                    Margin="6,0,0,0"
+                                    Content="연결 종료"
+                                    Command="{Binding DisconnectCommand}" />
+                        </UniformGrid>
+
+                        <Border Margin="0,14,0,0"
+                                Padding="10"
+                                CornerRadius="8"
+                                Background="#252525">
+                            <StackPanel>
+                                <TextBlock Foreground="#AAAAAA" FontSize="11" Text="연결 상태" />
+                                <TextBlock Margin="0,4,0,0"
+                                           Foreground="White"
+                                           FontWeight="SemiBold"
+                                           Text="{Binding ConnectionState}" />
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+                </Border>
+
+                <!-- Ack / Error status -->
+                <Border Style="{StaticResource PanelCard}" Margin="0,0,0,12">
+                    <StackPanel>
+                        <TextBlock Foreground="White" FontWeight="SemiBold" Text="시스템 알림" />
+                        <TextBlock Margin="0,10,0,0"
+                                   TextWrapping="Wrap"
+                                   Text="{Binding StatusMessage}">
+                            <TextBlock.Style>
+                                <Style TargetType="TextBlock">
+                                    <Setter Property="Foreground" Value="#03DAC6" />
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding IsStatusError}" Value="True">
+                                            <Setter Property="Foreground" Value="#CF6679" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </TextBlock.Style>
+                        </TextBlock>
+                    </StackPanel>
+                </Border>
+
+                <!-- Chat -->
+                <Border Style="{StaticResource PanelCard}" Margin="0,0,0,12">
+                    <StackPanel>
+                        <TextBlock Foreground="White" FontWeight="SemiBold" Text="실시간 채팅" />
+
+                        <ListBox Margin="0,10,0,0"
+                                 Height="140"
+                                 ItemsSource="{Binding ChatMessages}"
+                                 Background="#151515"
+                                 BorderThickness="0"
+                                 Foreground="#DDDDDD" />
+
+                        <DockPanel Margin="0,10,0,0">
+                            <Button DockPanel.Dock="Right"
+                                    Width="88"
+                                    Margin="8,0,0,0"
+                                    Style="{StaticResource PrimaryButton}"
+                                    Content="전송"
+                                    Command="{Binding SendChatCommand}" />
+                            <TextBox Style="{StaticResource DarkTextBox}"
+                                     Text="{Binding ChatInput, UpdateSourceTrigger=PropertyChanged}" />
+                        </DockPanel>
+                    </StackPanel>
+                </Border>
+
+                <!-- Files -->
+                <Border Style="{StaticResource PanelCard}" Margin="0,0,0,12">
+                    <StackPanel>
+                        <TextBlock Foreground="White" FontWeight="SemiBold" Text="파일 수신" />
+                        <TextBlock Margin="0,8,0,0" Foreground="#AAAAAA" Text="{Binding DownloadStatus}" />
+
+                        <ListBox Margin="0,10,0,0"
+                                 Height="90"
+                                 ItemsSource="{Binding DownloadedFiles}"
+                                 Background="#151515"
+                                 BorderThickness="0"
+                                 Foreground="#DDDDDD" />
+
+                        <WrapPanel Margin="0,10,0,0">
+                            <Button Style="{StaticResource GhostButton}"
+                                    Margin="0,0,8,0"
+                                    Content="화면 수신 테스트"
+                                    Command="{Binding SimulateScreenRenderCommand}" />
+                            <Button Style="{StaticResource GhostButton}"
+                                    Content="파일 수신 테스트"
+                                    Command="{Binding SimulateFileReceiveCommand}" />
+                        </WrapPanel>
+                    </StackPanel>
+                </Border>
+
+                <!-- Activity log -->
+                <Border Style="{StaticResource PanelCard}">
+                    <StackPanel>
+                        <TextBlock Foreground="White" FontWeight="SemiBold" Text="활동 로그" />
+                        <ListBox Margin="0,10,0,0"
+                                 MaxHeight="160"
+                                 ItemsSource="{Binding ActivityLogs}"
+                                 Background="#151515"
+                                 BorderThickness="0"
+                                 Foreground="#999999" />
+                    </StackPanel>
+                </Border>
+            </StackPanel>
+        </ScrollViewer>
     </Grid>
 </Window>
