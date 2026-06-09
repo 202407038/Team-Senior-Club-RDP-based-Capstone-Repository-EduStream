@@ -3,70 +3,20 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
-        xmlns:local="clr-namespace:EduStream.Client"
         mc:Ignorable="d"
         Title="EduStream Client"
         Height="820"
         Width="1360"
-        MinHeight="720"
-        MinWidth="1100"
-        Background="#121212"
+        MinHeight="640"
+        MinWidth="960"
+        Background="{StaticResource BrushBgPrimary}"
         WindowStartupLocation="CenterScreen">
-
-    <Window.Resources>
-        <Style x:Key="PanelCard" TargetType="Border">
-            <Setter Property="Background" Value="#1A1A1A" />
-            <Setter Property="BorderBrush" Value="#2E2E2E" />
-            <Setter Property="BorderThickness" Value="1" />
-            <Setter Property="CornerRadius" Value="10" />
-            <Setter Property="Padding" Value="14" />
-        </Style>
-
-        <Style x:Key="FieldLabel" TargetType="TextBlock">
-            <Setter Property="Foreground" Value="#B0B0B0" />
-            <Setter Property="FontSize" Value="12" />
-            <Setter Property="Margin" Value="0,0,0,6" />
-        </Style>
-
-        <Style x:Key="DarkTextBox" TargetType="TextBox">
-            <Setter Property="Padding" Value="10,8" />
-            <Setter Property="Background" Value="#2D2D2D" />
-            <Setter Property="Foreground" Value="White" />
-            <Setter Property="BorderThickness" Value="0" />
-        </Style>
-
-        <Style x:Key="PrimaryButton" TargetType="Button">
-            <Setter Property="Height" Value="38" />
-            <Setter Property="Background" Value="#BB86FC" />
-            <Setter Property="Foreground" Value="#121212" />
-            <Setter Property="FontWeight" Value="Bold" />
-            <Setter Property="BorderThickness" Value="0" />
-            <Setter Property="Cursor" Value="Hand" />
-        </Style>
-
-        <Style x:Key="SecondaryButton" TargetType="Button">
-            <Setter Property="Height" Value="38" />
-            <Setter Property="Background" Value="#333333" />
-            <Setter Property="Foreground" Value="#CF6679" />
-            <Setter Property="FontWeight" Value="SemiBold" />
-            <Setter Property="BorderThickness" Value="0" />
-            <Setter Property="Cursor" Value="Hand" />
-        </Style>
-
-        <Style x:Key="GhostButton" TargetType="Button">
-            <Setter Property="Padding" Value="12,6" />
-            <Setter Property="Background" Value="#252525" />
-            <Setter Property="Foreground" Value="#03DAC6" />
-            <Setter Property="BorderThickness" Value="0" />
-            <Setter Property="Cursor" Value="Hand" />
-        </Style>
-    </Window.Resources>
 
     <Grid Margin="16">
         <Grid.ColumnDefinitions>
-            <ColumnDefinition Width="*" />
+            <ColumnDefinition Width="*" MinWidth="480" />
             <ColumnDefinition Width="16" />
-            <ColumnDefinition Width="400" />
+            <ColumnDefinition Width="380" MinWidth="320" MaxWidth="440" />
         </Grid.ColumnDefinitions>
 
         <!-- Remote display -->
@@ -80,18 +30,13 @@
                     <Image Source="{Binding DisplaySource}" />
                 </Viewbox>
 
-                <Border Background="#CC0A0A0A">
-                    <Border.Style>
-                        <Style TargetType="Border">
-                            <Setter Property="Visibility" Value="Visible" />
-                            <Style.Triggers>
-                                <DataTrigger Binding="{Binding HasRemoteFrame}" Value="True">
-                                    <Setter Property="Visibility" Value="Collapsed" />
-                                </DataTrigger>
-                            </Style.Triggers>
-                        </Style>
-                    </Border.Style>
-                    <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" MaxWidth="420">
+                <!-- Placeholder -->
+                <Border Background="#CC0A0A0A"
+                        Visibility="{Binding HasRemoteFrame, Converter={StaticResource BoolToVis}, ConverterParameter=Invert}">
+                    <StackPanel VerticalAlignment="Center"
+                                HorizontalAlignment="Center"
+                                MaxWidth="420"
+                                Margin="24">
                         <TextBlock Text="{Binding PlaceholderTitle}"
                                    Foreground="#666666"
                                    FontSize="26"
@@ -107,33 +52,56 @@
                     </StackPanel>
                 </Border>
 
+                <!-- Loading overlay -->
+                <Border Background="#CC0A0A0A"
+                        Visibility="{Binding IsConnecting, Converter={StaticResource BoolToVis}}">
+                    <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
+                        <ProgressBar Style="{StaticResource LoadingProgressBar}" />
+                        <TextBlock Margin="0,16,0,0"
+                                   Text="세션에 연결하는 중..."
+                                   Foreground="{StaticResource BrushAccentPurple}"
+                                   FontWeight="SemiBold"
+                                   HorizontalAlignment="Center" />
+                    </StackPanel>
+                </Border>
+
+                <!-- Frame status badge -->
                 <Border VerticalAlignment="Top"
                         HorizontalAlignment="Left"
                         Margin="16"
                         Padding="10,6"
                         Background="#CC000000"
                         CornerRadius="8">
-                    <TextBlock Foreground="#03DAC6" FontWeight="SemiBold" Text="{Binding RenderStatus}" />
+                    <TextBlock Foreground="{StaticResource BrushAccentTeal}"
+                               FontWeight="SemiBold"
+                               Text="{Binding RenderStatus}" />
                 </Border>
             </Grid>
         </Border>
 
         <!-- Sidebar -->
-        <ScrollViewer Grid.Column="2" VerticalScrollBarVisibility="Auto">
+        <ScrollViewer Grid.Column="2"
+                      VerticalScrollBarVisibility="Auto"
+                      HorizontalScrollBarVisibility="Disabled">
             <StackPanel>
                 <StackPanel Margin="0,0,0,16">
-                    <TextBlock Text="EDUSTREAM" Foreground="#BB86FC" FontSize="24" FontWeight="ExtraBold" />
-                    <TextBlock Margin="0,4,0,0" Foreground="#888888" Text="수강생 클라이언트" />
+                    <TextBlock Text="EDUSTREAM"
+                               Foreground="{StaticResource BrushAccentPurple}"
+                               FontSize="24"
+                               FontWeight="ExtraBold" />
+                    <TextBlock Margin="0,4,0,0"
+                               Foreground="{StaticResource BrushTextMuted}"
+                               Text="수강생 클라이언트" />
                 </StackPanel>
 
                 <!-- Connection -->
                 <Border Style="{StaticResource PanelCard}" Margin="0,0,0,12">
                     <StackPanel>
-                        <TextBlock Foreground="White" FontWeight="SemiBold" Text="세션 연결" />
+                        <TextBlock Style="{StaticResource SectionTitle}" Text="세션 연결" />
 
                         <TextBlock Style="{StaticResource FieldLabel}" Margin="0,14,0,6" Text="표시 이름" />
                         <TextBox Style="{StaticResource DarkTextBox}"
-                                 IsEnabled="{Binding IsConnected, Converter={x:Static local:InverseBooleanConverter.Instance}}"
+                                 IsEnabled="{Binding IsConnected, Converter={StaticResource InverseBool}}"
                                  Text="{Binding DisplayName, UpdateSourceTrigger=PropertyChanged}" />
 
                         <Grid Margin="0,12,0,0">
@@ -145,13 +113,13 @@
                             <StackPanel Grid.Column="0">
                                 <TextBlock Style="{StaticResource FieldLabel}" Text="호스트" />
                                 <TextBox Style="{StaticResource DarkTextBox}"
-                                         IsEnabled="{Binding IsConnected, Converter={x:Static local:InverseBooleanConverter.Instance}}"
+                                         IsEnabled="{Binding IsConnected, Converter={StaticResource InverseBool}}"
                                          Text="{Binding HostAddress, UpdateSourceTrigger=PropertyChanged}" />
                             </StackPanel>
                             <StackPanel Grid.Column="2">
                                 <TextBlock Style="{StaticResource FieldLabel}" Text="포트" />
                                 <TextBox Style="{StaticResource DarkTextBox}"
-                                         IsEnabled="{Binding IsConnected, Converter={x:Static local:InverseBooleanConverter.Instance}}"
+                                         IsEnabled="{Binding IsConnected, Converter={StaticResource InverseBool}}"
                                          Text="{Binding Port, UpdateSourceTrigger=PropertyChanged}" />
                             </StackPanel>
                         </Grid>
@@ -170,50 +138,71 @@
                         <Border Margin="0,14,0,0"
                                 Padding="10"
                                 CornerRadius="8"
-                                Background="#252525">
-                            <StackPanel>
-                                <TextBlock Foreground="#AAAAAA" FontSize="11" Text="연결 상태" />
-                                <TextBlock Margin="0,4,0,0"
-                                           Foreground="White"
-                                           FontWeight="SemiBold"
-                                           Text="{Binding ConnectionState}" />
+                                Background="{StaticResource BrushBgElevated}">
+                            <StackPanel Orientation="Horizontal">
+                                <Ellipse Style="{StaticResource StatusDot}"
+                                         Fill="{Binding ConnectionState, Converter={StaticResource StateToBrush}}" />
+                                <StackPanel>
+                                    <TextBlock Foreground="{StaticResource BrushTextSecondary}"
+                                               FontSize="11"
+                                               Text="연결 상태" />
+                                    <TextBlock Margin="0,4,0,0"
+                                               Foreground="{StaticResource BrushTextPrimary}"
+                                               FontWeight="SemiBold"
+                                               Text="{Binding ConnectionState}" />
+                                </StackPanel>
                             </StackPanel>
                         </Border>
                     </StackPanel>
                 </Border>
 
-                <!-- Ack / Error status -->
+                <!-- System notification -->
                 <Border Style="{StaticResource PanelCard}" Margin="0,0,0,12">
                     <StackPanel>
-                        <TextBlock Foreground="White" FontWeight="SemiBold" Text="시스템 알림" />
-                        <TextBlock Margin="0,10,0,0"
-                                   TextWrapping="Wrap"
-                                   Text="{Binding StatusMessage}">
-                            <TextBlock.Style>
-                                <Style TargetType="TextBlock">
-                                    <Setter Property="Foreground" Value="#03DAC6" />
+                        <TextBlock Style="{StaticResource SectionTitle}" Text="시스템 알림" />
+                        <Border Margin="0,10,0,0"
+                                Padding="10"
+                                CornerRadius="8"
+                                Background="{StaticResource BrushBgElevated}">
+                            <Border.Style>
+                                <Style TargetType="Border">
+                                    <Setter Property="BorderBrush" Value="{StaticResource BrushAccentTeal}" />
+                                    <Setter Property="BorderThickness" Value="0,0,0,2" />
                                     <Style.Triggers>
                                         <DataTrigger Binding="{Binding IsStatusError}" Value="True">
-                                            <Setter Property="Foreground" Value="#CF6679" />
+                                            <Setter Property="BorderBrush" Value="{StaticResource BrushAccentError}" />
+                                            <Setter Property="Background" Value="#2A1E22" />
                                         </DataTrigger>
                                     </Style.Triggers>
                                 </Style>
-                            </TextBlock.Style>
-                        </TextBlock>
+                            </Border.Style>
+                            <TextBlock TextWrapping="Wrap" Text="{Binding StatusMessage}">
+                                <TextBlock.Style>
+                                    <Style TargetType="TextBlock">
+                                        <Setter Property="Foreground" Value="{StaticResource BrushAccentTeal}" />
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding IsStatusError}" Value="True">
+                                                <Setter Property="Foreground" Value="{StaticResource BrushAccentError}" />
+                                                <Setter Property="FontWeight" Value="SemiBold" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </TextBlock.Style>
+                            </TextBlock>
+                        </Border>
                     </StackPanel>
                 </Border>
 
                 <!-- Chat -->
                 <Border Style="{StaticResource PanelCard}" Margin="0,0,0,12">
                     <StackPanel>
-                        <TextBlock Foreground="White" FontWeight="SemiBold" Text="실시간 채팅" />
+                        <TextBlock Style="{StaticResource SectionTitle}" Text="실시간 채팅" />
 
                         <ListBox Margin="0,10,0,0"
-                                 Height="140"
+                                 Height="160"
+                                 Style="{StaticResource DarkListBox}"
                                  ItemsSource="{Binding ChatMessages}"
-                                 Background="#151515"
-                                 BorderThickness="0"
-                                 Foreground="#DDDDDD" />
+                                 ItemTemplate="{StaticResource ChatBubbleTemplate}" />
 
                         <DockPanel Margin="0,10,0,0">
                             <Button DockPanel.Dock="Right"
@@ -231,15 +220,16 @@
                 <!-- Files -->
                 <Border Style="{StaticResource PanelCard}" Margin="0,0,0,12">
                     <StackPanel>
-                        <TextBlock Foreground="White" FontWeight="SemiBold" Text="파일 수신" />
-                        <TextBlock Margin="0,8,0,0" Foreground="#AAAAAA" Text="{Binding DownloadStatus}" />
+                        <TextBlock Style="{StaticResource SectionTitle}" Text="파일 수신" />
+                        <TextBlock Margin="0,8,0,0"
+                                   Foreground="{StaticResource BrushTextSecondary}"
+                                   Text="{Binding DownloadStatus}" />
 
                         <ListBox Margin="0,10,0,0"
                                  Height="90"
+                                 Style="{StaticResource DarkListBox}"
                                  ItemsSource="{Binding DownloadedFiles}"
-                                 Background="#151515"
-                                 BorderThickness="0"
-                                 Foreground="#DDDDDD" />
+                                 ItemTemplate="{StaticResource FileLineTemplate}" />
 
                         <WrapPanel Margin="0,10,0,0">
                             <Button Style="{StaticResource GhostButton}"
@@ -256,13 +246,12 @@
                 <!-- Activity log -->
                 <Border Style="{StaticResource PanelCard}">
                     <StackPanel>
-                        <TextBlock Foreground="White" FontWeight="SemiBold" Text="활동 로그" />
+                        <TextBlock Style="{StaticResource SectionTitle}" Text="활동 로그" />
                         <ListBox Margin="0,10,0,0"
                                  MaxHeight="160"
+                                 Style="{StaticResource DarkListBox}"
                                  ItemsSource="{Binding ActivityLogs}"
-                                 Background="#151515"
-                                 BorderThickness="0"
-                                 Foreground="#999999" />
+                                 ItemTemplate="{StaticResource LogLineTemplate}" />
                     </StackPanel>
                 </Border>
             </StackPanel>
