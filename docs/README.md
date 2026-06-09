@@ -1,56 +1,43 @@
-# EduStream 문서 허브
+# EduStream 문서 안내
 
-이 디렉터리는 `README.md`에 모두 담기에는 길고, 협업 과정에서 자주 갱신될 문서를 분리해서 관리하기 위한 공간입니다.
+문서는 작업자가 바로 보는 문서와 필요할 때만 보는 참고 문서로 나눠 관리합니다.
 
-프로젝트를 처음 받는 팀원은 아래 순서로 읽는 것을 권장합니다.
+## 작업자용 문서
 
-1. `README.md`
-2. `docs/TEAM_DEVELOPMENT_GUIDE.md`
-3. `docs/ARCHITECTURE_GUIDE.md`
-4. `docs/IMPLEMENTATION_PLAYBOOK.md`
-5. `docs/USER_WORKFLOW_SCENARIOS.md`
-6. `docs/SPRINT_7DAY_IMPLEMENTATION_GUIDE.md`
+작업자는 평소에 아래 문서만 우선 확인합니다.
 
-## 문서 목록
+1. [현재 상태와 로드맵](./work/STATUS_AND_ROADMAP.md)
+   - 현재 구현 상태
+   - PPT 기준 월간 로드맵
+   - 주차별 팀 목표치
+   - 주차별 담당별 목표치
 
-### 1. [팀 개발 가이드](./TEAM_DEVELOPMENT_GUIDE.md)
+2. [개발 작업 방식](./work/DEVELOPMENT_GUIDE.md)
+   - 작업 시작 절차
+   - 브랜치와 커밋 규칙
+   - 빌드/테스트 기준
+   - 푸시와 PR 작성 방식
 
-- 브랜치 전략
-- 커밋 메시지 규칙
-- Pull Request 작성 및 리뷰 절차
-- 코딩 규칙
-- 협업 중 충돌을 줄이기 위한 기본 원칙
+## 참고 문서
 
-### 2. [아키텍처 가이드](./ARCHITECTURE_GUIDE.md)
+필요할 때만 확인합니다.
 
-- 프로젝트 구조와 각 계층의 책임
-- 프로젝트 간 참조 방향
-- 서비스, ViewModel, 모델 분리 원칙
-- 현재 사용 기술과 도입 예정 기술 설명
+- [아키텍처 가이드](./reference/ARCHITECTURE_GUIDE.md)
+- [사용자 워크플로우](./reference/USER_WORKFLOW_SCENARIOS.md)
+- [프로젝트 작업 기록](./reference/PROJECT_HISTORY_TIMELINE.md)
+- [졸작 중간발표 자료](./reference/presentations/졸작중간발표.pptx)
 
-### 3. [구현 플레이북](./IMPLEMENTATION_PLAYBOOK.md)
+## 보관 문서
 
-- 5인 기준 권장 작업 분담
-- 인원이 부족할 때의 축소 운영 방법
-- 각 작업 단위를 시작하고 끝내는 절차
-- 기능별 권장 개발 순서
+과거 계획과 역할 분담 기록을 보존합니다. 현재 작업 기준은 `docs/work` 문서를 우선합니다.
 
-### 4. [사용자 워크플로우 시나리오](./USER_WORKFLOW_SCENARIOS.md)
+- [구현 플레이북](./archive/IMPLEMENTATION_PLAYBOOK.md)
+- [7일 스프린트 상세 구현 가이드](./archive/SPRINT_7DAY_IMPLEMENTATION_GUIDE.md)
 
-- 현재 프로젝트 기준 대표 사용자 흐름
-- 교수자/수강생 중심 사용 절차
-- 화면 공유, 파일 전송, 채팅, 세션 종료 시나리오
-- 향후 테스트 케이스 및 예외 흐름 확장 기준
+## 문서 운영 기준
 
-### 5. [7일 스프린트 상세 구현 가이드](./SPRINT_7DAY_IMPLEMENTATION_GUIDE.md)
-
-- 5명 기준 7일 구현 계획
-- 무리하지 않는 일일 목표
-- 세션/채팅/파일/화면 우선순위
-- 작업 시작 전 `git pull --all --prune` 규칙 포함
-
-## 문서 운영 원칙
-
-- 설계가 바뀌면 UML과 코드만 바꾸지 말고 관련 문서도 함께 수정합니다.
-- 구현 완료 전 항목은 "현재 사용 중"과 "도입 예정"을 구분해서 기록합니다.
-- 브랜치 전략, 커밋 규칙, 의존성 규칙이 바뀌면 이 디렉터리의 문서를 먼저 갱신합니다.
+- 루트 `README.md`는 프로젝트 입구 역할만 합니다.
+- 현재 상태와 목표는 `work/STATUS_AND_ROADMAP.md`에서 관리합니다.
+- 작업 방식과 PR 작성 방식은 `work/DEVELOPMENT_GUIDE.md`에서 관리합니다.
+- 구조, 사용자 흐름, 작업 기록, 발표 자료는 `reference/`에 둡니다.
+- 오래된 계획 문서는 삭제하지 않고 `archive/`에 보관합니다.

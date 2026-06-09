@@ -1,360 +1,450 @@
 using System.Collections.Concurrent;
 using System.Text.Json;
+using EduStream.Core.Factories;
 using EduStream.Core.Logging;
 using EduStream.Core.Models;
 using EduStream.Core.Protocols;
+using EduStream.Core.Utils;
 
 namespace EduStream.Server.Services;
 
 /// <summary>
-/// 세션 개설/종료와 참가자 관리, 그리고 서버 측 패킷 라우팅을 담당합니다.
-/// 실제 네트워크 송수신은 TcpServerService를 통해 수행합니다.
+/// 세션 개설/종료, 참여자 관리, 패킷 라우팅을 담당합니다.
+/// TcpServerService를 통해 실제 네트워크 전송을 수행합니다.
 /// </summary>
 public sealed class SessionManager
 {
+    private const int MaxChatMessageLength = 500;
+
     private readonly ILogSink _logSink;
     private readonly TcpServerService _tcpServer;
-    private readonly ConcurrentDictionary<string, string> _participants = new();
-
-    // clientId -> DisplayName 매핑. 연결이 끊겼을 때 자동 이탈 처리에 사용합니다.
-    private readonly ConcurrentDictionary<string, string> _clientDisplayNames = new();
+    private readonly ConcurrentDictionary<string, string> _participants = new(); // displayName → clientId
+    private readonly ConcurrentDictionary<string, string> _clientDisplayNames = new(); // clientId → displayName
+    private readonly ConcurrentDictionary<string, DateTimeOffset> _clientLastSeen = new(); // clientId → 마지막 수신 시각
     private readonly object _sessionLock = new();
 
-    public SessionManager(TcpServerService tcpServer, ILogSink logSink)
+    /// <summary>
+    /// 참여자 목록이 변경되었을 때 발생합니다.
+    /// </summary>
+    public event Action? ParticipantsChanged;
+
+    /// <summary>
+    /// 클라이언트로부터 채팅 메시지를 수신했을 때 발생합니다.
+    /// (sender, message)
+    /// </summary>
+    public event Action<string, string>? ChatReceived;
+
+    public SessionManager(ILogSink logSink, TcpServerService tcpServer)
     {
-        _tcpServer = tcpServer;
         _logSink = logSink;
+        _tcpServer = tcpServer;
 
         _tcpServer.PacketReceived += OnPacketReceivedAsync;
         _tcpServer.ClientDisconnected += OnClientDisconnectedAsync;
     }
 
-    /// <summary>
-    /// 참여자 목록이 변경되었을 때 UI가 즉시 반영할 수 있도록 알립니다.
-    /// </summary>
-    public event Action? ParticipantsChanged;
-
     public SessionInfo? CurrentSession { get; private set; }
 
     public bool IsSessionOpen => CurrentSession is not null;
 
-    public int ParticipantCount => _participants.Count;
-
+    /// <summary>
+    /// 현재 참여자 이름 목록을 반환합니다.
+    /// </summary>
     public IReadOnlyCollection<string> ParticipantNames => _participants.Keys.ToList().AsReadOnly();
 
-    public async Task<SessionInfo> OpenSessionAsync(string sessionName, int port)
-    {
-        SessionInfo openedSession;
+    public int ParticipantCount => _participants.Count;
 
+    /// <summary>
+    /// 마지막 수신 시각이 지정한 임계를 넘어선 클라이언트 ID 목록을 반환합니다.
+    /// HeartbeatService가 비활성 클라이언트를 끊을 때 사용합니다.
+    /// </summary>
+    public IReadOnlyCollection<string> GetStaleClientIds(TimeSpan timeout)
+    {
+        var threshold = DateTimeOffset.UtcNow - timeout;
+        var stale = new List<string>();
+        foreach (var (clientId, lastSeen) in _clientLastSeen)
+        {
+            if (lastSeen < threshold)
+            {
+                stale.Add(clientId);
+            }
+        }
+        return stale;
+    }
+
+    public Task<SessionInfo> OpenSessionAsync(string sessionName, int port)
+    {
         lock (_sessionLock)
         {
+            if (CurrentSession is not null)
+            {
+                throw new InvalidOperationException(
+                    $"세션이 이미 열려 있습니다. 이름={CurrentSession.SessionName}, 포트={CurrentSession.Port}");
+            }
+
             CurrentSession = new SessionInfo
             {
                 SessionName = sessionName,
                 HostName = Environment.MachineName,
                 Port = port,
-                HostAddress = "0.0.0.0"
+                HostAddress = "127.0.0.1"
             };
-
-            openedSession = CurrentSession;
         }
 
-        await _tcpServer.StartAsync(port);
-        _logSink.Write($"세션을 개설했습니다. 이름={sessionName}, 포트={port}");
-        return openedSession;
+        _tcpServer.Start(port);
+        _logSink.Write($"[Session] 개설: 이름={sessionName}, 포트={port}");
+        return Task.FromResult(CurrentSession);
     }
 
     public async Task CloseSessionAsync()
     {
-        string? sessionName = null;
+        // 연결 정리 전에 클라이언트들에게 세션 종료 알림
+        if (_participants.Count > 0)
+        {
+            await BroadcastSystemMessageAsync("교수자가 세션을 종료했습니다. 연결이 해제됩니다.");
+        }
 
         lock (_sessionLock)
         {
             if (CurrentSession is not null)
             {
-                sessionName = CurrentSession.SessionName;
+                _logSink.Write($"[Session] 종료: 이름={CurrentSession.SessionName}");
             }
-
-            _participants.Clear();
-            _clientDisplayNames.Clear();
             CurrentSession = null;
         }
 
+        ClearParticipants();
         await _tcpServer.StopAsync();
-
-        if (!string.IsNullOrWhiteSpace(sessionName))
-        {
-            _logSink.Write($"세션을 종료했습니다. 이름={sessionName}");
-        }
-
-        ParticipantsChanged?.Invoke();
     }
 
+    /// <summary>
+    /// 모든 연결된 클라이언트에게 패킷을 브로드캐스트합니다.
+    /// </summary>
     public async Task BroadcastPacketAsync(BasePacket packet)
     {
-        SessionInfo? currentSession;
-
-        lock (_sessionLock)
-        {
-            currentSession = CurrentSession;
-        }
-
-        if (currentSession is null)
-        {
-            _logSink.Write("브로드캐스트 실패: 세션이 열려 있지 않습니다.");
-            return;
-        }
-
-        packet.SessionId = currentSession.SessionId;
-        packet.SenderId = "Server";
-
-        _logSink.Write($"패킷 브로드캐스트: {packet.MessageType}, 참여자={ParticipantCount}명");
+        ValidateOutboundPacket(packet);
+        _logSink.Write($"[Packet] 브로드캐스트: 타입={packet.MessageType}, 길이={packet.DataLength}");
         await _tcpServer.BroadcastAsync(packet);
-    }
-
-    public Task<BasePacket> HandleJoinAsync(SessionJoinPacket packet)
-    {
-        BasePacket response;
-        string? logMessage = null;
-        var notifyParticipantsChanged = false;
-
-        lock (_sessionLock)
-        {
-            var currentSession = CurrentSession;
-            if (currentSession is null)
-            {
-                response = CreateError(
-                    ErrorCodes.SessionNotOpen,
-                    "현재 열려 있는 세션이 없습니다.",
-                    false,
-                    packet);
-            }
-            else if (string.IsNullOrWhiteSpace(packet.DisplayName))
-            {
-                response = CreateError(
-                    ErrorCodes.DisplayNameRequired,
-                    "참여자 이름은 비워둘 수 없습니다.",
-                    true,
-                    packet);
-            }
-            else if (!_participants.TryAdd(packet.DisplayName, packet.SenderId))
-            {
-                response = CreateError(
-                    ErrorCodes.AlreadyJoined,
-                    $"{packet.DisplayName}은(는) 이미 참여 중입니다.",
-                    true,
-                    packet);
-            }
-            else
-            {
-                currentSession.ParticipantCount = _participants.Count;
-                logMessage = $"세션 참여 처리: {packet.DisplayName}, 현재 인원={currentSession.ParticipantCount}";
-                notifyParticipantsChanged = true;
-                response = new AckPacket
-                {
-                    SessionId = currentSession.SessionId,
-                    SenderId = "Server",
-                    AckCode = AckCodes.SessionJoined,
-                    Message = $"{packet.DisplayName}님이 세션에 참여했습니다."
-                };
-            }
-        }
-
-        if (logMessage is not null)
-        {
-            _logSink.Write(logMessage);
-        }
-
-        if (notifyParticipantsChanged)
-        {
-            ParticipantsChanged?.Invoke();
-        }
-
-        return Task.FromResult(response);
-    }
-
-    public Task<BasePacket> HandleLeaveAsync(SessionLeavePacket packet)
-    {
-        BasePacket response;
-        string? logMessage = null;
-        var notifyParticipantsChanged = false;
-
-        lock (_sessionLock)
-        {
-            var currentSession = CurrentSession;
-            if (currentSession is null)
-            {
-                response = CreateError(
-                    ErrorCodes.SessionNotOpen,
-                    "현재 열려 있는 세션이 없습니다.",
-                    false,
-                    packet);
-            }
-            else
-            {
-                // 새 호출부는 DisplayName을 채우고, 이전 호출부는 SenderId만 채울 수 있습니다.
-                var participantKey = string.IsNullOrWhiteSpace(packet.DisplayName)
-                    ? packet.SenderId
-                    : packet.DisplayName;
-
-                if (!string.IsNullOrWhiteSpace(participantKey))
-                {
-                    _participants.TryRemove(participantKey, out _);
-                }
-
-                currentSession.ParticipantCount = _participants.Count;
-                logMessage = $"세션 이탈 처리: {participantKey}, 현재 인원={currentSession.ParticipantCount}";
-                notifyParticipantsChanged = true;
-                response = new AckPacket
-                {
-                    SessionId = currentSession.SessionId,
-                    SenderId = "Server",
-                    AckCode = AckCodes.SessionLeft,
-                    Message = "세션 이탈을 처리했습니다."
-                };
-            }
-        }
-
-        if (logMessage is not null)
-        {
-            _logSink.Write(logMessage);
-        }
-
-        if (notifyParticipantsChanged)
-        {
-            ParticipantsChanged?.Invoke();
-        }
-
-        return Task.FromResult(response);
     }
 
     public HeartbeatPacket CreateHeartbeat()
     {
-        lock (_sessionLock)
-        {
-            return new HeartbeatPacket
-            {
-                SessionId = CurrentSession?.SessionId,
-                SenderId = "Server"
-            };
-        }
+        return PacketFactory.CreateHeartbeat(
+            senderId: "Server",
+            sessionId: CurrentSession?.SessionId);
     }
 
     /// <summary>
-    /// 클라이언트로부터 수신된 패킷을 타입별로 라우팅합니다.
+    /// 수신된 패킷을 MessageType별로 라우팅합니다.
     /// </summary>
-    private async Task OnPacketReceivedAsync(string clientId, string json)
+    private async Task OnPacketReceivedAsync(string clientId, byte[] payload)
     {
+        // 어떤 종류의 패킷이든 수신한 시점을 기록해 두면 HeartbeatService가
+        // 응답 없는 클라이언트만 골라서 끊을 수 있습니다.
+        _clientLastSeen[clientId] = DateTimeOffset.UtcNow;
+
         try
         {
-            using var doc = JsonDocument.Parse(json);
-            if (!doc.RootElement.TryGetProperty("MessageType", out var typeElement))
+            // BasePacket으로 먼저 역직렬화하여 MessageType 확인
+            var basePacket = JsonSerializer.Deserialize<JsonElement>(payload);
+            if (!basePacket.TryGetProperty("MessageType", out var messageTypeElement))
             {
-                _logSink.Write($"패킷에 MessageType이 없습니다: clientId={clientId}");
+                _logSink.Write($"[Packet] MessageType 누락: clientId={clientId}");
                 return;
             }
 
-            var packetType = (PacketType)typeElement.GetInt32();
-            BasePacket? response = null;
+            var messageType = (PacketType)messageTypeElement.GetInt32();
 
-            switch (packetType)
+            switch (messageType)
             {
                 case PacketType.SessionJoin:
-                    var joinPacket = JsonSerializer.Deserialize<SessionJoinPacket>(json);
+                    var joinPacket = JsonSerializer.Deserialize<SessionJoinPacket>(payload);
                     if (joinPacket is not null)
                     {
-                        response = await HandleJoinAsync(joinPacket);
-                        if (response is AckPacket)
+                        var response = HandleJoin(clientId, joinPacket);
+                        await _tcpServer.SendToClientAsync(clientId, response);
+
+                        if (response is ErrorPacket)
                         {
-                            _clientDisplayNames[clientId] = joinPacket.DisplayName;
+                            await _tcpServer.DisconnectClientAsync(clientId);
+                        }
+                        else
+                        {
+                            await BroadcastSystemMessageAsync($"{joinPacket.DisplayName}님이 세션에 참여했습니다.");
                         }
                     }
                     break;
 
                 case PacketType.SessionLeave:
-                    var leavePacket = JsonSerializer.Deserialize<SessionLeavePacket>(json);
+                    var leavePacket = JsonSerializer.Deserialize<SessionLeavePacket>(payload);
                     if (leavePacket is not null)
                     {
-                        response = await HandleLeaveAsync(leavePacket);
-                        _clientDisplayNames.TryRemove(clientId, out _);
+                        var leaveName = GetDisplayName(clientId, leavePacket.DisplayName);
+                        var response = HandleLeave(clientId, leavePacket);
+                        await _tcpServer.SendToClientAsync(clientId, response);
+
+                        if (response is AckPacket && !string.IsNullOrWhiteSpace(leaveName))
+                        {
+                            await BroadcastSystemMessageAsync($"{leaveName}님이 세션에서 나갔습니다.");
+                        }
                     }
                     break;
 
                 case PacketType.Chat:
-                    var chatPacket = JsonSerializer.Deserialize<ChatPacket>(json);
+                    var chatPacket = JsonSerializer.Deserialize<ChatPacket>(payload);
                     if (chatPacket is not null)
                     {
-                        _logSink.Write($"채팅 수신: {chatPacket.Sender}: {chatPacket.Message}");
-                        await _tcpServer.BroadcastAsync(chatPacket);
+                        await HandleChatAsync(clientId, chatPacket);
+                    }
+                    break;
+
+                case PacketType.Screen:
+                    // 화면 패킷은 모든 클라이언트에게 브로드캐스트
+                    var screenPacket = JsonSerializer.Deserialize<ScreenPacket>(payload);
+                    if (screenPacket is not null)
+                    {
+                        ScreenTransferUtility.ValidatePacketMetadata(screenPacket);
+                        await _tcpServer.BroadcastAsync(screenPacket);
+                        _logSink.Write($"[Screen] 브로드캐스트: 프레임#{screenPacket.FrameIndex}");
+                    }
+                    break;
+
+                case PacketType.File:
+                    // 파일 패킷은 모든 클라이언트에게 브로드캐스트
+                    var filePacket = JsonSerializer.Deserialize<FilePacket>(payload);
+                    if (filePacket is not null)
+                    {
+                        await _tcpServer.BroadcastAsync(filePacket);
+                        _logSink.Write($"[File] 브로드캐스트: {filePacket.FileName}");
                     }
                     break;
 
                 case PacketType.Heartbeat:
-                    // 현재는 heartbeat 수신 여부만 확인하고 별도 응답은 하지 않습니다.
+                    // 클라이언트 하트비트 수신 — 연결 유지 확인용
                     break;
 
                 default:
-                    _logSink.Write($"알 수 없는 패킷 타입: {packetType}, clientId={clientId}");
+                    _logSink.Write($"[Packet] 미처리 타입: {messageType}, clientId={clientId}");
                     break;
-            }
-
-            if (response is not null)
-            {
-                await _tcpServer.SendToClientAsync(clientId, response);
             }
         }
         catch (Exception ex)
         {
-            _logSink.Write($"패킷 처리 오류: clientId={clientId}, {ex.Message}");
+            _logSink.Write($"[Packet] 처리 오류: clientId={clientId}, {ex.GetType().Name}: {ex.Message}");
         }
     }
 
     /// <summary>
-    /// 연결이 끊긴 클라이언트를 자동으로 세션에서 제거합니다.
+    /// 클라이언트 연결 끊김 시 자동으로 세션 이탈을 처리합니다.
     /// </summary>
-    private Task OnClientDisconnectedAsync(string clientId)
+    private async Task OnClientDisconnectedAsync(string clientId)
     {
-        string? logMessage = null;
-        var notifyParticipantsChanged = false;
+        _clientLastSeen.TryRemove(clientId, out _);
 
-        lock (_sessionLock)
+        var displayName = RemoveParticipant(clientId);
+        if (displayName is null)
+            return;
+
+        _logSink.Write($"[Session] 연결 끊김 이탈: {displayName} (clientId={clientId})");
+        await BroadcastSystemMessageAsync($"{displayName}님의 연결이 끊어졌습니다.");
+    }
+
+    private async Task HandleChatAsync(string clientId, ChatPacket chatPacket)
+    {
+        // 1) 참가자 검증
+        if (!_clientDisplayNames.TryGetValue(clientId, out var verifiedName))
         {
-            if (_clientDisplayNames.TryRemove(clientId, out var displayName))
-            {
-                _participants.TryRemove(displayName, out _);
-
-                if (CurrentSession is not null)
-                {
-                    CurrentSession.ParticipantCount = _participants.Count;
-                    logMessage = $"연결 끊김으로 자동 이탈: {displayName}, 현재 인원={CurrentSession.ParticipantCount}";
-                    notifyParticipantsChanged = true;
-                }
-            }
+            var errorPacket = CreateError(ErrorCodes.NotParticipant,
+                "세션에 참여하지 않은 상태에서는 채팅을 보낼 수 없습니다.",
+                true, chatPacket);
+            await _tcpServer.SendToClientAsync(clientId, errorPacket);
+            _logSink.Write($"[Chat] 비참가자 차단: clientId={clientId}");
+            return;
         }
 
-        if (logMessage is not null)
+        // 2) 빈 메시지 검증
+        if (string.IsNullOrWhiteSpace(chatPacket.Message))
         {
-            _logSink.Write(logMessage);
+            _logSink.Write($"[Chat] 빈 메시지 무시: {verifiedName} (clientId={clientId})");
+            return;
         }
 
-        if (notifyParticipantsChanged)
+        // 3) 메시지 길이 제한
+        if (chatPacket.Message.Length > MaxChatMessageLength)
         {
-            ParticipantsChanged?.Invoke();
+            var errorPacket = CreateError(ErrorCodes.MessageTooLong,
+                $"메시지는 {MaxChatMessageLength}자 이하여야 합니다. (현재 {chatPacket.Message.Length}자)",
+                true, chatPacket);
+            await _tcpServer.SendToClientAsync(clientId, errorPacket);
+            _logSink.Write($"[Chat] 길이 초과: {verifiedName}, {chatPacket.Message.Length}자");
+            return;
         }
 
-        return Task.CompletedTask;
+        // 4) 송신자 이름을 서버 매핑 기준으로 강제 보정 (변조 방지)
+        chatPacket.Sender = verifiedName;
+
+        // 5) 브로드캐스트
+        var targetCount = _participants.Count;
+        await _tcpServer.BroadcastAsync(chatPacket);
+
+        ChatReceived?.Invoke(verifiedName, chatPacket.Message);
+        _logSink.Write($"[Chat] 브로드캐스트: {verifiedName} → {targetCount}명");
+    }
+
+    private BasePacket HandleJoin(string clientId, SessionJoinPacket packet)
+    {
+        if (CurrentSession is null)
+        {
+            return CreateError(ErrorCodes.SessionNotOpen, "현재 열려 있는 세션이 없습니다.", false, packet);
+        }
+
+        if (string.IsNullOrWhiteSpace(packet.DisplayName))
+        {
+            return CreateError(ErrorCodes.DisplayNameRequired, "참여자 이름은 비워둘 수 없습니다.", true, packet);
+        }
+
+        if (_clientDisplayNames.TryGetValue(clientId, out var existingDisplayName))
+        {
+            _logSink.Write($"중복 참가 요청 차단: clientId={clientId}, 기존 이름={existingDisplayName}, 요청 이름={packet.DisplayName}");
+            return CreateError(
+                ErrorCodes.ClientAlreadyJoined,
+                $"{existingDisplayName} 이름으로 이미 세션에 참여 중입니다.",
+                true,
+                packet);
+        }
+
+        // 중복 참여 체크
+        if (!TryAddParticipant(clientId, packet.DisplayName))
+        {
+            return CreateError(ErrorCodes.AlreadyJoined, $"{packet.DisplayName}은(는) 이미 참여 중입니다.", true, packet);
+        }
+
+        _logSink.Write($"[Session] 참여: {packet.DisplayName}, 현재 인원={CurrentSession.ParticipantCount}");
+
+        return PacketFactory.CreateAck(
+            senderId: "Server",
+            ackCode: AckCodes.SessionJoined,
+            message: $"{packet.DisplayName}님이 세션에 참여했습니다.",
+            sessionId: CurrentSession.SessionId,
+            correlationId: packet.CorrelationId);
+    }
+
+    private BasePacket HandleLeave(string clientId, SessionLeavePacket packet)
+    {
+        if (CurrentSession is null)
+        {
+            return CreateError(ErrorCodes.SessionNotOpen, "현재 열려 있는 세션이 없습니다.", false, packet);
+        }
+
+        if (!_clientDisplayNames.TryGetValue(clientId, out var displayName))
+        {
+            _logSink.Write($"비참가자 이탈 요청 차단: clientId={clientId}, 요청 이름={packet.DisplayName}");
+            return CreateError(
+                ErrorCodes.NotParticipant,
+                "세션에 참여하지 않은 상태에서는 이탈 요청을 보낼 수 없습니다.",
+                true,
+                packet);
+        }
+
+        if (!string.IsNullOrWhiteSpace(packet.DisplayName) &&
+            !string.Equals(packet.DisplayName, displayName, StringComparison.Ordinal))
+        {
+            _logSink.Write($"이탈 요청 이름 불일치: clientId={clientId}, 매핑 이름={displayName}, 요청 이름={packet.DisplayName}");
+            return CreateError(
+                ErrorCodes.NotParticipant,
+                "현재 연결의 참여자 이름과 이탈 요청 정보가 일치하지 않습니다.",
+                true,
+                packet);
+        }
+
+        displayName = RemoveParticipant(clientId);
+        _logSink.Write($"[Session] 이탈: {displayName ?? "(unknown)"}, 현재 인원={CurrentSession.ParticipantCount}");
+
+        return PacketFactory.CreateAck(
+            senderId: "Server",
+            ackCode: AckCodes.SessionLeft,
+            message: "세션 이탈이 처리되었습니다.",
+            sessionId: CurrentSession.SessionId,
+            correlationId: packet.CorrelationId);
+    }
+
+    private string? GetDisplayName(string clientId, string? packetDisplayName)
+    {
+        if (!string.IsNullOrWhiteSpace(packetDisplayName))
+            return packetDisplayName;
+
+        _clientDisplayNames.TryGetValue(clientId, out var name);
+        return name;
+    }
+
+    private bool TryAddParticipant(string clientId, string displayName)
+    {
+        if (!_participants.TryAdd(displayName, clientId))
+            return false;
+
+        _clientDisplayNames.TryAdd(clientId, displayName);
+        UpdateParticipantCount();
+        ParticipantsChanged?.Invoke();
+        return true;
+    }
+
+    private string? RemoveParticipant(string clientId)
+    {
+        if (!_clientDisplayNames.TryRemove(clientId, out var displayName))
+            return null;
+
+        _participants.TryRemove(displayName, out _);
+        UpdateParticipantCount();
+        ParticipantsChanged?.Invoke();
+        return displayName;
+    }
+
+    private void ClearParticipants()
+    {
+        _participants.Clear();
+        _clientDisplayNames.Clear();
+        _clientLastSeen.Clear();
+        UpdateParticipantCount();
+        ParticipantsChanged?.Invoke();
+    }
+
+    private void UpdateParticipantCount()
+    {
+        if (CurrentSession is not null)
+            CurrentSession.ParticipantCount = _participants.Count;
+    }
+
+    private async Task BroadcastSystemMessageAsync(string message)
+    {
+        var systemChat = PacketFactory.CreateSystemChat(
+            message: message,
+            sessionId: CurrentSession?.SessionId);
+
+        systemChat.SenderId = "Server";
+
+        await _tcpServer.BroadcastAsync(systemChat);
+        ChatReceived?.Invoke("System", message);
+        _logSink.Write($"[Chat] 시스템 브로드캐스트: {message}");
     }
 
     private static ErrorPacket CreateError(string errorCode, string message, bool isRecoverable, BasePacket requestPacket)
     {
-        return new ErrorPacket
+        return PacketFactory.CreateError(
+            senderId: "Server",
+            errorCode: errorCode,
+            message: message,
+            isRecoverable: isRecoverable,
+            sessionId: requestPacket.SessionId,
+            correlationId: requestPacket.CorrelationId);
+    }
+
+    private static void ValidateOutboundPacket(BasePacket packet)
+    {
+        ArgumentNullException.ThrowIfNull(packet);
+
+        if (packet is FilePacket filePacket)
         {
-            SessionId = requestPacket.SessionId,
-            SenderId = "Server",
-            CorrelationId = requestPacket.CorrelationId,
-            ErrorCode = errorCode,
-            Message = message,
-            IsRecoverable = isRecoverable
-        };
+            FileTransferUtility.ValidatePacketMetadata(filePacket);
+        }
     }
 }

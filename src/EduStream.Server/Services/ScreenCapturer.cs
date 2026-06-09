@@ -4,6 +4,7 @@ using System.IO;
 using System.Windows.Forms;
 using EduStream.Core.Models;
 using EduStream.Core.Protocols;
+using EduStream.Core.Utils;
 
 namespace EduStream.Server.Services;
 
@@ -13,7 +14,19 @@ namespace EduStream.Server.Services;
 /// </summary>
 public sealed class ScreenCapturer
 {
+    private readonly ScreenCaptureSettings _settings;
     private int _frameIndex;
+
+    public ScreenCapturer()
+        : this(new ScreenCaptureSettings())
+    {
+    }
+
+    public ScreenCapturer(ScreenCaptureSettings settings)
+    {
+        ScreenTransferUtility.ValidateCaptureSettings(settings);
+        _settings = settings;
+    }
 
     public ScreenPacket CapturePreviewFrame()
     {
@@ -29,7 +42,7 @@ public sealed class ScreenCapturer
         }
     }
 
-    private static ScreenPacket CaptureDesktopFrame(int frameIndex)
+    private ScreenPacket CaptureDesktopFrame(int frameIndex)
     {
         var bounds = Screen.PrimaryScreen?.Bounds ?? new Rectangle(0, 0, 1280, 720);
 
@@ -41,11 +54,11 @@ public sealed class ScreenCapturer
 
         return CreatePngPacket(
             frameIndex,
-            $"Desktop preview frame {frameIndex}",
+            $"{_settings.CaptureSourceName} preview frame {frameIndex}",
             bitmap);
     }
 
-    private static ScreenPacket CreatePlaceholderFrame(int frameIndex)
+    private ScreenPacket CreatePlaceholderFrame(int frameIndex)
     {
         const int width = 1280;
         const int height = 720;
@@ -75,25 +88,29 @@ public sealed class ScreenCapturer
 
         return CreatePngPacket(
             frameIndex,
-            $"Placeholder preview frame {frameIndex}",
+            $"{_settings.CaptureSourceName} placeholder frame {frameIndex}",
             bitmap);
     }
 
-    private static ScreenPacket CreatePngPacket(int frameIndex, string description, Bitmap bitmap)
+    private ScreenPacket CreatePngPacket(int frameIndex, string description, Bitmap bitmap)
     {
         using var stream = new MemoryStream();
         bitmap.Save(stream, ImageFormat.Png);
 
         var content = stream.ToArray();
-        return new ScreenPacket
+        var packet = new ScreenPacket
         {
             FrameIndex = frameIndex,
             FrameDescription = description,
+            CapturedAt = DateTimeOffset.UtcNow,
             Width = bitmap.Width,
             Height = bitmap.Height,
-            Encoding = ScreenEncodings.Png,
+            Encoding = _settings.Encoding,
             Content = content,
             DataLength = content.Length
         };
+
+        ScreenTransferUtility.ValidatePacketMetadata(packet);
+        return packet;
     }
 }

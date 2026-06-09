@@ -1,3 +1,4 @@
+using EduStream.Core.Factories;
 using EduStream.Core.Logging;
 using EduStream.Core.Models;
 using EduStream.Core.Protocols;
@@ -22,13 +23,11 @@ public sealed class SessionClient
 
     public SessionJoinPacket CreateJoinRequest(string hostAddress, int port, string displayName)
     {
-        return new SessionJoinPacket
-        {
-            SenderId = displayName,
-            DisplayName = displayName,
-            TargetAddress = hostAddress,
-            TargetPort = port
-        };
+        return PacketFactory.CreateSessionJoin(
+            senderId: displayName,
+            displayName: displayName,
+            targetAddress: hostAddress,
+            targetPort: port);
     }
 
     public Task<SessionInfo> ApplyJoinAckAsync(AckPacket packet, string hostAddress, int port)
@@ -48,24 +47,20 @@ public sealed class SessionClient
 
     public ErrorPacket CreateJoinError(string hostAddress, int port, string message)
     {
-        return new ErrorPacket
-        {
-            SenderId = "Client",
-            ErrorCode = ErrorCodes.JoinRejected,
-            Message = $"{hostAddress}:{port} 연결 실패 - {message}",
-            IsRecoverable = true
-        };
+        return PacketFactory.CreateError(
+            senderId: "Client",
+            errorCode: ErrorCodes.JoinRejected,
+            message: $"{hostAddress}:{port} 연결 실패 - {message}",
+            isRecoverable: true);
     }
 
-    public SessionLeavePacket CreateLeaveRequest(string displayName, string reason)
+    public SessionLeavePacket CreateLeaveRequest(string senderId, string reason)
     {
-        return new SessionLeavePacket
-        {
-            SessionId = CurrentSession?.SessionId,
-            SenderId = displayName,
-            DisplayName = displayName,
-            Reason = reason
-        };
+        return PacketFactory.CreateSessionLeave(
+            senderId: senderId,
+            displayName: senderId,
+            reason: reason,
+            sessionId: CurrentSession?.SessionId);
     }
 
     public Task DisconnectAsync(string reason = "사용자 종료")
