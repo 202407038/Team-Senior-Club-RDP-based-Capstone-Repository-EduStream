@@ -47,7 +47,11 @@ public sealed class FileReceiver
                 var singlePath = Path.Combine(targetDirectory, packet.FileName);
 
                 await File.WriteAllBytesAsync(singlePath, packet.Content);
-                return FileReceiveResult.CreateSuccess(singlePath);
+                return FileReceiveResult.CreateSuccess(
+                    singlePath,
+                    $"{packet.FileName} 저장 완료",
+                    receivedChunkCount: 1,
+                    totalChunks: 1);
             }
 
             var addResult = AddChunkAndTryAssemble(packet);
@@ -58,7 +62,10 @@ public sealed class FileReceiver
 
             if (addResult.Pending)
             {
-                return FileReceiveResult.CreatePending("파일 청크를 수신 중입니다.");
+                return FileReceiveResult.CreatePending(
+                    "파일 청크를 수신 중입니다.",
+                    addResult.ReceivedChunkCount,
+                    packet.TotalChunks);
             }
 
             if (addResult.AssembledContent is null)
@@ -75,7 +82,11 @@ public sealed class FileReceiver
             var savePath = Path.Combine(targetDirectory, packet.FileName);
 
             await File.WriteAllBytesAsync(savePath, addResult.AssembledContent);
-            return FileReceiveResult.CreateSuccess(savePath);
+            return FileReceiveResult.CreateSuccess(
+                savePath,
+                $"{packet.FileName} 저장 완료",
+                packet.TotalChunks,
+                packet.TotalChunks);
         }
         catch (ArgumentNullException ex)
         {
@@ -144,7 +155,7 @@ public sealed class FileReceiver
                     return ChunkAddResult.Failure(ErrorCodes.FileChunkMetadataMismatch, "동일 인덱스 청크가 서로 다른 내용으로 수신되었습니다.");
                 }
 
-                return ChunkAddResult.CreatePending();
+                return ChunkAddResult.CreatePending(buffer.ReceivedChunkCount);
             }
 
             buffer.Chunks[packet.ChunkIndex] = packet.Content.ToArray();
@@ -152,7 +163,7 @@ public sealed class FileReceiver
 
             if (buffer.ReceivedChunkCount < buffer.TotalChunks)
             {
-                return ChunkAddResult.CreatePending();
+                return ChunkAddResult.CreatePending(buffer.ReceivedChunkCount);
             }
 
             try
@@ -173,7 +184,7 @@ public sealed class FileReceiver
                 }
 
                 _chunkBuffers.Remove(packet.TransferId);
-                return ChunkAddResult.Completed(assembledContent);
+                return ChunkAddResult.Completed(assembledContent, buffer.ReceivedChunkCount);
             }
             catch (OverflowException)
             {
@@ -202,12 +213,12 @@ public sealed class FileReceiver
         public byte[][] Chunks { get; }
     }
 
-    private readonly record struct ChunkAddResult(bool Pending, byte[]? AssembledContent, string? ErrorCode, string? ErrorMessage)
+    private readonly record struct ChunkAddResult(bool Pending, byte[]? AssembledContent, string? ErrorCode, string? ErrorMessage, int ReceivedChunkCount)
     {
-        public static ChunkAddResult CreatePending() => new(true, null, null, null);
+        public static ChunkAddResult CreatePending(int receivedChunkCount) => new(true, null, null, null, receivedChunkCount);
 
-        public static ChunkAddResult Completed(byte[] assembledContent) => new(false, assembledContent, null, null);
+        public static ChunkAddResult Completed(byte[] assembledContent, int receivedChunkCount) => new(false, assembledContent, null, null, receivedChunkCount);
 
-        public static ChunkAddResult Failure(string errorCode, string message) => new(false, null, errorCode, message);
+        public static ChunkAddResult Failure(string errorCode, string message) => new(false, null, errorCode, message, 0);
     }
 }
