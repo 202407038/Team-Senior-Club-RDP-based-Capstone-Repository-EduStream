@@ -8,6 +8,7 @@
     <ApplicationDefinition Remove="EduStream.Server\App.xaml" />
     <Compile Remove="EduStream.Server\**\*.cs" />
     <Page Remove="EduStream.Server\**\*.xaml" />
+    <Page Include="..\EduStream.Client\Themes\EduStreamTheme.xaml" Link="Themes\EduStreamTheme.xaml" />
   </ItemGroup>
 
   <PropertyGroup>

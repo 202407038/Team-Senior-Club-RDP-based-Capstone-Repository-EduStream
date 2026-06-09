@@ -32,6 +32,10 @@ public sealed class ServerViewModel : ObservableObject
     private string _rdpPassword = string.Empty;
     private string _rdpStatus = "RDP preview is idle.";
     private bool _isSessionOpen;
+    private bool _isBusy;
+    private string _sessionStatus = "세션 대기 중";
+    private string _statusMessage = "세션 이름과 포트를 설정한 뒤 세션을 열어 주세요.";
+    private bool _isStatusError;
     private int _participantCount;
 
     public ServerViewModel(RdpHost? rdpHost = null)
@@ -46,8 +50,8 @@ public sealed class ServerViewModel : ObservableObject
 
         _sessionManager.ParticipantsChanged += OnParticipantsChanged;
 
-        OpenSessionCommand = new RelayCommand(() => _ = OpenSessionAsync(), () => !IsSessionOpen);
-        CloseSessionCommand = new RelayCommand(() => _ = CloseSessionAsync(), () => IsSessionOpen);
+        OpenSessionCommand = new RelayCommand(() => _ = OpenSessionAsync(), () => !IsSessionOpen && !IsBusy);
+        CloseSessionCommand = new RelayCommand(() => _ = CloseSessionAsync(), () => IsSessionOpen && !IsBusy);
         StartScreenShareCommand = new RelayCommand(() => _ = StartScreenShareAsync(), () => IsSessionOpen);
         SendSampleFileCommand = new RelayCommand(() => _ = SendSampleFileAsync(), () => IsSessionOpen);
         SendChatCommand = new RelayCommand(() => _ = SendChatAsync(), () => IsSessionOpen && !string.IsNullOrWhiteSpace(ChatInput));
@@ -126,6 +130,37 @@ public sealed class ServerViewModel : ObservableObject
         }
     }
 
+    public bool IsBusy
+    {
+        get => _isBusy;
+        private set
+        {
+            if (SetProperty(ref _isBusy, value))
+            {
+                OpenSessionCommand.RaiseCanExecuteChanged();
+                CloseSessionCommand.RaiseCanExecuteChanged();
+            }
+        }
+    }
+
+    public string SessionStatus
+    {
+        get => _sessionStatus;
+        private set => SetProperty(ref _sessionStatus, value);
+    }
+
+    public string StatusMessage
+    {
+        get => _statusMessage;
+        private set => SetProperty(ref _statusMessage, value);
+    }
+
+    public bool IsStatusError
+    {
+        get => _isStatusError;
+        private set => SetProperty(ref _isStatusError, value);
+    }
+
     public int ParticipantCount
     {
         get => _participantCount;
@@ -136,7 +171,7 @@ public sealed class ServerViewModel : ObservableObject
 
     public ObservableCollection<string> SharedFiles { get; } = [];
 
-    public ObservableCollection<string> ChatMessages { get; } = [];
+    public ObservableCollection<ChatLine> ChatMessages { get; } = [];
 
     public RelayCommand OpenSessionCommand { get; }
 
@@ -162,25 +197,60 @@ public sealed class ServerViewModel : ObservableObject
 
     private async Task OpenSessionAsync()
     {
-        await _sessionManager.OpenSessionAsync(SessionName, Port);
-        _heartbeatService.Start();
-        IsSessionOpen = true;
-        RdpStatus = _rdpHost.IsAttached
-            ? "RDP preview is ready. Enter credentials and start the connection."
-            : "RDP preview host is not attached yet.";
-        SyncLogs();
+        IsBusy = true;
+        SessionStatus = "세션 여는 중...";
+
+        try
+        {
+            await _sessionManager.OpenSessionAsync(SessionName, Port);
+            _heartbeatService.Start();
+            IsSessionOpen = true;
+            SessionStatus = $"세션 Open · 포트 {Port}";
+            StatusMessage = $"'{SessionName}' 세션이 시작되었습니다.";
+            IsStatusError = false;
+            RdpStatus = _rdpHost.IsAttached
+                ? "RDP 미리보기 준비됨. 자격 증명을 입력하고 연결을 시작하세요."
+                : "RDP 미리보기 호스트가 아직 연결되지 않았습니다.";
+            ChatMessages.Insert(0, ChatLine.System("세션이 열렸습니다."));
+            SyncLogs();
+        }
+        catch (Exception ex)
+        {
+            SessionStatus = "세션 Open 실패";
+            StatusMessage = ex.Message;
+            IsStatusError = true;
+            SyncLogs();
+        }
+        finally
+        {
+            IsBusy = false;
+        }
     }
 
     private async Task CloseSessionAsync()
     {
-        _heartbeatService.Stop();
-        await _rdpHost.StopHostAsync();
-        await _sessionManager.CloseSessionAsync();
-        IsSessionOpen = false;
-        ParticipantCount = 0;
-        LatestScreenStatus = "Session closed.";
-        RdpStatus = "RDP preview stopped.";
-        SyncLogs();
+        IsBusy = true;
+        SessionStatus = "세션 닫는 중...";
+
+        try
+        {
+            _heartbeatService.Stop();
+            await _rdpHost.StopHostAsync();
+            await _sessionManager.CloseSessionAsync();
+            IsSessionOpen = false;
+            ParticipantCount = 0;
+            SessionStatus = "세션 닫힘";
+            LatestScreenStatus = "화면 공유가 중지되었습니다.";
+            RdpStatus = "RDP 미리보기가 중지되었습니다.";
+            StatusMessage = "세션이 종료되었습니다.";
+            IsStatusError = false;
+            ChatMessages.Insert(0, ChatLine.System("세션이 닫혔습니다."));
+            SyncLogs();
+        }
+        finally
+        {
+            IsBusy = false;
+        }
     }
 
     private async Task StartScreenShareAsync()
@@ -188,7 +258,7 @@ public sealed class ServerViewModel : ObservableObject
         var frame = _screenCapturer.CapturePreviewFrame();
         frame.DataLength = frame.Content.Length;
         await _sessionManager.BroadcastPacketAsync(frame);
-        LatestScreenStatus = $"{frame.FrameDescription} is ready to broadcast.";
+        LatestScreenStatus = $"{frame.FrameDescription} 전송 준비 완료";
         SyncLogs();
     }
 
@@ -214,7 +284,7 @@ public sealed class ServerViewModel : ObservableObject
         packet.DataLength = ChatInput.Length;
         await _sessionManager.BroadcastPacketAsync(packet);
 
-        ChatMessages.Insert(0, $"Professor: {ChatInput}");
+        ChatMessages.Insert(0, ChatLine.User("교수자", ChatInput, isSelf: true));
         ChatInput = string.Empty;
         SyncLogs();
     }
@@ -224,11 +294,11 @@ public sealed class ServerViewModel : ObservableObject
         try
         {
             await _rdpHost.StartHostAsync(RdpServerAddress, RdpUserName, RdpPassword);
-            RdpStatus = $"RDP connection started for {RdpServerAddress}.";
+            RdpStatus = $"RDP 연결 시작: {RdpServerAddress}";
         }
         catch (Exception ex)
         {
-            RdpStatus = $"RDP start failed: {ex.Message}";
+            RdpStatus = $"RDP 시작 실패: {ex.Message}";
             _logSink.Write(RdpStatus);
         }
 
@@ -238,7 +308,7 @@ public sealed class ServerViewModel : ObservableObject
     private async Task StopRdpPreviewAsync()
     {
         await _rdpHost.StopHostAsync();
-        RdpStatus = "RDP preview stopped.";
+        RdpStatus = "RDP 미리보기가 중지되었습니다.";
         SyncLogs();
     }
 
@@ -247,6 +317,11 @@ public sealed class ServerViewModel : ObservableObject
         System.Windows.Application.Current?.Dispatcher.Invoke(() =>
         {
             ParticipantCount = _sessionManager.ParticipantCount;
+            if (IsSessionOpen)
+            {
+                SessionStatus = $"세션 Open · 참가자 {ParticipantCount}명";
+            }
+
             SyncLogs();
         });
     }

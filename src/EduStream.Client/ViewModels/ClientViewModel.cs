@@ -29,6 +29,7 @@ public sealed class ClientViewModel : ObservableObject
     private string _statusMessage = "서버 주소를 입력한 뒤 세션에 참여하세요.";
     private string _chatInput = string.Empty;
     private bool _isConnected;
+    private bool _isConnecting;
     private bool _isStatusError;
     private bool _hasRemoteFrame;
     private ImageSource? _displaySource;
@@ -131,6 +132,19 @@ public sealed class ClientViewModel : ObservableObject
                 SendChatCommand.RaiseCanExecuteChanged();
                 SimulateFileReceiveCommand.RaiseCanExecuteChanged();
                 SimulateScreenRenderCommand.RaiseCanExecuteChanged();
+                NotifyPlaceholderChanged();
+            }
+        }
+    }
+
+    public bool IsConnecting
+    {
+        get => _isConnecting;
+        private set
+        {
+            if (SetProperty(ref _isConnecting, value))
+            {
+                JoinSessionCommand.RaiseCanExecuteChanged();
             }
         }
     }
@@ -156,7 +170,7 @@ public sealed class ClientViewModel : ObservableObject
 
     public ObservableCollection<string> ActivityLogs { get; } = [];
 
-    public ObservableCollection<string> ChatMessages { get; } = [];
+    public ObservableCollection<ChatLine> ChatMessages { get; } = [];
 
     public ObservableCollection<string> DownloadedFiles { get; } = [];
 
@@ -173,6 +187,7 @@ public sealed class ClientViewModel : ObservableObject
     private bool CanJoinSession()
     {
         return !IsConnected
+            && !IsConnecting
             && !string.IsNullOrWhiteSpace(HostAddress)
             && !string.IsNullOrWhiteSpace(DisplayName);
     }
@@ -185,23 +200,32 @@ public sealed class ClientViewModel : ObservableObject
             return;
         }
 
-        var joinRequest = _sessionClient.CreateJoinRequest(HostAddress, Port, DisplayName);
-        var ack = new AckPacket
-        {
-            SessionId = Guid.NewGuid(),
-            SenderId = "Server",
-            AckCode = AckCodes.SessionJoined,
-            Message = $"{DisplayName}님, 세션 참여가 승인되었습니다."
-        };
+        IsConnecting = true;
+        ConnectionState = "연결 중...";
 
-        await _sessionClient.ApplyJoinAckAsync(ack, HostAddress, Port);
-        IsConnected = true;
-        ConnectionState = $"연결됨 · {HostAddress}:{Port}";
-        ApplyAck(ack);
-        ChatMessages.Insert(0, "시스템: 세션에 참여했습니다.");
-        _logSink.Write($"세션 참여 요청: {joinRequest.DisplayName} -> {joinRequest.TargetAddress}:{joinRequest.TargetPort}");
-        NotifyPlaceholderChanged();
-        SyncLogs();
+        try
+        {
+            var joinRequest = _sessionClient.CreateJoinRequest(HostAddress, Port, DisplayName);
+            var ack = new AckPacket
+            {
+                SessionId = Guid.NewGuid(),
+                SenderId = "Server",
+                AckCode = AckCodes.SessionJoined,
+                Message = $"{DisplayName}님, 세션 참여가 승인되었습니다."
+            };
+
+            await _sessionClient.ApplyJoinAckAsync(ack, HostAddress, Port);
+            IsConnected = true;
+            ConnectionState = $"연결됨 · {HostAddress}:{Port}";
+            ApplyAck(ack);
+            ChatMessages.Insert(0, ChatLine.System("세션에 참여했습니다."));
+            _logSink.Write($"세션 참여 요청: {joinRequest.DisplayName} -> {joinRequest.TargetAddress}:{joinRequest.TargetPort}");
+            SyncLogs();
+        }
+        finally
+        {
+            IsConnecting = false;
+        }
     }
 
     private async Task DisconnectAsync()
@@ -217,15 +241,14 @@ public sealed class ClientViewModel : ObservableObject
         IsStatusError = false;
         HasRemoteFrame = false;
         DisplaySource = null;
-        ChatMessages.Insert(0, "시스템: 세션 연결이 종료되었습니다.");
-        NotifyPlaceholderChanged();
+        ChatMessages.Insert(0, ChatLine.System("세션 연결이 종료되었습니다."));
         SyncLogs();
     }
 
     private void SendChat()
     {
         var message = ChatInput.Trim();
-        ChatMessages.Insert(0, $"{DisplayName}: {message}");
+        ChatMessages.Insert(0, ChatLine.User(DisplayName, message, isSelf: true));
         _logSink.Write($"채팅 전송: {message}");
         ChatInput = string.Empty;
         SyncLogs();
