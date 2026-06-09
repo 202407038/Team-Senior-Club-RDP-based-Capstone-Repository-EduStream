@@ -28,9 +28,25 @@ public sealed class FileDistributorTests
             Assert.Equal(Path.GetFileName(filePath), packet.FileName);
             Assert.Equal(packets.Count, packet.TotalChunks);
             Assert.True(packet.Content.Length > 0);
+            Assert.Equal(packet.Content.Length, packet.DataLength);
         });
         Assert.Equal(0, packets[0].ChunkIndex);
         Assert.Equal(packets.Count - 1, packets[^1].ChunkIndex);
+    }
+
+    [Fact]
+    public async Task BuildFilePacketAsync_ShouldUsePayloadLengthForDataLength()
+    {
+        var distributor = new FileDistributor(new PacketSerializer(), new InMemoryLogSink());
+        var content = Encoding.UTF8.GetBytes("단일 파일 payload 길이 확인");
+        var filePath = CreateSampleFile(content);
+
+        var packet = await distributor.BuildFilePacketAsync(filePath);
+
+        Assert.Equal(content.Length, packet.DataLength);
+        Assert.Equal(content.Length, packet.ContentLength);
+        Assert.Equal(0, packet.ChunkIndex);
+        Assert.Equal(1, packet.TotalChunks);
     }
 
     [Fact]
@@ -51,11 +67,16 @@ public sealed class FileDistributorTests
 
     private static string CreateSampleFile(string content)
     {
+        return CreateSampleFile(Encoding.UTF8.GetBytes(content));
+    }
+
+    private static string CreateSampleFile(byte[] content)
+    {
         var directory = Path.Combine(Path.GetTempPath(), "EduStream-Distributor-Tests", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(directory);
 
         var path = Path.Combine(directory, "sample.txt");
-        File.WriteAllBytes(path, Encoding.UTF8.GetBytes(content));
+        File.WriteAllBytes(path, content);
         return path;
     }
 }

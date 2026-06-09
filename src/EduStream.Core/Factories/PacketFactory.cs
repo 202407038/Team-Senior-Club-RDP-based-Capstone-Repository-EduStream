@@ -1,3 +1,4 @@
+using System.Text;
 using EduStream.Core.Models;
 
 namespace EduStream.Core.Factories;
@@ -53,7 +54,7 @@ public static class PacketFactory
             SenderId = senderId,
             AckCode = ackCode,
             Message = message,
-            DataLength = message.Length,
+            DataLength = GetTextPayloadLength(message),
             CorrelationId = correlationId ?? Guid.NewGuid()
         };
     }
@@ -73,7 +74,7 @@ public static class PacketFactory
             ErrorCode = errorCode,
             Message = message,
             IsRecoverable = isRecoverable,
-            DataLength = message.Length,
+            DataLength = GetTextPayloadLength(message),
             CorrelationId = correlationId ?? Guid.NewGuid()
         };
     }
@@ -92,7 +93,7 @@ public static class PacketFactory
             Sender = sender,
             Message = message,
             IsSystemMessage = isSystemMessage,
-            DataLength = message.Length
+            DataLength = GetTextPayloadLength(message)
         };
     }
 
@@ -173,5 +174,10 @@ public static class PacketFactory
             Content = content,
             DataLength = content.Length
         };
+    }
+
+    private static int GetTextPayloadLength(string message)
+    {
+        return Encoding.UTF8.GetByteCount(message);
     }
 }

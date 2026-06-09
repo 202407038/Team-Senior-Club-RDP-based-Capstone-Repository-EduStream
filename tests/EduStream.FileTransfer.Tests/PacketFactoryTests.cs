@@ -1,3 +1,4 @@
+using System.Text;
 using EduStream.Core.Factories;
 using EduStream.Core.Models;
 using EduStream.Core.Protocols;
@@ -58,6 +59,21 @@ public sealed class PacketFactoryTests
         Assert.Equal("server", packet.SenderId);
         Assert.Equal(sessionId, packet.SessionId);
         Assert.Equal(now, packet.LastSeenAt);
+    }
+
+    [Fact]
+    public void CreateTextPackets_ShouldUseUtf8PayloadLength()
+    {
+        const string message = "세션 참여 완료";
+        var expectedLength = Encoding.UTF8.GetByteCount(message);
+
+        var ack = PacketFactory.CreateAck("server", AckCodes.SessionJoined, message);
+        var error = PacketFactory.CreateError("server", ErrorCodes.JoinRejected, message, true);
+        var chat = PacketFactory.CreateChat("student-01", "Student 01", message);
+
+        Assert.Equal(expectedLength, ack.DataLength);
+        Assert.Equal(expectedLength, error.DataLength);
+        Assert.Equal(expectedLength, chat.DataLength);
     }
 
     [Fact]
