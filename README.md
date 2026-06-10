@@ -13,6 +13,8 @@ EduStream은 교수자 화면 공유, 파일 전송, 텍스트 채팅을 하나�
 
 ## 실행 및 검증
 
+자세한 실행 순서와 기본 설정은 [실행 및 설정 가이드](docs/work/RUN_GUIDE.md)를 확인합니다.
+
 ### 빌드
 
 ```bash
@@ -29,6 +31,7 @@ dotnet test EduStream.sln --no-build
 
 작업자는 아래 두 문서를 우선 확인합니다.
 
+- [실행 및 설정 가이드](docs/work/RUN_GUIDE.md)
 - [현재 상태와 로드맵](docs/work/STATUS_AND_ROADMAP.md)
 - [개발 작업 방식](docs/work/DEVELOPMENT_GUIDE.md)
 
@@ -43,5 +46,5 @@ dotnet test EduStream.sln --no-build
 
 - 현재 작업 방향은 졸작 중간발표 PPT의 월간 로드맵을 기준으로 합니다.
 - 로드맵은 현재 달과 다음 달까지만 유지합니다.
-- 완료된 작업은 로드맵 문서에서 `~~내용~~ 완료` 형식으로 표시합니다.
+- 완료된 작업은 로드맵 문서에서 `내용 ----- %완료%` 형식으로 표시합니다.
 - 오래된 계획 문서는 `docs/archive`에 보관합니다.
