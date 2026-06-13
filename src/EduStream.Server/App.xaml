@@ -2,8 +2,17 @@
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:local="clr-namespace:EduStream.Server"
+             xmlns:conv="clr-namespace:EduStream.Server.Converters"
              StartupUri="MainWindow.xaml">
     <Application.Resources>
-         
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="Themes/EduStreamTheme.xaml" />
+            </ResourceDictionary.MergedDictionaries>
+
+            <conv:BoolToVisibilityConverter x:Key="BoolToVis" />
+            <conv:ConnectionStateToBrushConverter x:Key="StateToBrush" />
+            <conv:InverseBooleanConverter x:Key="InverseBool" />
+        </ResourceDictionary>
     </Application.Resources>
 </Application>

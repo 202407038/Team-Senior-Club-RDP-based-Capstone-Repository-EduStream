@@ -6,135 +6,268 @@
         xmlns:wfi="clr-namespace:System.Windows.Forms.Integration;assembly=WindowsFormsIntegration"
         mc:Ignorable="d"
         Title="EduStream Server"
-        Height="760"
-        Width="1280"
-        MinHeight="680"
-        MinWidth="1080">
-    <Grid Margin="20">
-        <Border Padding="20" CornerRadius="12" Background="#FFF7F4EA" BorderBrush="#FFE0D6B8" BorderThickness="1">
-            <Grid>
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="1.4*" />
-                    <ColumnDefinition Width="16" />
-                    <ColumnDefinition Width="1.2*" />
-                </Grid.ColumnDefinitions>
+        Height="820"
+        Width="1360"
+        MinHeight="640"
+        MinWidth="1080"
+        Background="{StaticResource BrushBgPrimary}"
+        WindowStartupLocation="CenterScreen">
 
-                <ScrollViewer VerticalScrollBarVisibility="Auto">
-                    <StackPanel>
-                        <TextBlock FontSize="28" FontWeight="Bold" Text="Professor Session Dashboard" />
-                        <TextBlock Margin="0,8,0,0"
-                                   Foreground="#FF5F5A4E"
-                                   Text="Open a lecture session, send sample content, and test a local RDP integration spike from the same window."
-                                   TextWrapping="Wrap" />
+    <Grid Margin="16">
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="*" MinWidth="480" />
+            <ColumnDefinition Width="16" />
+            <ColumnDefinition Width="380" MinWidth="320" MaxWidth="440" />
+        </Grid.ColumnDefinitions>
 
-                        <UniformGrid Margin="0,20,0,0" Columns="2">
-                            <StackPanel Margin="0,0,12,0">
-                                <TextBlock FontWeight="SemiBold" Text="Session Name" />
-                                <TextBox Margin="0,6,0,0" Padding="10,8" Text="{Binding SessionName, UpdateSourceTrigger=PropertyChanged}" />
-                            </StackPanel>
-                            <StackPanel Margin="12,0,0,0">
-                                <TextBlock FontWeight="SemiBold" Text="Port" />
-                                <TextBox Margin="0,6,0,0" Padding="10,8" Text="{Binding Port, UpdateSourceTrigger=PropertyChanged}" />
-                            </StackPanel>
-                        </UniformGrid>
+        <!-- Left: session controls + RDP preview -->
+        <Grid Grid.Column="0">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="12" />
+                <RowDefinition Height="*" MinHeight="280" />
+            </Grid.RowDefinitions>
 
-                        <WrapPanel Margin="0,20,0,0">
-                            <Button Margin="0,0,10,10" Padding="18,10" Command="{Binding OpenSessionCommand}" Content="Open Session" />
-                            <Button Margin="0,0,10,10" Padding="18,10" Command="{Binding CloseSessionCommand}" Content="Close Session" />
-                            <Button Margin="0,0,10,10" Padding="18,10" Command="{Binding StartScreenShareCommand}" Content="Send Preview Frame" />
-                            <Button Margin="0,0,10,10" Padding="18,10" Command="{Binding StartAutoScreenShareCommand}" Content="Start Auto Share" />
-                            <Button Margin="0,0,10,10" Padding="18,10" Command="{Binding StopAutoScreenShareCommand}" Content="Stop Auto Share" />
-                            <Button Margin="0,0,10,10" Padding="18,10" Command="{Binding SendSampleFileCommand}" Content="Send Sample File" />
-                        </WrapPanel>
-
-                        <Border Margin="0,14,0,0" Padding="16" Background="White" BorderBrush="#FFE0D6B8" BorderThickness="1" CornerRadius="10">
-                            <StackPanel>
-                                <TextBlock FontWeight="SemiBold" Text="Screen Sharing Status" />
-                                <TextBlock Margin="0,8,0,0" Text="{Binding LatestScreenStatus}" />
-                                <UniformGrid Margin="0,12,0,0" Columns="2">
-                                    <StackPanel Margin="0,0,12,0">
-                                        <TextBlock FontWeight="SemiBold" Text="Loop Status" />
-                                        <TextBlock Margin="0,6,0,0" Text="{Binding ScreenLoopStatus}" TextWrapping="Wrap" />
-                                    </StackPanel>
-                                    <StackPanel Margin="12,0,0,0">
-                                        <TextBlock FontWeight="SemiBold" Text="Broadcast Frames" />
-                                        <TextBlock Margin="0,6,0,0" Text="{Binding ScreenFrameCount}" />
-                                    </StackPanel>
-                                </UniformGrid>
-                            </StackPanel>
-                        </Border>
-
-                        <Border Margin="0,16,0,0" Padding="16" Background="White" BorderBrush="#FFE0D6B8" BorderThickness="1" CornerRadius="10">
-                            <StackPanel>
-                                <TextBlock FontWeight="SemiBold" Text="RDP Integration Test" />
-                                <TextBlock Margin="0,6,0,0"
-                                           Foreground="#FF5F5A4E"
-                                           Text="This uses the built-in Microsoft Remote Desktop ActiveX control inside a WPF WindowsFormsHost."
-                                           TextWrapping="Wrap" />
-
-                                <TextBlock Margin="0,14,0,0" FontWeight="SemiBold" Text="RDP Server" />
-                                <TextBox Margin="0,6,0,0" Padding="10,8" Text="{Binding RdpServerAddress, UpdateSourceTrigger=PropertyChanged}" />
-
-                                <TextBlock Margin="0,12,0,0" FontWeight="SemiBold" Text="User Name" />
-                                <TextBox Margin="0,6,0,0" Padding="10,8" Text="{Binding RdpUserName, UpdateSourceTrigger=PropertyChanged}" />
-
-                                <TextBlock Margin="0,12,0,0" FontWeight="SemiBold" Text="Password" />
-                                <TextBox Margin="0,6,0,0" Padding="10,8" Text="{Binding RdpPassword, UpdateSourceTrigger=PropertyChanged}" />
-
-                                <WrapPanel Margin="0,14,0,0">
-                                    <Button Margin="0,0,10,10" Padding="18,10" Command="{Binding StartRdpPreviewCommand}" Content="Start RDP" />
-                                    <Button Margin="0,0,10,10" Padding="18,10" Command="{Binding StopRdpPreviewCommand}" Content="Stop RDP" />
-                                </WrapPanel>
-
-                                <TextBlock Margin="0,4,0,0" Text="{Binding RdpStatus}" TextWrapping="Wrap" />
-                            </StackPanel>
-                        </Border>
-
-                        <TextBlock Margin="0,20,0,0" FontWeight="SemiBold" Text="Realtime Chat" />
-                        <DockPanel Margin="0,8,0,0">
-                            <Button DockPanel.Dock="Right" Width="110" Margin="12,0,0,0" Command="{Binding SendChatCommand}" Content="Send Message" />
-                            <TextBox Padding="10,8" Text="{Binding ChatInput, UpdateSourceTrigger=PropertyChanged}" />
-                        </DockPanel>
-                        <ListBox Margin="0,10,0,0" Height="160" ItemsSource="{Binding ChatMessages}" />
+            <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                <StackPanel>
+                    <StackPanel Margin="0,0,0,16">
+                        <TextBlock Text="EDUSTREAM"
+                                   Foreground="{StaticResource BrushAccentPurple}"
+                                   FontSize="24"
+                                   FontWeight="ExtraBold" />
+                        <TextBlock Margin="0,4,0,0"
+                                   Foreground="{StaticResource BrushTextMuted}"
+                                   Text="교수자 세션 대시보드" />
                     </StackPanel>
-                </ScrollViewer>
 
-                <Grid Grid.Column="2">
-                    <Grid.RowDefinitions>
-                        <RowDefinition Height="2*" />
-                        <RowDefinition Height="12" />
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="12" />
-                        <RowDefinition Height="*" />
-                    </Grid.RowDefinitions>
-
-                    <Border Padding="12" Background="White" BorderBrush="#FFE0D6B8" BorderThickness="1" CornerRadius="10">
-                        <Grid>
-                            <TextBlock Margin="8"
-                                       VerticalAlignment="Top"
-                                       Panel.ZIndex="1"
-                                       Background="#CCFFFFFF"
-                                       FontWeight="SemiBold"
-                                       Text="RDP Preview Surface" />
-                            <wfi:WindowsFormsHost x:Name="RdpPreviewHost" Margin="0,28,0,0" />
-                        </Grid>
-                    </Border>
-
-                    <Border Grid.Row="2" Padding="16" Background="White" BorderBrush="#FFE0D6B8" BorderThickness="1" CornerRadius="10">
+                    <Border Style="{StaticResource PanelCard}" Margin="0,0,0,12">
                         <StackPanel>
-                            <TextBlock FontWeight="SemiBold" Text="Shared Files" />
-                            <ListBox Margin="0,10,0,0" Height="120" ItemsSource="{Binding SharedFiles}" />
+                            <TextBlock Style="{StaticResource SectionTitle}" Text="세션 관리" />
+
+                            <UniformGrid Margin="0,14,0,0" Columns="2">
+                                <StackPanel Margin="0,0,8,0">
+                                    <TextBlock Style="{StaticResource FieldLabel}" Text="세션 이름" />
+                                    <TextBox Style="{StaticResource DarkTextBox}"
+                                             IsEnabled="{Binding IsSessionOpen, Converter={StaticResource InverseBool}}"
+                                             Text="{Binding SessionName, UpdateSourceTrigger=PropertyChanged}" />
+                                </StackPanel>
+                                <StackPanel Margin="8,0,0,0">
+                                    <TextBlock Style="{StaticResource FieldLabel}" Text="포트" />
+                                    <TextBox Style="{StaticResource DarkTextBox}"
+                                             IsEnabled="{Binding IsSessionOpen, Converter={StaticResource InverseBool}}"
+                                             Text="{Binding Port, UpdateSourceTrigger=PropertyChanged}" />
+                                </StackPanel>
+                            </UniformGrid>
+
+                            <WrapPanel Margin="0,14,0,0">
+                                <Button Style="{StaticResource PrimaryButton}"
+                                        Margin="0,0,8,8"
+                                        Padding="18,0"
+                                        Content="세션 열기"
+                                        Command="{Binding OpenSessionCommand}" />
+                                <Button Style="{StaticResource SecondaryButton}"
+                                        Margin="0,0,8,8"
+                                        Padding="18,0"
+                                        Content="세션 닫기"
+                                        Command="{Binding CloseSessionCommand}" />
+                                <Button Style="{StaticResource GhostButton}"
+                                        Margin="0,0,8,8"
+                                        Content="화면 프레임 전송"
+                                        Command="{Binding StartScreenShareCommand}" />
+                                <Button Style="{StaticResource GhostButton}"
+                                        Margin="0,0,8,8"
+                                        Content="샘플 파일 전송"
+                                        Command="{Binding SendSampleFileCommand}" />
+                            </WrapPanel>
+
+                            <Border Margin="0,14,0,0"
+                                    Padding="10"
+                                    CornerRadius="8"
+                                    Background="{StaticResource BrushBgElevated}">
+                                <StackPanel Orientation="Horizontal">
+                                    <Ellipse Style="{StaticResource StatusDot}"
+                                             Fill="{Binding SessionStatus, Converter={StaticResource StateToBrush}}" />
+                                    <StackPanel>
+                                        <TextBlock Foreground="{StaticResource BrushTextSecondary}"
+                                                   FontSize="11"
+                                                   Text="세션 상태" />
+                                        <TextBlock Margin="0,4,0,0"
+                                                   Foreground="{StaticResource BrushTextPrimary}"
+                                                   FontWeight="SemiBold"
+                                                   Text="{Binding SessionStatus}" />
+                                        <TextBlock Margin="0,4,0,0"
+                                                   Foreground="{StaticResource BrushAccentTeal}"
+                                                   FontSize="12"
+                                                   Text="{Binding ParticipantCount, StringFormat=참가자 {0}명}" />
+                                    </StackPanel>
+                                </StackPanel>
+                            </Border>
+
+                            <Border Margin="0,10,0,0"
+                                    Padding="10"
+                                    CornerRadius="8"
+                                    Background="{StaticResource BrushBgElevated}">
+                                <Border.Style>
+                                    <Style TargetType="Border">
+                                        <Setter Property="BorderBrush" Value="{StaticResource BrushAccentTeal}" />
+                                        <Setter Property="BorderThickness" Value="0,0,0,2" />
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding IsStatusError}" Value="True">
+                                                <Setter Property="BorderBrush" Value="{StaticResource BrushAccentError}" />
+                                                <Setter Property="Background" Value="#2A1E22" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </Border.Style>
+                                <TextBlock TextWrapping="Wrap" Text="{Binding StatusMessage}">
+                                    <TextBlock.Style>
+                                        <Style TargetType="TextBlock">
+                                            <Setter Property="Foreground" Value="{StaticResource BrushAccentTeal}" />
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding IsStatusError}" Value="True">
+                                                    <Setter Property="Foreground" Value="{StaticResource BrushAccentError}" />
+                                                    <Setter Property="FontWeight" Value="SemiBold" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </TextBlock.Style>
+                                </TextBlock>
+                            </Border>
                         </StackPanel>
                     </Border>
 
-                    <Border Grid.Row="4" Padding="16" Background="White" BorderBrush="#FFE0D6B8" BorderThickness="1" CornerRadius="10">
+                    <Border Style="{StaticResource PanelCard}" Margin="0,0,0,12">
                         <StackPanel>
-                            <TextBlock FontWeight="SemiBold" Text="Activity Log" />
-                            <ListBox Margin="0,10,0,0" ItemsSource="{Binding ActivityLogs}" />
+                            <TextBlock Style="{StaticResource SectionTitle}" Text="화면 공유 상태" />
+                            <TextBlock Margin="0,10,0,0"
+                                       Foreground="{StaticResource BrushTextSecondary}"
+                                       TextWrapping="Wrap"
+                                       Text="{Binding LatestScreenStatus}" />
+                        </StackPanel>
+                    </Border>
+
+                    <Border Style="{StaticResource PanelCard}">
+                        <StackPanel>
+                            <TextBlock Style="{StaticResource SectionTitle}" Text="RDP 연동 테스트" />
+                            <TextBlock Margin="0,8,0,0"
+                                       Foreground="{StaticResource BrushTextMuted}"
+                                       TextWrapping="Wrap"
+                                       Text="Microsoft Remote Desktop ActiveX 컨트롤을 WPF WindowsFormsHost에 임베드합니다." />
+
+                            <TextBlock Style="{StaticResource FieldLabel}" Margin="0,14,0,6" Text="RDP 서버" />
+                            <TextBox Style="{StaticResource DarkTextBox}"
+                                     Text="{Binding RdpServerAddress, UpdateSourceTrigger=PropertyChanged}" />
+
+                            <TextBlock Style="{StaticResource FieldLabel}" Margin="0,12,0,6" Text="사용자 이름" />
+                            <TextBox Style="{StaticResource DarkTextBox}"
+                                     Text="{Binding RdpUserName, UpdateSourceTrigger=PropertyChanged}" />
+
+                            <TextBlock Style="{StaticResource FieldLabel}" Margin="0,12,0,6" Text="비밀번호" />
+                            <TextBox Style="{StaticResource DarkTextBox}"
+                                     Text="{Binding RdpPassword, UpdateSourceTrigger=PropertyChanged}" />
+
+                            <WrapPanel Margin="0,14,0,0">
+                                <Button Style="{StaticResource PrimaryButton}"
+                                        Margin="0,0,8,0"
+                                        Padding="18,0"
+                                        Content="RDP 시작"
+                                        Command="{Binding StartRdpPreviewCommand}" />
+                                <Button Style="{StaticResource SecondaryButton}"
+                                        Padding="18,0"
+                                        Content="RDP 중지"
+                                        Command="{Binding StopRdpPreviewCommand}" />
+                            </WrapPanel>
+
+                            <TextBlock Margin="0,10,0,0"
+                                       Foreground="{StaticResource BrushAccentTeal}"
+                                       TextWrapping="Wrap"
+                                       Text="{Binding RdpStatus}" />
+                        </StackPanel>
+                    </Border>
+                </StackPanel>
+            </ScrollViewer>
+
+            <!-- RDP preview surface -->
+            <Border Grid.Row="2"
+                    Background="#000000"
+                    CornerRadius="12"
+                    BorderBrush="#333333"
+                    BorderThickness="1"
+                    Padding="12">
+                <Grid>
+                    <TextBlock Margin="4"
+                               VerticalAlignment="Top"
+                               Panel.ZIndex="1"
+                               Foreground="{StaticResource BrushAccentTeal}"
+                               FontWeight="SemiBold"
+                               Text="RDP 미리보기" />
+
+                    <wfi:WindowsFormsHost x:Name="RdpPreviewHost" Margin="0,28,0,0" />
+
+                    <Border Background="#CC0A0A0A"
+                            Visibility="{Binding IsBusy, Converter={StaticResource BoolToVis}}">
+                        <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
+                            <ProgressBar Style="{StaticResource LoadingProgressBar}" />
+                            <TextBlock Margin="0,16,0,0"
+                                       Text="세션 처리 중..."
+                                       Foreground="{StaticResource BrushAccentPurple}"
+                                       FontWeight="SemiBold" />
                         </StackPanel>
                     </Border>
                 </Grid>
-            </Grid>
-        </Border>
+            </Border>
+        </Grid>
+
+        <!-- Right sidebar -->
+        <ScrollViewer Grid.Column="2"
+                      VerticalScrollBarVisibility="Auto"
+                      HorizontalScrollBarVisibility="Disabled">
+            <StackPanel>
+                <Border Style="{StaticResource PanelCard}" Margin="0,0,0,12">
+                    <StackPanel>
+                        <TextBlock Style="{StaticResource SectionTitle}" Text="실시간 채팅" />
+
+                        <ListBox Margin="0,10,0,0"
+                                 Height="220"
+                                 Style="{StaticResource DarkListBox}"
+                                 ItemsSource="{Binding ChatMessages}"
+                                 ItemTemplate="{StaticResource ChatBubbleTemplate}" />
+
+                        <DockPanel Margin="0,10,0,0">
+                            <Button DockPanel.Dock="Right"
+                                    Width="88"
+                                    Margin="8,0,0,0"
+                                    Style="{StaticResource PrimaryButton}"
+                                    Content="전송"
+                                    Command="{Binding SendChatCommand}" />
+                            <TextBox Style="{StaticResource DarkTextBox}"
+                                     Text="{Binding ChatInput, UpdateSourceTrigger=PropertyChanged}" />
+                        </DockPanel>
+                    </StackPanel>
+                </Border>
+
+                <Border Style="{StaticResource PanelCard}" Margin="0,0,0,12">
+                    <StackPanel>
+                        <TextBlock Style="{StaticResource SectionTitle}" Text="공유 파일" />
+                        <ListBox Margin="0,10,0,0"
+                                 Height="120"
+                                 Style="{StaticResource DarkListBox}"
+                                 ItemsSource="{Binding SharedFiles}"
+                                 ItemTemplate="{StaticResource FileLineTemplate}" />
+                    </StackPanel>
+                </Border>
+
+                <Border Style="{StaticResource PanelCard}">
+                    <StackPanel>
+                        <TextBlock Style="{StaticResource SectionTitle}" Text="활동 로그" />
+                        <ListBox Margin="0,10,0,0"
+                                 MaxHeight="280"
+                                 Style="{StaticResource DarkListBox}"
+                                 ItemsSource="{Binding ActivityLogs}"
+                                 ItemTemplate="{StaticResource LogLineTemplate}" />
+                    </StackPanel>
+                </Border>
+            </StackPanel>
+        </ScrollViewer>
     </Grid>
 </Window>
