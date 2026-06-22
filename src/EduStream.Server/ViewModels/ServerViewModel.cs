@@ -20,7 +20,7 @@ public sealed class ServerViewModel : ObservableObject
     private readonly SessionManager _sessionManager;
     private readonly TcpServerService _tcpServer;
     private readonly HeartbeatService _heartbeatService;
-    private readonly ScreenCapturer _screenCapturer;
+    private readonly ScreenShareService _screenShareService;
     private readonly RdpHost _rdpHost;
     private readonly FileDistributor _fileDistributor;
     private string _sessionName = "Capstone Live Class";
@@ -37,6 +37,7 @@ public sealed class ServerViewModel : ObservableObject
     private string _statusMessage = "세션 이름과 포트를 설정한 뒤 세션을 열어 주세요.";
     private bool _isStatusError;
     private int _participantCount;
+    private bool _isScreenSharing;
 
     public ServerViewModel(RdpHost? rdpHost = null)
     {
@@ -44,15 +45,18 @@ public sealed class ServerViewModel : ObservableObject
         _tcpServer = new TcpServerService(_logSink, serializer);
         _sessionManager = new SessionManager(_logSink, _tcpServer);
         _heartbeatService = new HeartbeatService(_sessionManager, _tcpServer, _logSink);
-        _screenCapturer = new ScreenCapturer();
+        _screenShareService = new ScreenShareService(_sessionManager, _logSink);
         _rdpHost = rdpHost ?? new RdpHost(_logSink);
         _fileDistributor = new FileDistributor(serializer, _logSink);
 
         _sessionManager.ParticipantsChanged += OnParticipantsChanged;
+        _screenShareService.StatusChanged += OnScreenShareStatusChanged;
 
         OpenSessionCommand = new RelayCommand(() => _ = OpenSessionAsync(), () => !IsSessionOpen && !IsBusy);
         CloseSessionCommand = new RelayCommand(() => _ = CloseSessionAsync(), () => IsSessionOpen && !IsBusy);
         StartScreenShareCommand = new RelayCommand(() => _ = StartScreenShareAsync(), () => IsSessionOpen);
+        StartAutoShareCommand = new RelayCommand(() => _ = StartAutoShareAsync(), () => IsSessionOpen && !IsScreenSharing);
+        StopAutoShareCommand = new RelayCommand(() => _ = StopAutoShareAsync(), () => IsScreenSharing);
         SendSampleFileCommand = new RelayCommand(() => _ = SendSampleFileAsync(), () => IsSessionOpen);
         SendChatCommand = new RelayCommand(() => _ = SendChatAsync(), () => IsSessionOpen && !string.IsNullOrWhiteSpace(ChatInput));
         StartRdpPreviewCommand = new RelayCommand(() => _ = StartRdpPreviewAsync(), () => IsSessionOpen && _rdpHost.IsAttached);
@@ -167,6 +171,19 @@ public sealed class ServerViewModel : ObservableObject
         private set => SetProperty(ref _participantCount, value);
     }
 
+    public bool IsScreenSharing
+    {
+        get => _isScreenSharing;
+        private set
+        {
+            if (SetProperty(ref _isScreenSharing, value))
+            {
+                StartAutoShareCommand.RaiseCanExecuteChanged();
+                StopAutoShareCommand.RaiseCanExecuteChanged();
+            }
+        }
+    }
+
     public ObservableCollection<string> ActivityLogs { get; } = [];
 
     public ObservableCollection<string> SharedFiles { get; } = [];
@@ -178,6 +195,10 @@ public sealed class ServerViewModel : ObservableObject
     public RelayCommand CloseSessionCommand { get; }
 
     public RelayCommand StartScreenShareCommand { get; }
+
+    public RelayCommand StartAutoShareCommand { get; }
+
+    public RelayCommand StopAutoShareCommand { get; }
 
     public RelayCommand SendSampleFileCommand { get; }
 
@@ -236,8 +257,10 @@ public sealed class ServerViewModel : ObservableObject
         {
             _heartbeatService.Stop();
             await _rdpHost.StopHostAsync();
+            await _screenShareService.StopContinuousBroadcastAsync();
             await _sessionManager.CloseSessionAsync();
             IsSessionOpen = false;
+            IsScreenSharing = false;
             ParticipantCount = 0;
             SessionStatus = "세션 닫힘";
             LatestScreenStatus = "화면 공유가 중지되었습니다.";
@@ -255,10 +278,24 @@ public sealed class ServerViewModel : ObservableObject
 
     private async Task StartScreenShareAsync()
     {
-        var frame = _screenCapturer.CapturePreviewFrame();
-        frame.DataLength = frame.Content.Length;
-        await _sessionManager.BroadcastPacketAsync(frame);
+        var frame = await _screenShareService.CaptureAndBroadcastPreviewAsync();
         LatestScreenStatus = $"{frame.FrameDescription} 전송 준비 완료";
+        SyncLogs();
+    }
+
+    private async Task StartAutoShareAsync()
+    {
+        await _screenShareService.StartContinuousBroadcastAsync();
+        IsScreenSharing = _screenShareService.IsStreaming;
+        LatestScreenStatus = _screenShareService.LatestStatus;
+        SyncLogs();
+    }
+
+    private async Task StopAutoShareAsync()
+    {
+        await _screenShareService.StopContinuousBroadcastAsync();
+        IsScreenSharing = _screenShareService.IsStreaming;
+        LatestScreenStatus = _screenShareService.LatestStatus;
         SyncLogs();
     }
 
@@ -322,6 +359,16 @@ public sealed class ServerViewModel : ObservableObject
                 SessionStatus = $"세션 Open · 참가자 {ParticipantCount}명";
             }
 
+            SyncLogs();
+        });
+    }
+
+    private void OnScreenShareStatusChanged()
+    {
+        System.Windows.Application.Current?.Dispatcher.Invoke(() =>
+        {
+            IsScreenSharing = _screenShareService.IsStreaming;
+            LatestScreenStatus = _screenShareService.LatestStatus;
             SyncLogs();
         });
     }
