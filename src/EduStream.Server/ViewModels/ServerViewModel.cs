@@ -5,6 +5,7 @@ using System.Windows.Forms.Integration;
 using EduStream.Core.Common;
 using EduStream.Core.Logging;
 using EduStream.Core.Models;
+using EduStream.Core.Protocols;
 using EduStream.Core.Serialization;
 using EduStream.Server.Services;
 
@@ -31,6 +32,8 @@ public sealed class ServerViewModel : ObservableObject
     private string _rdpUserName = Environment.UserName;
     private string _rdpPassword = string.Empty;
     private string _rdpStatus = "RDP preview is idle.";
+    private string _selectedFilePath = string.Empty;
+    private string _fileShareStatus = "아직 공유한 파일이 없습니다.";
     private bool _isSessionOpen;
     private bool _isBusy;
     private string _sessionStatus = "세션 대기 중";
@@ -58,6 +61,8 @@ public sealed class ServerViewModel : ObservableObject
         StartAutoShareCommand = new RelayCommand(() => _ = StartAutoShareAsync(), () => IsSessionOpen && !IsScreenSharing);
         StopAutoShareCommand = new RelayCommand(() => _ = StopAutoShareAsync(), () => IsScreenSharing);
         SendSampleFileCommand = new RelayCommand(() => _ = SendSampleFileAsync(), () => IsSessionOpen);
+        SelectFileCommand = new RelayCommand(SelectFile);
+        SendSelectedFileCommand = new RelayCommand(() => _ = SendSelectedFileAsync(), () => IsSessionOpen && File.Exists(SelectedFilePath));
         SendChatCommand = new RelayCommand(() => _ = SendChatAsync(), () => IsSessionOpen && !string.IsNullOrWhiteSpace(ChatInput));
         StartRdpPreviewCommand = new RelayCommand(() => _ = StartRdpPreviewAsync(), () => IsSessionOpen && _rdpHost.IsAttached);
         StopRdpPreviewCommand = new RelayCommand(() => _ = StopRdpPreviewAsync(), () => _rdpHost.IsAttached);
@@ -128,6 +133,7 @@ public sealed class ServerViewModel : ObservableObject
                 CloseSessionCommand.RaiseCanExecuteChanged();
                 StartScreenShareCommand.RaiseCanExecuteChanged();
                 SendSampleFileCommand.RaiseCanExecuteChanged();
+                SendSelectedFileCommand.RaiseCanExecuteChanged();
                 SendChatCommand.RaiseCanExecuteChanged();
                 StartRdpPreviewCommand.RaiseCanExecuteChanged();
             }
@@ -202,11 +208,33 @@ public sealed class ServerViewModel : ObservableObject
 
     public RelayCommand SendSampleFileCommand { get; }
 
+    public RelayCommand SelectFileCommand { get; }
+
+    public RelayCommand SendSelectedFileCommand { get; }
+
     public RelayCommand SendChatCommand { get; }
 
     public RelayCommand StartRdpPreviewCommand { get; }
 
     public RelayCommand StopRdpPreviewCommand { get; }
+
+    public string SelectedFilePath
+    {
+        get => _selectedFilePath;
+        set
+        {
+            if (SetProperty(ref _selectedFilePath, value))
+            {
+                SendSelectedFileCommand.RaiseCanExecuteChanged();
+            }
+        }
+    }
+
+    public string FileShareStatus
+    {
+        get => _fileShareStatus;
+        private set => SetProperty(ref _fileShareStatus, value);
+    }
 
     public void AttachRdpSurface(WindowsFormsHost hostSurface)
     {
@@ -302,12 +330,86 @@ public sealed class ServerViewModel : ObservableObject
     private async Task SendSampleFileAsync()
     {
         var tempFile = Path.Combine(Path.GetTempPath(), "edustream-sample-note.txt");
-        await File.WriteAllTextAsync(tempFile, "EduStream sample lecture note");
-        var packet = await _fileDistributor.BuildFilePacketAsync(tempFile);
-        await _sessionManager.BroadcastPacketAsync(packet);
+        var sampleContent = string.Join(Environment.NewLine, Enumerable.Range(1, 260)
+            .Select(index => $"EduStream sample lecture note line {index:D3}"));
+        await File.WriteAllTextAsync(tempFile, sampleContent);
 
-        SharedFiles.Insert(0, $"{packet.FileName} ({packet.FileSize} byte)");
-        SyncLogs();
+        await SendFileAsync(tempFile, "샘플 파일");
+    }
+
+    private void SelectFile()
+    {
+        var dialog = new Microsoft.Win32.OpenFileDialog
+        {
+            Title = "공유할 파일 선택",
+            CheckFileExists = true,
+            Multiselect = false
+        };
+
+        if (dialog.ShowDialog() == true)
+        {
+            SelectedFilePath = dialog.FileName;
+            FileShareStatus = $"선택됨: {Path.GetFileName(dialog.FileName)}";
+            IsStatusError = false;
+            SyncLogs();
+        }
+    }
+
+    private async Task SendSelectedFileAsync()
+    {
+        if (!File.Exists(SelectedFilePath))
+        {
+            FileShareStatus = "전송할 파일을 먼저 선택해 주세요.";
+            StatusMessage = FileShareStatus;
+            IsStatusError = true;
+            return;
+        }
+
+        await SendFileAsync(SelectedFilePath, "선택 파일");
+    }
+
+    private async Task SendFileAsync(string filePath, string label)
+    {
+        if (!IsSessionOpen)
+        {
+            FileShareStatus = "세션을 먼저 열어 주세요.";
+            StatusMessage = FileShareStatus;
+            IsStatusError = true;
+            return;
+        }
+
+        try
+        {
+            var packets = await _fileDistributor.BuildFilePacketsAsync(
+                filePath,
+                senderId: "Server",
+                sessionId: _sessionManager.CurrentSession?.SessionId,
+                chunkSize: FileTransferRules.MinChunkSize);
+
+            FileShareStatus = $"{label} 전송 중: {Path.GetFileName(filePath)} / {packets.Count} chunks";
+            IsStatusError = false;
+            SyncLogs();
+
+            foreach (var packet in packets)
+            {
+                await _sessionManager.BroadcastPacketAsync(packet);
+            }
+
+            var firstPacket = packets[0];
+            FileShareStatus = $"{label} 전송 완료: {firstPacket.FileName} / {packets.Count} chunks / {firstPacket.FileSize} byte";
+            StatusMessage = FileShareStatus;
+            SharedFiles.Insert(0, $"{firstPacket.FileName} ({firstPacket.FileSize} byte, {packets.Count} chunks)");
+            _logSink.Write($"파일 전송 완료: {firstPacket.FileName}, chunks={packets.Count}, checksum={firstPacket.Checksum[..Math.Min(12, firstPacket.Checksum.Length)]}...");
+            SyncLogs();
+        }
+        catch (Exception ex)
+        {
+            FileShareStatus = $"{label} 전송 실패: {ex.Message}";
+            StatusMessage = FileShareStatus;
+            IsStatusError = true;
+            _logSink.Write(FileShareStatus);
+            SyncLogs();
+        }
     }
 
     private async Task SendChatAsync()
