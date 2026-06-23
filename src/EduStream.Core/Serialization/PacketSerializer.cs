@@ -12,17 +12,21 @@ public sealed class PacketSerializer : IPacketSerializer
 {
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
-        WriteIndented = true
+        WriteIndented = false
     };
 
     public byte[] Serialize<TPacket>(TPacket packet) where TPacket : BasePacket
     {
+        ArgumentNullException.ThrowIfNull(packet);
+
         var json = JsonSerializer.Serialize(packet, packet.GetType(), JsonOptions);
         return Encoding.UTF8.GetBytes(json);
     }
 
     public TPacket? Deserialize<TPacket>(byte[] payload) where TPacket : BasePacket
     {
+        ArgumentNullException.ThrowIfNull(payload);
+
         return JsonSerializer.Deserialize<TPacket>(payload, JsonOptions);
     }
 }
