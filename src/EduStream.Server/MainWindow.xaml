@@ -61,31 +61,58 @@
 
                             <WrapPanel Margin="0,14,0,0">
                                 <Button Style="{StaticResource PrimaryButton}"
-                                        Margin="0,0,8,8"
-                                        Padding="18,0"
-                                        Content="세션 열기"
-                                        Command="{Binding OpenSessionCommand}" />
+            Margin="0,0,8,8"
+            Padding="18,0"
+            Content="세션 열기"
+            Command="{Binding OpenSessionCommand}" />
+
                                 <Button Style="{StaticResource SecondaryButton}"
-                                        Margin="0,0,8,8"
-                                        Padding="18,0"
-                                        Content="세션 닫기"
-                                        Command="{Binding CloseSessionCommand}" />
+            Margin="0,0,8,8"
+            Padding="18,0"
+            Content="세션 닫기"
+            Command="{Binding CloseSessionCommand}" />
+
                                 <Button Style="{StaticResource GhostButton}"
-                                        Margin="0,0,8,8"
-                                        Content="화면 프레임 전송"
-                                        Command="{Binding StartScreenShareCommand}" />
+            Margin="0,0,8,8"
+            Content="화면 프레임 전송"
+            Command="{Binding StartScreenShareCommand}" />
+
+                                <Button Margin="0,0,8,8" Padding="14,0">
+                                    <Button.Style>
+                                        <Style TargetType="Button" BasedOn="{StaticResource GhostButton}">
+                                            <Setter Property="Content" Value="공유 시작" />
+                                            <Setter Property="Command" Value="{Binding StartAutoShareCommand}" />
+                                            <Setter Property="Background" Value="#1B5E20" />
+                                            <Setter Property="Foreground" Value="#A9F5A9" />
+                                            <Setter Property="BorderBrush" Value="#2E7D32" />
+
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding IsAutoSharing}" Value="True">
+                                                    <Setter Property="Content" Value="공유 중지" />
+                                                    <Setter Property="Command" Value="{Binding StopAutoShareCommand}" />
+                                                    <Setter Property="Background" Value="#C62828" />
+                                                    <Setter Property="Foreground" Value="#FFCDD2" />
+                                                    <Setter Property="BorderBrush" Value="#D32F2F" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </Button.Style>
+                                </Button>
+
                                 <Button Style="{StaticResource GhostButton}"
-                                        Margin="0,0,8,8"
-                                        Content="샘플 파일 전송"
-                                        Command="{Binding SendSampleFileCommand}" />
+            Margin="0,0,8,8"
+            Content="샘플 파일 전송"
+            Command="{Binding SendSampleFileCommand}" />
+
                                 <Button Style="{StaticResource GhostButton}"
-                                        Margin="0,0,8,8"
-                                        Content="파일 선택"
-                                        Command="{Binding SelectFileCommand}" />
+            Margin="0,0,8,8"
+            Content="파일 선택"
+            Command="{Binding SelectFileCommand}" />
+
                                 <Button Style="{StaticResource GhostButton}"
-                                        Margin="0,0,8,8"
-                                        Content="선택 파일 전송"
-                                        Command="{Binding SendSelectedFileCommand}" />
+            Margin="0,0,8,8"
+            Content="선택 파일 전송"
+            Command="{Binding SendSelectedFileCommand}" />
                             </WrapPanel>
 
                             <Border Margin="0,14,0,0"
