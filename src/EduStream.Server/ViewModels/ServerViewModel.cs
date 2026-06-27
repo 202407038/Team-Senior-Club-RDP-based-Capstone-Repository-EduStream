@@ -53,6 +53,7 @@ public sealed class ServerViewModel : ObservableObject
         _fileDistributor = new FileDistributor(serializer, _logSink);
 
         _sessionManager.ParticipantsChanged += OnParticipantsChanged;
+        _sessionManager.ChatReceived += OnChatReceived;
         _screenShareService.StatusChanged += OnScreenShareStatusChanged;
 
         OpenSessionCommand = new RelayCommand(() => _ = OpenSessionAsync(), () => !IsSessionOpen && !IsBusy);
@@ -461,6 +462,20 @@ public sealed class ServerViewModel : ObservableObject
                 SessionStatus = $"세션 Open · 참가자 {ParticipantCount}명";
             }
 
+            SyncLogs();
+        });
+    }
+
+    private void OnChatReceived(string sender, string message)
+    {
+        // ChatReceived는 TCP 수신 스레드에서 발생하므로 UI 스레드로 마샬링해야
+        // ObservableCollection 바인딩이 깨지지 않습니다.
+        System.Windows.Application.Current?.Dispatcher.Invoke(() =>
+        {
+            var line = string.Equals(sender, "System", StringComparison.Ordinal)
+                ? ChatLine.System(message)
+                : ChatLine.User(sender, message, isSelf: false);
+            ChatMessages.Insert(0, line);
             SyncLogs();
         });
     }
