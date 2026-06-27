@@ -83,7 +83,7 @@ public sealed class ScreenShareService
         Settings = settings;
         _capturer = new ScreenCapturer(settings);
 
-        _logSink.Write($"화면 송신 설정 갱신: {settings.CaptureSourceName}, {settings.Encoding}, {settings.TargetFrameIntervalMilliseconds}ms");
+        _logSink.Write($"[Screen] 화면 송신 설정 갱신: {settings.CaptureSourceName}, {settings.Encoding}, {settings.TargetFrameIntervalMilliseconds}ms");
         UpdateStatus($"화면 송신 설정 갱신: {settings.CaptureSourceName}, {settings.TargetFrameIntervalMilliseconds}ms");
     }
 
@@ -93,7 +93,7 @@ public sealed class ScreenShareService
 
         if (IsPlaceholderFrame(frame))
         {
-            _logSink.Write($"화면 캡처 fallback: #{frame.FrameIndex}, 플레이스홀더 프레임 사용");
+            _logSink.Write($"[Screen] 화면 캡처 fallback: #{frame.FrameIndex}, 플레이스홀더 프레임 사용");
             UpdateStatus($"화면 캡처 fallback: 프레임#{frame.FrameIndex} 플레이스홀더 사용");
         }
 
@@ -107,7 +107,7 @@ public sealed class ScreenShareService
         {
             if (_streamTask is not null && !_streamTask.IsCompleted)
             {
-                _logSink.Write("화면 자동 송신이 이미 실행 중입니다.");
+                _logSink.Write("[Screen] 화면 자동 송신이 이미 실행 중입니다.");
                 return Task.CompletedTask;
             }
 
@@ -116,7 +116,7 @@ public sealed class ScreenShareService
             _latestStatus = $"화면 자동 송신 시작 ({Settings.TargetFrameIntervalMilliseconds}ms 간격)";
         }
 
-        _logSink.Write(_latestStatus);
+        _logSink.Write($"[Screen] {_latestStatus}");
         StatusChanged?.Invoke();
         return Task.CompletedTask;
     }
@@ -134,12 +134,12 @@ public sealed class ScreenShareService
 
         if (cts is null || streamTask is null)
         {
-            _logSink.Write("화면 자동 송신 중지 요청: 실행 중인 송신이 없습니다.");
+            _logSink.Write("[Screen] 화면 자동 송신 중지 요청: 실행 중인 송신이 없습니다.");
             UpdateStatus("화면 자동 송신이 실행 중이 아닙니다.");
             return;
         }
 
-        _logSink.Write("화면 자동 송신 중지 요청");
+        _logSink.Write("[Screen] 화면 자동 송신 중지 요청");
         cts.Cancel();
 
         try
@@ -150,7 +150,7 @@ public sealed class ScreenShareService
         {
         }
 
-        _logSink.Write("화면 자동 송신 중지 완료");
+        _logSink.Write("[Screen] 화면 자동 송신 중지 완료");
         UpdateStatus("화면 자동 송신 중지");
     }
 
@@ -172,7 +172,7 @@ public sealed class ScreenShareService
                 catch (Exception ex)
                 {
                     // 프레임 단위 실패는 루프를 중단하지 않고 다음 주기로 넘깁니다.
-                    _logSink.Write($"화면 프레임 송신 실패(루프 유지): {ex.GetType().Name}: {ex.Message}");
+                    _logSink.Write($"[Screen] 화면 프레임 송신 실패(루프 유지): {ex.GetType().Name}: {ex.Message}");
                     UpdateStatus($"화면 프레임 송신 실패(루프 유지): {ex.Message}");
                 }
 
@@ -184,7 +184,7 @@ public sealed class ScreenShareService
         }
         catch (Exception ex)
         {
-            _logSink.Write($"화면 자동 송신 실패: {ex.Message}");
+            _logSink.Write($"[Screen] 화면 자동 송신 실패: {ex.Message}");
             UpdateStatus($"화면 자동 송신 실패: {ex.Message}");
         }
         finally
@@ -207,7 +207,7 @@ public sealed class ScreenShareService
         try
         {
             await _sessionManager.BroadcastPacketAsync(frame);
-            _logSink.Write($"화면 프레임 전송: #{frame.FrameIndex}, {frame.Width}x{frame.Height}, {frame.Encoding}");
+            _logSink.Write($"[Screen] 화면 프레임 전송: #{frame.FrameIndex}, {frame.Width}x{frame.Height}, {frame.Encoding}");
 
             lock (_streamLock)
             {
@@ -220,7 +220,7 @@ public sealed class ScreenShareService
         }
         catch (Exception ex)
         {
-            _logSink.Write($"화면 프레임 전송 실패: #{frame.FrameIndex}, {ex.GetType().Name}: {ex.Message}");
+            _logSink.Write($"[Screen] 화면 프레임 전송 실패: #{frame.FrameIndex}, {ex.GetType().Name}: {ex.Message}");
             UpdateStatus($"화면 프레임 전송 실패: #{frame.FrameIndex}, {ex.Message}");
         }
     }

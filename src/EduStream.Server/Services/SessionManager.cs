@@ -166,7 +166,7 @@ public sealed class SessionManager
 
                         if (response is ErrorPacket)
                         {
-                            await _tcpServer.DisconnectClientAsync(clientId);
+                            await _tcpServer.DisconnectClientAsync(clientId, "참가 거부");
                         }
                         else
                         {

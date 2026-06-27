@@ -92,7 +92,7 @@ public sealed class HeartbeatService
                 foreach (var clientId in stale)
                 {
                     _logSink.Write($"[Heartbeat] 타임아웃 disconnect: clientId={clientId}, timeout={_timeout.TotalSeconds}s");
-                    await _tcpServer.DisconnectClientAsync(clientId);
+                    await _tcpServer.DisconnectClientAsync(clientId, "타임아웃");
                 }
             }
             catch (OperationCanceledException)
