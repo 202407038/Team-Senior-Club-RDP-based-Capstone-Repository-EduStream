@@ -197,7 +197,7 @@ public sealed class ClientViewModel : ObservableObject
 
     public ObservableCollection<string> ActivityLogs { get; } = [];
 
-    public ObservableCollection<string> ChatMessages { get; } = [];
+    public ObservableCollection<ChatLine> ChatMessages { get; } = [];
 
     public ObservableCollection<string> DownloadedFiles { get; } = [];
 
@@ -282,7 +282,7 @@ public sealed class ClientViewModel : ObservableObject
             DownloadStatus = "다운로드 대기 중";
             FileTransferDetail = "파일 수신 이벤트가 없습니다.";
 
-            ChatMessages.Insert(0, $"[시스템] {DisplayName} 님이 세션에서 나갔습니다.");
+            ChatMessages.Insert(0, ChatLine.System($"{DisplayName} 님이 세션에서 나갔습니다."));
             _logSink.Write("세션 연결을 종료했습니다.");
             SyncLogs();
         });
@@ -406,7 +406,7 @@ public sealed class ClientViewModel : ObservableObject
                 LastSuccessMessage = "세션 참가 성공";
                 LastErrorMessage = "오류 없음";
                 ChatStatus = "채팅 가능";
-                ChatMessages.Insert(0, $"[시스템] {DisplayName} 님이 세션에 참가했습니다.");
+                ChatMessages.Insert(0, ChatLine.System($"{DisplayName} 님이 세션에 참가했습니다."));
             }
             else if (packet.AckCode == AckCodes.SessionLeft)
             {
@@ -459,11 +459,18 @@ public sealed class ClientViewModel : ObservableObject
     {
         RunOnUiThread(() =>
         {
-            var prefix = packet.IsSystemMessage ? "[시스템]" : packet.Sender;
-            ChatMessages.Insert(0, $"{prefix}: {packet.Message}");
-            ChatStatus = packet.IsSystemMessage
-                ? $"시스템 안내 수신: {packet.Message}"
-                : $"최근 수신: {packet.Sender} - {packet.Message}";
+            // 💡 팀 지침대로 ChatLine.System()과 User() 팩토리 메서드로 분기 처리
+            if (packet.IsSystemMessage)
+            {
+                ChatMessages.Insert(0, ChatLine.System(packet.Message));
+                ChatStatus = $"시스템 안내 수신: {packet.Message}";
+            }
+            else
+            {
+                ChatMessages.Insert(0, ChatLine.User(packet.Sender, packet.Message));
+                ChatStatus = $"최근 수신: {packet.Sender} - {packet.Message}";
+            }
+
             _logSink.Write($"채팅 수신: {packet.Sender}");
             SyncLogs();
         });
@@ -576,7 +583,7 @@ public sealed class ClientViewModel : ObservableObject
                 ConnectionState = "연결 끊김";
                 LastServerMessage = reason;
                 ChatStatus = "채팅 대기 중";
-                ChatMessages.Insert(0, $"[시스템] 서버와의 연결이 끊어졌습니다.");
+                ChatMessages.Insert(0, ChatLine.System("서버와의 연결이 끊어졌습니다."));
                 _logSink.Write($"서버 연결 끊김: {reason}");
                 SyncLogs();
 

@@ -87,7 +87,7 @@
                                             <Setter Property="BorderBrush" Value="#2E7D32" />
 
                                             <Style.Triggers>
-                                                <DataTrigger Binding="{Binding IsAutoSharing}" Value="True">
+                                                <DataTrigger Binding="{Binding IsScreenSharing}" Value="True">
                                                     <Setter Property="Content" Value="공유 중지" />
                                                     <Setter Property="Command" Value="{Binding StopAutoShareCommand}" />
                                                     <Setter Property="Background" Value="#C62828" />
