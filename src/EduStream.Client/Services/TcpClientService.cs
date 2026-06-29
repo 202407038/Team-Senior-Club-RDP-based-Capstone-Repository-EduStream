@@ -4,6 +4,7 @@ using System.Text.Json;
 using EduStream.Core.Logging;
 using EduStream.Core.Models;
 using EduStream.Core.Serialization;
+using EduStream.Core.Utils;
 
 namespace EduStream.Client.Services;
 
@@ -151,7 +152,9 @@ public sealed class TcpClientService : IDisposable
             var element = JsonSerializer.Deserialize<JsonElement>(payload);
             if (element.TryGetProperty("MessageType", out var mt))
             {
-                return (PacketType)mt.GetInt32();
+                var packetType = (PacketType)mt.GetInt32();
+                PacketContractUtility.ValidatePacketType(packetType);
+                return packetType;
             }
         }
         catch { }

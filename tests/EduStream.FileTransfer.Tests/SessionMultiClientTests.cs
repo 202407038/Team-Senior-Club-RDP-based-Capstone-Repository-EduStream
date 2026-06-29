@@ -1,10 +1,12 @@
 using System.Net;
 using System.Net.Sockets;
 using System.Runtime.CompilerServices;
+using System.Text;
 using EduStream.Client.Services;
 using EduStream.Core.Factories;
 using EduStream.Core.Logging;
 using EduStream.Core.Models;
+using EduStream.Core.Protocols;
 using EduStream.Core.Serialization;
 using EduStream.Server.Services;
 
@@ -131,6 +133,32 @@ public sealed class SessionMultiClientTests
 
         Assert.Equal(0, rig.SessionManager.ParticipantCount);
         Assert.Empty(rig.SessionManager.ParticipantNames);
+    }
+
+    [Fact]
+    public async Task InvalidPacketType_ShouldBeRejectedByCommonContractWithoutClosingSession()
+    {
+        await using var rig = await TestRig.OpenAsync();
+
+        using var rawClient = new TcpClient();
+        await rawClient.ConnectAsync("127.0.0.1", rig.Port);
+
+        var payload = Encoding.UTF8.GetBytes("{\"MessageType\":999,\"SenderId\":\"invalid-client\",\"DataLength\":0}");
+        var frame = new byte[4 + payload.Length];
+        BitConverter.GetBytes(payload.Length).CopyTo(frame, 0);
+        payload.CopyTo(frame, 4);
+
+        await rawClient.GetStream().WriteAsync(frame);
+        await rawClient.GetStream().FlushAsync();
+
+        await WaitUntilAsync(
+            () => rig.ServerLog.Snapshot().Any(entry =>
+                entry.Contains("[Packet] 처리 오류") &&
+                entry.Contains(ErrorCodes.InvalidPacketType)),
+            DefaultWait);
+
+        Assert.True(rig.SessionManager.IsSessionOpen);
+        Assert.Equal(0, rig.SessionManager.ParticipantCount);
     }
 
     private static async Task WaitUntilAsync(

@@ -9,6 +9,10 @@ public static class ErrorCodes
     public const string DisplayNameRequired = "DISPLAY_NAME_REQUIRED";
     public const string JoinRejected = "JOIN_REJECTED";
     public const string ClientAlreadyJoined = "CLIENT_ALREADY_JOINED";
+    public const string InvalidPacketType = "INVALID_PACKET_TYPE";
+    public const string InvalidAckCode = "INVALID_ACK_CODE";
+    public const string InvalidErrorCode = "INVALID_ERROR_CODE";
+    public const string PayloadLengthMismatch = "PAYLOAD_LENGTH_MISMATCH";
     public const string ChecksumMismatch = "CHECKSUM_MISMATCH";
     public const string ChecksumRequired = "CHECKSUM_REQUIRED";
     public const string InvalidChunkSize = "INVALID_CHUNK_SIZE";
