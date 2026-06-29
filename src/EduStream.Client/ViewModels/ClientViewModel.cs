@@ -42,6 +42,11 @@ public sealed class ClientViewModel : ObservableObject
     private string _chatInput = string.Empty;
     private bool _isConnected;
 
+    // 💡 UI 연동을 위해 새로 추가한 백엔드 필드들
+    private bool _isConnecting;
+    private bool _isStatusError;
+    private string _statusMessage = string.Empty;
+
     public ClientViewModel()
     {
         _sessionClient = new SessionClient(_logSink);
@@ -52,7 +57,7 @@ public sealed class ClientViewModel : ObservableObject
         _tcpClient.PacketReceived += OnPacketReceivedAsync;
         _tcpClient.Disconnected += OnDisconnectedAsync;
 
-        JoinSessionCommand = new RelayCommand(() => _ = JoinSessionAsync(), () => !IsConnected);
+        JoinSessionCommand = new RelayCommand(() => _ = JoinSessionAsync(), () => !IsConnected && !IsConnecting);
         DisconnectCommand = new RelayCommand(() => _ = DisconnectAsync(), () => IsConnected);
         SendChatCommand = new RelayCommand(() => _ = SendChatAsync(), () => IsConnected && !string.IsNullOrWhiteSpace(ChatInput));
 
@@ -163,9 +168,36 @@ public sealed class ClientViewModel : ObservableObject
         }
     }
 
+    // 💡 UI의 로딩창(Visibility)과 연결되는 프로퍼티
+    public bool IsConnecting
+    {
+        get => _isConnecting;
+        private set
+        {
+            if (SetProperty(ref _isConnecting, value))
+            {
+                JoinSessionCommand.RaiseCanExecuteChanged();
+            }
+        }
+    }
+
+    // 💡 UI 시스템 알림창의 빨간색 에러 트리거와 연결되는 프로퍼티
+    public bool IsStatusError
+    {
+        get => _isStatusError;
+        private set => SetProperty(ref _isStatusError, value);
+    }
+
+    // 💡 UI 시스템 알림창의 텍스트와 연결되는 프로퍼티
+    public string StatusMessage
+    {
+        get => _statusMessage;
+        private set => SetProperty(ref _statusMessage, value);
+    }
+
     public ObservableCollection<string> ActivityLogs { get; } = [];
 
-    public ObservableCollection<string> ChatMessages { get; } = [];
+    public ObservableCollection<ChatLine> ChatMessages { get; } = [];
 
     public ObservableCollection<string> DownloadedFiles { get; } = [];
 
@@ -191,11 +223,16 @@ public sealed class ClientViewModel : ObservableObject
 
         try
         {
+            // 💡 연결 시도 시 에러 상태 초기화 및 로딩 가동
+            IsConnecting = true;
+            IsStatusError = false;
+            StatusMessage = "서버에 연결을 시도하는 중입니다...";
+
             ConnectionState = "연결 중...";
             _logSink.Write($"서버 연결 시도: {HostAddress}:{Port}");
             SyncLogs();
 
-            // TCP 연결
+            // TCP 연결 (만약 서버가 꺼져있으면 여기서 catch 블록으로 튕깁니다)
             await _tcpClient.ConnectAsync(HostAddress, Port);
 
             // Join 패킷 전송
@@ -204,10 +241,13 @@ public sealed class ClientViewModel : ObservableObject
 
             _logSink.Write($"세션 참가 요청 전송: {DisplayName} -> {HostAddress}:{Port}");
             SyncLogs();
+
+            StatusMessage = "서버의 세션 참여 승인을 대기하고 있습니다.";
         }
-        catch (Exception ex)
+        catch (Exception)
         {
-            ApplyJoinError(_sessionClient.CreateJoinError(HostAddress, Port, ex.Message));
+            // 💡 서버가 닫혀있을 때 명확하게 에러 메시지 주입
+            ApplyJoinError(_sessionClient.CreateJoinError(HostAddress, Port, "서버를 찾을 수 없습니다. 호스트 주소와 포트 혹은 서버 구동 상태를 확인해 주세요."));
         }
     }
 
@@ -227,6 +267,10 @@ public sealed class ClientViewModel : ObservableObject
         RunOnUiThread(() =>
         {
             IsConnected = false;
+            IsConnecting = false;
+            IsStatusError = false;
+            StatusMessage = "세션 연결을 안전하게 종료했습니다.";
+
             ConnectionState = "연결 종료";
             SessionSummary = "아직 참가한 세션이 없습니다.";
             LastServerMessage = "세션 종료 요청을 전송했습니다.";
@@ -238,7 +282,7 @@ public sealed class ClientViewModel : ObservableObject
             DownloadStatus = "다운로드 대기 중";
             FileTransferDetail = "파일 수신 이벤트가 없습니다.";
 
-            ChatMessages.Insert(0, $"[시스템] {DisplayName} 님이 세션에서 나갔습니다.");
+            ChatMessages.Insert(0, ChatLine.System($"{DisplayName} 님이 세션에서 나갔습니다."));
             _logSink.Write("세션 연결을 종료했습니다.");
             SyncLogs();
         });
@@ -351,16 +395,26 @@ public sealed class ClientViewModel : ObservableObject
             {
                 _ = _sessionClient.ApplyJoinAckAsync(packet, HostAddress, Port);
                 IsConnected = true;
+
+                // 💡 연결 성공 시중앙 로딩 비활성화 및 시스템 알림창 메시지 정상 주입
+                IsConnecting = false;
+                IsStatusError = false;
+                StatusMessage = "강의 세션 연결에 성공했습니다. 실시간 스트리밍 및 채팅이 가능합니다.";
+
                 ConnectionState = "연결됨";
                 SessionSummary = $"{_sessionClient.CurrentSession?.SessionName} / {HostAddress}:{Port}";
                 LastSuccessMessage = "세션 참가 성공";
                 LastErrorMessage = "오류 없음";
                 ChatStatus = "채팅 가능";
-                ChatMessages.Insert(0, $"[시스템] {DisplayName} 님이 세션에 참가했습니다.");
+                ChatMessages.Insert(0, ChatLine.System($"{DisplayName} 님이 세션에 참가했습니다."));
             }
             else if (packet.AckCode == AckCodes.SessionLeft)
             {
                 IsConnected = false;
+                IsConnecting = false;
+                IsStatusError = false;
+                StatusMessage = "세션에서 정상적으로 퇴장했습니다.";
+
                 ConnectionState = "연결 종료";
                 SessionSummary = "아직 참가한 세션이 없습니다.";
                 LastSuccessMessage = "세션 이탈 처리 완료";
@@ -380,6 +434,12 @@ public sealed class ClientViewModel : ObservableObject
         {
             LastErrorMessage = $"{packet.ErrorCode}: {packet.Message}";
             LastServerMessage = packet.Message;
+
+            // 💡 서버에서 에러 패킷을 수신했을 때 시스템 경고창을 연동시키는 로직
+            IsConnecting = false;
+            IsStatusError = true;
+            StatusMessage = $"[서버 에러] {packet.Message}";
+
             if (!IsConnected)
             {
                 ConnectionState = "연결 실패";
@@ -399,11 +459,18 @@ public sealed class ClientViewModel : ObservableObject
     {
         RunOnUiThread(() =>
         {
-            var prefix = packet.IsSystemMessage ? "[시스템]" : packet.Sender;
-            ChatMessages.Insert(0, $"{prefix}: {packet.Message}");
-            ChatStatus = packet.IsSystemMessage
-                ? $"시스템 안내 수신: {packet.Message}"
-                : $"최근 수신: {packet.Sender} - {packet.Message}";
+            // 💡 팀 지침대로 ChatLine.System()과 User() 팩토리 메서드로 분기 처리
+            if (packet.IsSystemMessage)
+            {
+                ChatMessages.Insert(0, ChatLine.System(packet.Message));
+                ChatStatus = $"시스템 안내 수신: {packet.Message}";
+            }
+            else
+            {
+                ChatMessages.Insert(0, ChatLine.User(packet.Sender, packet.Message));
+                ChatStatus = $"최근 수신: {packet.Sender} - {packet.Message}";
+            }
+
             _logSink.Write($"채팅 수신: {packet.Sender}");
             SyncLogs();
         });
@@ -507,10 +574,16 @@ public sealed class ClientViewModel : ObservableObject
             if (IsConnected)
             {
                 IsConnected = false;
+                IsConnecting = false;
+
+                // 💡 비정상적으로 연결이 끊겼을 때 알림창을 에러 상태로 전환
+                IsStatusError = true;
+                StatusMessage = $"서버와의 연결이 차단되었습니다: {reason}";
+
                 ConnectionState = "연결 끊김";
                 LastServerMessage = reason;
                 ChatStatus = "채팅 대기 중";
-                ChatMessages.Insert(0, $"[시스템] 서버와의 연결이 끊어졌습니다.");
+                ChatMessages.Insert(0, ChatLine.System("서버와의 연결이 끊어졌습니다."));
                 _logSink.Write($"서버 연결 끊김: {reason}");
                 SyncLogs();
 
@@ -523,6 +596,11 @@ public sealed class ClientViewModel : ObservableObject
 
     private void ApplyJoinError(ErrorPacket error)
     {
+        // 💡 에러 발생 시 UI 단에서 변수를 인지하여 반응하도록 값 주입
+        IsConnecting = false;
+        IsStatusError = true;
+        StatusMessage = error.Message;
+
         ConnectionState = "연결 실패";
         LastServerMessage = "세션 참가 요청이 거절되었습니다.";
         LastSuccessMessage = "아직 성공한 작업이 없습니다.";
