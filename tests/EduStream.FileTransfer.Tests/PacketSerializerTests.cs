@@ -3,6 +3,7 @@ using EduStream.Core.Factories;
 using EduStream.Core.Models;
 using EduStream.Core.Protocols;
 using EduStream.Core.Serialization;
+using EduStream.Core.Utils;
 
 namespace EduStream.FileTransfer.Tests;
 
@@ -46,5 +47,48 @@ public sealed class PacketSerializerTests
         Assert.Equal(transferId, roundTrip.TransferId);
         Assert.Equal(content.Length, roundTrip.DataLength);
         Assert.Equal(content, roundTrip.Content);
+    }
+
+    [Fact]
+    public void ValidatePayloadLength_ShouldUseActualScreenPayloadLength()
+    {
+        var packet = PacketFactory.CreateScreenFrame(
+            senderId: "server",
+            frameIndex: 1,
+            frameDescription: "frame",
+            width: 1280,
+            height: 720,
+            encoding: ScreenEncodings.Png,
+            content: [1, 2, 3]);
+
+        PacketContractUtility.ValidatePayloadLength(packet.DataLength, packet.ContentLength);
+
+        packet.DataLength += 1;
+        var ex = Assert.Throws<InvalidOperationException>(
+            () => PacketContractUtility.ValidatePayloadLength(packet.DataLength, packet.ContentLength));
+
+        Assert.Equal(ErrorCodes.PayloadLengthMismatch, ex.Message);
+    }
+
+    [Fact]
+    public void ValidatePayloadLength_ShouldUseActualFilePayloadLength()
+    {
+        var packet = PacketFactory.CreateFileChunk(
+            senderId: "server",
+            fileName: "lecture.bin",
+            fileSize: 4,
+            checksum: "checksum",
+            transferId: Guid.NewGuid(),
+            chunkIndex: 0,
+            totalChunks: 1,
+            content: [1, 2, 3, 4]);
+
+        PacketContractUtility.ValidatePayloadLength(packet.DataLength, packet.ContentLength);
+
+        packet.DataLength -= 1;
+        var ex = Assert.Throws<InvalidOperationException>(
+            () => PacketContractUtility.ValidatePayloadLength(packet.DataLength, packet.ContentLength));
+
+        Assert.Equal(ErrorCodes.PayloadLengthMismatch, ex.Message);
     }
 }
