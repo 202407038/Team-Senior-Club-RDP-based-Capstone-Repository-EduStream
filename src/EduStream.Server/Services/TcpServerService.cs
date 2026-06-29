@@ -96,7 +96,8 @@ public sealed class TcpServerService
 
         foreach (var clientId in failedClients)
         {
-            await RemoveClientAsync(clientId);
+            _logSink.Write($"[Tcp] 송신 실패 클라이언트 감지: {clientId}");
+            await RemoveClientAsync(clientId, "송신 실패");
         }
     }
 
@@ -119,16 +120,18 @@ public sealed class TcpServerService
         }
         catch
         {
-            await RemoveClientAsync(clientId);
+            _logSink.Write($"[Tcp] 송신 실패 클라이언트 감지: {clientId}");
+            await RemoveClientAsync(clientId, "송신 실패");
         }
     }
 
     /// <summary>
     /// 특정 클라이언트 연결을 강제로 정리합니다.
+    /// reason은 제거 로그에 사유로 남깁니다(예: 타임아웃, 참가 거부).
     /// </summary>
-    public Task DisconnectClientAsync(string clientId)
+    public Task DisconnectClientAsync(string clientId, string reason = "강제 종료")
     {
-        return RemoveClientAsync(clientId);
+        return RemoveClientAsync(clientId, reason);
     }
 
     private async Task AcceptClientsAsync(CancellationToken ct)
@@ -192,16 +195,16 @@ public sealed class TcpServerService
         }
         finally
         {
-            await RemoveClientAsync(clientId);
+            await RemoveClientAsync(clientId, "수신 종료");
         }
     }
 
-    private async Task RemoveClientAsync(string clientId)
+    private async Task RemoveClientAsync(string clientId, string reason)
     {
         if (_clients.TryRemove(clientId, out var connection))
         {
             connection.Dispose();
-            _logSink.Write($"[Tcp] 클라이언트 제거: {clientId}");
+            _logSink.Write($"[Tcp] 클라이언트 제거: {clientId} (사유={reason})");
 
             if (ClientDisconnected is not null)
             {
