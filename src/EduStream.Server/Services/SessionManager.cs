@@ -154,6 +154,7 @@ public sealed class SessionManager
             }
 
             var messageType = (PacketType)messageTypeElement.GetInt32();
+            PacketContractUtility.ValidatePacketType(messageType);
 
             switch (messageType)
             {
