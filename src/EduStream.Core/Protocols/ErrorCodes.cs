@@ -16,6 +16,7 @@ public static class ErrorCodes
     public const string InvalidTotalChunks = "INVALID_TOTAL_CHUNKS";
     public const string InvalidFileName = "INVALID_FILE_NAME";
     public const string InvalidFileSize = "INVALID_FILE_SIZE";
+    public const string InvalidFilePayloadLength = "INVALID_FILE_PAYLOAD_LENGTH";
     public const string EmptyChunkPayload = "EMPTY_CHUNK_PAYLOAD";
     public const string FileChunkPending = "FILE_CHUNK_PENDING";
     public const string FileChunkMetadataMismatch = "FILE_CHUNK_METADATA_MISMATCH";

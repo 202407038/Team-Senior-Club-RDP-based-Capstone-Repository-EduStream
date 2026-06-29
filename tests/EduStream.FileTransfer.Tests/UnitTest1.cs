@@ -512,6 +512,31 @@ public sealed class FileReceiverDay6Tests
         Assert.Equal(100, success.ProgressPercent);
     }
 
+    [Fact]
+    public async Task FilePacket_PayloadLengthMismatch_ShouldFailBeforeSaving()
+    {
+        var receiver = new FileReceiver();
+        var targetDirectory = CreateIsolatedDirectory();
+        var content = Encoding.UTF8.GetBytes("payload-length-mismatch");
+        var packet = CreatePacket(
+            content: content,
+            fileName: "payload-length.txt",
+            transferId: Guid.NewGuid(),
+            chunkIndex: 0,
+            totalChunks: 1,
+            checksum: ChecksumUtility.ComputeSha256(content),
+            fileSize: content.Length);
+
+        packet.DataLength = content.Length + 1;
+
+        var result = await receiver.TrySaveAsync(packet, targetDirectory);
+
+        Assert.False(result.Success);
+        Assert.False(result.Pending);
+        Assert.Equal(ErrorCodes.InvalidFilePayloadLength, result.ErrorCode);
+        Assert.False(File.Exists(Path.Combine(targetDirectory, "payload-length.txt")));
+    }
+
     private static string CreateIsolatedDirectory()
     {
         var path = Path.Combine(Path.GetTempPath(), "EduStream-Day6-Tests", Guid.NewGuid().ToString("N"));
