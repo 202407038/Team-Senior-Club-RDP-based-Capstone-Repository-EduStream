@@ -98,6 +98,7 @@ public sealed class FileReceiver
                                                   ex.Message == ErrorCodes.InvalidFileSize ||
                                                   ex.Message == ErrorCodes.InvalidTotalChunks ||
                                                   ex.Message == ErrorCodes.InvalidChunkIndex ||
+                                                  ex.Message == ErrorCodes.InvalidFilePayloadLength ||
                                                   ex.Message == ErrorCodes.EmptyChunkPayload ||
                                                   ex.Message == ErrorCodes.FileChunkPending ||
                                                   ex.Message == ErrorCodes.FileChunkMetadataMismatch ||

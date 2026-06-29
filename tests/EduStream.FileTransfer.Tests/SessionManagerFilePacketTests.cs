@@ -23,7 +23,8 @@ public sealed class SessionManagerFilePacketTests
             TransferId = Guid.NewGuid(),
             ChunkIndex = 0,
             TotalChunks = 1,
-            Content = payload
+            Content = payload,
+            DataLength = payload.Length
         };
 
         await sessionManager.BroadcastPacketAsync(packet);
@@ -43,7 +44,8 @@ public sealed class SessionManagerFilePacketTests
             TransferId = Guid.NewGuid(),
             ChunkIndex = 0,
             TotalChunks = 1,
-            Content = new byte[] { 1, 2, 3, 4 }
+            Content = new byte[] { 1, 2, 3, 4 },
+            DataLength = 4
         };
 
         var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => sessionManager.BroadcastPacketAsync(packet));

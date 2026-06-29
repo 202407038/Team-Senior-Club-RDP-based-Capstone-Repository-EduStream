@@ -365,6 +365,178 @@ public sealed class FileReceiverDay6Tests
         Assert.False(File.Exists(Path.Combine(targetDirectory, "checksum.txt")));
     }
 
+    [Fact]
+    public async Task ChunkedFile_ShouldSaveForMultipleReceiversIndependently()
+    {
+        var sourceDirectory = CreateIsolatedDirectory();
+        var firstTargetDirectory = CreateIsolatedDirectory();
+        var secondTargetDirectory = CreateIsolatedDirectory();
+        var sourcePath = Path.Combine(sourceDirectory, "multi-client.bin");
+        var sourceBytes = Enumerable.Range(0, FileTransferRules.MinChunkSize * 2 + 257)
+            .Select(index => (byte)(index % 251))
+            .ToArray();
+        await File.WriteAllBytesAsync(sourcePath, sourceBytes);
+
+        var distributor = new FileDistributor(new PacketSerializer(), new InMemoryLogSink());
+        var packets = await distributor.BuildFilePacketsAsync(
+            sourcePath,
+            senderId: "Server",
+            sessionId: Guid.NewGuid(),
+            chunkSize: FileTransferRules.MinChunkSize);
+        var firstReceiver = new FileReceiver();
+        var secondReceiver = new FileReceiver();
+
+        FileReceiveResult? firstFinal = null;
+        FileReceiveResult? secondFinal = null;
+        foreach (var packet in packets)
+        {
+            firstFinal = await firstReceiver.TrySaveAsync(packet, firstTargetDirectory);
+            secondFinal = await secondReceiver.TrySaveAsync(packet, secondTargetDirectory);
+        }
+
+        Assert.NotNull(firstFinal);
+        Assert.NotNull(secondFinal);
+        Assert.True(firstFinal!.Success);
+        Assert.True(secondFinal!.Success);
+        Assert.NotEqual(firstFinal.FilePath, secondFinal.FilePath);
+        Assert.Equal(100, firstFinal.ProgressPercent);
+        Assert.Equal(100, secondFinal.ProgressPercent);
+        Assert.Equal(
+            ChecksumUtility.ComputeSha256(sourceBytes),
+            ChecksumUtility.ComputeSha256(await File.ReadAllBytesAsync(firstFinal.FilePath!)));
+        Assert.Equal(
+            ChecksumUtility.ComputeSha256(sourceBytes),
+            ChecksumUtility.ComputeSha256(await File.ReadAllBytesAsync(secondFinal.FilePath!)));
+    }
+
+    [Fact]
+    public async Task ChunkedFile_MetadataMismatch_ShouldAllowRetryWithSameTransfer()
+    {
+        var receiver = new FileReceiver();
+        var targetDirectory = CreateIsolatedDirectory();
+        var contentText = "retry-after-metadata-mismatch-" + string.Join('|', Enumerable.Range(0, 100));
+        var fullContent = Encoding.UTF8.GetBytes(contentText);
+        var checksum = ChecksumUtility.ComputeSha256(fullContent);
+        var transferId = Guid.NewGuid();
+        var firstChunk = fullContent[..40];
+        var secondChunk = fullContent[40..];
+
+        var firstPacket = CreatePacket(
+            content: firstChunk,
+            fileName: "retry.txt",
+            transferId: transferId,
+            chunkIndex: 0,
+            totalChunks: 2,
+            checksum: checksum,
+            fileSize: fullContent.Length);
+        var mismatchedPacket = CreatePacket(
+            content: secondChunk,
+            fileName: "retry-other-name.txt",
+            transferId: transferId,
+            chunkIndex: 1,
+            totalChunks: 2,
+            checksum: checksum,
+            fileSize: fullContent.Length);
+        var retrySecondPacket = CreatePacket(
+            content: secondChunk,
+            fileName: "retry.txt",
+            transferId: transferId,
+            chunkIndex: 1,
+            totalChunks: 2,
+            checksum: checksum,
+            fileSize: fullContent.Length);
+
+        var pending = await receiver.TrySaveAsync(firstPacket, targetDirectory);
+        var failed = await receiver.TrySaveAsync(mismatchedPacket, targetDirectory);
+        var retryPending = await receiver.TrySaveAsync(firstPacket, targetDirectory);
+        var retrySuccess = await receiver.TrySaveAsync(retrySecondPacket, targetDirectory);
+
+        Assert.True(pending.Pending);
+        Assert.False(failed.Success);
+        Assert.Equal(ErrorCodes.FileChunkMetadataMismatch, failed.ErrorCode);
+        Assert.True(retryPending.Pending);
+        Assert.True(retrySuccess.Success);
+        Assert.Equal(100, retrySuccess.ProgressPercent);
+        Assert.Equal(contentText, await File.ReadAllTextAsync(retrySuccess.FilePath!));
+    }
+
+    [Fact]
+    public async Task ChunkedFile_StatusMessages_ShouldTrackPendingFailureAndSuccess()
+    {
+        var receiver = new FileReceiver();
+        var targetDirectory = CreateIsolatedDirectory();
+        var content = Encoding.UTF8.GetBytes("status-message-check-" + new string('S', 128));
+        var checksum = ChecksumUtility.ComputeSha256(content);
+        var transferId = Guid.NewGuid();
+        var firstPacket = CreatePacket(
+            content: content[..50],
+            fileName: "status.txt",
+            transferId: transferId,
+            chunkIndex: 0,
+            totalChunks: 2,
+            checksum: checksum,
+            fileSize: content.Length);
+        var secondPacket = CreatePacket(
+            content: content[50..],
+            fileName: "status.txt",
+            transferId: transferId,
+            chunkIndex: 1,
+            totalChunks: 2,
+            checksum: checksum,
+            fileSize: content.Length);
+        var invalidPacket = CreatePacket(
+            content: content,
+            fileName: "invalid-status.txt",
+            transferId: Guid.NewGuid(),
+            chunkIndex: 4,
+            totalChunks: 2,
+            checksum: checksum,
+            fileSize: content.Length);
+
+        var pending = await receiver.TrySaveAsync(firstPacket, targetDirectory);
+        var failure = await receiver.TrySaveAsync(invalidPacket, targetDirectory);
+        var success = await receiver.TrySaveAsync(secondPacket, targetDirectory);
+
+        Assert.True(pending.Pending);
+        Assert.Equal(ErrorCodes.FileChunkPending, pending.ErrorCode);
+        Assert.Equal("파일 청크를 수신 중입니다.", pending.StatusMessage);
+        Assert.InRange(pending.ProgressPercent, 1, 99);
+
+        Assert.False(failure.Success);
+        Assert.Equal(ErrorCodes.InvalidChunkIndex, failure.ErrorCode);
+        Assert.False(string.IsNullOrWhiteSpace(failure.StatusMessage));
+
+        Assert.True(success.Success);
+        Assert.False(success.Pending);
+        Assert.Equal("status.txt 저장 완료", success.StatusMessage);
+        Assert.Equal(100, success.ProgressPercent);
+    }
+
+    [Fact]
+    public async Task FilePacket_PayloadLengthMismatch_ShouldFailBeforeSaving()
+    {
+        var receiver = new FileReceiver();
+        var targetDirectory = CreateIsolatedDirectory();
+        var content = Encoding.UTF8.GetBytes("payload-length-mismatch");
+        var packet = CreatePacket(
+            content: content,
+            fileName: "payload-length.txt",
+            transferId: Guid.NewGuid(),
+            chunkIndex: 0,
+            totalChunks: 1,
+            checksum: ChecksumUtility.ComputeSha256(content),
+            fileSize: content.Length);
+
+        packet.DataLength = content.Length + 1;
+
+        var result = await receiver.TrySaveAsync(packet, targetDirectory);
+
+        Assert.False(result.Success);
+        Assert.False(result.Pending);
+        Assert.Equal(ErrorCodes.InvalidFilePayloadLength, result.ErrorCode);
+        Assert.False(File.Exists(Path.Combine(targetDirectory, "payload-length.txt")));
+    }
+
     private static string CreateIsolatedDirectory()
     {
         var path = Path.Combine(Path.GetTempPath(), "EduStream-Day6-Tests", Guid.NewGuid().ToString("N"));
@@ -384,7 +556,8 @@ public sealed class FileReceiverDay6Tests
             TransferId = transferId,
             ChunkIndex = chunkIndex,
             TotalChunks = totalChunks,
-            Content = content
+            Content = content,
+            DataLength = content.Length
         };
     }
 }

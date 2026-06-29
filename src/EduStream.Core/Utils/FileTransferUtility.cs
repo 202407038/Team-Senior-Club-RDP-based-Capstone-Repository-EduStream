@@ -71,6 +71,11 @@ public static class FileTransferUtility
             throw new InvalidOperationException(ErrorCodes.EmptyChunkPayload);
         }
 
+        if (packet.DataLength != packet.Content.Length)
+        {
+            throw new InvalidOperationException(ErrorCodes.InvalidFilePayloadLength);
+        }
+
         if (string.IsNullOrWhiteSpace(packet.Checksum))
         {
             throw new InvalidOperationException(ErrorCodes.ChecksumRequired);
