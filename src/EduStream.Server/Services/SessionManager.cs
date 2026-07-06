@@ -238,7 +238,7 @@ public sealed class SessionManager
     /// <summary>
     /// 클라이언트 연결 끊김 시 자동으로 세션 이탈을 처리합니다.
     /// </summary>
-    private async Task OnClientDisconnectedAsync(string clientId)
+    private async Task OnClientDisconnectedAsync(string clientId, string reason)
     {
         _clientLastSeen.TryRemove(clientId, out _);
 
@@ -246,7 +246,10 @@ public sealed class SessionManager
         if (displayName is null)
             return;
 
-        _logSink.Write($"[Session] 연결 끊김 이탈: {displayName} (clientId={clientId})");
+        // 세션 계층 로그에는 TCP 계층이 모르는 sessionId까지 남겨 추적성을 확보한다.
+        _logSink.Write(
+            $"[Session] 연결 끊김 이탈: {displayName} " +
+            $"(clientId={clientId}, sessionId={CurrentSession?.SessionId}, 사유={reason})");
         await BroadcastSystemMessageAsync($"{displayName}님의 연결이 끊어졌습니다.");
     }
 
