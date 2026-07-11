@@ -133,6 +133,8 @@ public sealed class ServerViewModel : ObservableObject
                 OpenSessionCommand.RaiseCanExecuteChanged();
                 CloseSessionCommand.RaiseCanExecuteChanged();
                 StartScreenShareCommand.RaiseCanExecuteChanged();
+                StartAutoShareCommand.RaiseCanExecuteChanged();
+                StopAutoShareCommand.RaiseCanExecuteChanged();
                 SendSampleFileCommand.RaiseCanExecuteChanged();
                 SendSelectedFileCommand.RaiseCanExecuteChanged();
                 SendChatCommand.RaiseCanExecuteChanged();
