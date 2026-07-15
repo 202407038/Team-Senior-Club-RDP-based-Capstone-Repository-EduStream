@@ -30,8 +30,9 @@ public sealed class TcpServerService
 
     /// <summary>
     /// 클라이언트 연결이 끊어졌을 때 발생합니다.
+    /// (clientId, 제거 사유) — 사유는 상위 계층 로그 추적에 사용합니다.
     /// </summary>
-    public event Func<string, Task>? ClientDisconnected;
+    public event Func<string, string, Task>? ClientDisconnected;
 
     public TcpServerService(ILogSink logSink, IPacketSerializer serializer)
     {
@@ -208,7 +209,7 @@ public sealed class TcpServerService
 
             if (ClientDisconnected is not null)
             {
-                await ClientDisconnected.Invoke(clientId);
+                await ClientDisconnected.Invoke(clientId, reason);
             }
         }
     }
