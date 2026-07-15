@@ -487,7 +487,7 @@ public sealed class ClientViewModel : ObservableObject
                 LastServerMessage = "화면 프레임을 수신했습니다.";
                 LastSuccessMessage = $"화면 프레임 #{packet.FrameIndex} 수신 성공";
                 ScreenDetail = $"{packet.Width}x{packet.Height} / {packet.Encoding} / {packet.ContentLength} bytes / {packet.CapturedAt:HH:mm:ss}";
-                _logSink.Write($"화면 프레임 수신: #{packet.FrameIndex}, {packet.Width}x{packet.Height}");
+                _logSink.Write($"[Screen] 화면 프레임 수신: #{packet.FrameIndex}, {packet.Width}x{packet.Height}, {packet.Encoding}");
                 SyncLogs();
             });
         }
