@@ -168,6 +168,121 @@ public sealed class ScreenFileChatIntegrationTests
         }
     }
 
+    [Fact]
+    public async Task ChecksumFailure_DuringScreenShare_ShouldAllowNextTransferInSameSession()
+    {
+        var serializer = new PacketSerializer();
+        var port = GetFreePort();
+        var serverLog = new InMemoryLogSink();
+        var tcpServer = new TcpServerService(serverLog, serializer);
+        var sessionManager = new SessionManager(serverLog, tcpServer);
+        var screenShare = new ScreenShareService(
+            sessionManager,
+            serverLog,
+            new ScreenCaptureSettings
+            {
+                TargetFrameIntervalMilliseconds = ScreenTransferRules.MinimumFrameIntervalMilliseconds
+            });
+        var fileDistributor = new FileDistributor(serializer, serverLog);
+        var fileReceiver = new FileReceiver();
+
+        var tempRoot = Path.Combine(Path.GetTempPath(), "EduStreamTests", Guid.NewGuid().ToString("N"));
+        var sourcePath = Path.Combine(tempRoot, "retry-payload.bin");
+        var receiveDirectory = Path.Combine(tempRoot, "receiver");
+        var sourceContent = Enumerable.Range(0, FileTransferRules.MinChunkSize * 2 + 31)
+            .Select(index => (byte)(index % 239))
+            .ToArray();
+
+        var results = new ConcurrentQueue<FileReceiveResult>();
+        var screenCount = 0;
+        var client = new TcpClientService(new InMemoryLogSink(), serializer);
+
+        try
+        {
+            Directory.CreateDirectory(tempRoot);
+            await File.WriteAllBytesAsync(sourcePath, sourceContent);
+            await sessionManager.OpenSessionAsync("FileRetryIntegration", port);
+
+            client.PacketReceived += async (packetType, payload) =>
+            {
+                if (packetType == PacketType.Screen)
+                {
+                    Interlocked.Increment(ref screenCount);
+                    return;
+                }
+
+                if (packetType == PacketType.File)
+                {
+                    var filePacket = serializer.Deserialize<FilePacket>(payload);
+                    if (filePacket is not null)
+                    {
+                        results.Enqueue(await fileReceiver.TrySaveAsync(filePacket, receiveDirectory));
+                    }
+                }
+            };
+
+            await client.ConnectAsync("127.0.0.1", port);
+            await client.SendAsync(PacketFactory.CreateSessionJoin(
+                senderId: "Alice",
+                displayName: "Alice",
+                targetAddress: "127.0.0.1",
+                targetPort: port));
+            await WaitUntilAsync(() => sessionManager.ParticipantCount == 1, DefaultWait);
+
+            await screenShare.StartContinuousBroadcastAsync();
+            await WaitUntilAsync(() => Volatile.Read(ref screenCount) >= 2, DefaultWait);
+
+            var invalidPackets = await fileDistributor.BuildFilePacketsAsync(
+                sourcePath,
+                senderId: "Server",
+                sessionId: sessionManager.CurrentSession?.SessionId,
+                chunkSize: FileTransferRules.MinChunkSize);
+            foreach (var packet in invalidPackets)
+            {
+                packet.Checksum = new string('0', 64);
+                await sessionManager.BroadcastPacketAsync(packet);
+            }
+
+            await WaitUntilAsync(
+                () => results.Any(result =>
+                    !result.Success
+                    && !result.Pending
+                    && result.ErrorCode == ErrorCodes.ChecksumMismatch),
+                DefaultWait);
+
+            var framesBeforeRetry = Volatile.Read(ref screenCount);
+            var retryPackets = await fileDistributor.BuildFilePacketsAsync(
+                sourcePath,
+                senderId: "Server",
+                sessionId: sessionManager.CurrentSession?.SessionId,
+                chunkSize: FileTransferRules.MinChunkSize);
+
+            Assert.NotEqual(invalidPackets[0].TransferId, retryPackets[0].TransferId);
+            foreach (var packet in retryPackets)
+            {
+                await sessionManager.BroadcastPacketAsync(packet);
+            }
+
+            await WaitUntilAsync(() => results.Any(result => result.Success), DefaultWait);
+            await WaitUntilAsync(() => Volatile.Read(ref screenCount) >= framesBeforeRetry + 2, DefaultWait);
+
+            var success = results.Last(result => result.Success);
+            Assert.True(screenShare.IsStreaming);
+            Assert.Equal(1, sessionManager.ParticipantCount);
+            Assert.Equal(100, success.ProgressPercent);
+            Assert.Equal(sourceContent, await File.ReadAllBytesAsync(success.FilePath!));
+            Assert.Contains(results, result => result.ErrorCode == ErrorCodes.ChecksumMismatch);
+            Assert.DoesNotContain(serverLog.Snapshot(), entry => entry.Contains("잘못된 패킷 크기"));
+        }
+        finally
+        {
+            await screenShare.StopContinuousBroadcastAsync();
+            try { client.Dispose(); } catch { }
+            await sessionManager.CloseSessionAsync();
+            TryDeleteTestDirectory(tempRoot);
+        }
+    }
+
     private static async Task WaitUntilAsync(Func<bool> condition, TimeSpan timeout)
     {
         var deadline = DateTime.UtcNow + timeout;
