@@ -104,4 +104,41 @@ public sealed class FeatureOperationResultTests
         Assert.Equal(ErrorCodes.InvalidAckCode, ex.Message);
     }
 
+    [Fact]
+    public void FileReceiveResult_ShouldUseCommonOperationState()
+    {
+        var success = FileReceiveResult.CreateSuccess("lecture.pdf");
+        var pending = FileReceiveResult.CreatePending("파일 청크 수신 중", 2, 4);
+        var failure = FileReceiveResult.CreateFailure(ErrorCodes.ChecksumMismatch, "체크섬 불일치");
+
+        Assert.Equal(OperationState.Succeeded, success.State);
+        Assert.True(success.Success);
+        Assert.False(success.Pending);
+
+        Assert.Equal(OperationState.InProgress, pending.State);
+        Assert.False(pending.Success);
+        Assert.True(pending.Pending);
+
+        Assert.Equal(OperationState.Failed, failure.State);
+        Assert.False(failure.Success);
+        Assert.False(failure.Pending);
+    }
+
+    [Fact]
+    public void FileReceiveResult_ShouldConvertToCommonFeatureResult()
+    {
+        var sessionId = Guid.NewGuid();
+        var failure = FileReceiveResult.CreateFailure(
+            ErrorCodes.FileChunkMetadataMismatch,
+            "파일 청크 메타데이터 불일치");
+
+        var result = failure.ToOperationResult(sessionId);
+
+        Assert.Equal(FeatureArea.File, result.Feature);
+        Assert.Equal(OperationState.Failed, result.State);
+        Assert.Equal(ErrorCodes.FileChunkMetadataMismatch, result.Code);
+        Assert.Equal("파일 청크 메타데이터 불일치", result.Message);
+        Assert.Equal(sessionId, result.SessionId);
+        Assert.True(result.IsTerminal);
+    }
 }
