@@ -34,8 +34,26 @@ public sealed class FileReceiver
     {
         try
         {
+            // 1. 0byte 파일 사전 처리 (청크 검증이나 체크섬 검사 없이 바로 빈 파일 생성)
+            if (packet.FileSize == 0 || (!packet.IsChunkedTransfer && (packet.Content == null || packet.Content.Length == 0)))
+            {
+                Directory.CreateDirectory(targetDirectory);
+                var emptyFilePath = Path.Combine(targetDirectory, packet.FileName);
+
+                // 빈 파일 생성 및 즉시 성공 반환
+                await File.WriteAllBytesAsync(emptyFilePath, Array.Empty<byte>());
+
+                return FileReceiveResult.CreateSuccess(
+                    emptyFilePath,
+                    $"{packet.FileName} (0byte) 저장 완료",
+                    receivedChunkCount: 1,
+                    totalChunks: 1);
+            }
+
+            // 2. 패킷 메타데이터 검증
             FileTransferUtility.ValidatePacketMetadata(packet);
 
+            // 3. 단일 패킷 전송 (Chunked가 아닌 경우)
             if (!packet.IsChunkedTransfer)
             {
                 if (!ChecksumUtility.VerifySha256(packet.Content, packet.Checksum))
@@ -54,6 +72,7 @@ public sealed class FileReceiver
                     totalChunks: 1);
             }
 
+            // 4. 청크 분할 전송 처리
             var addResult = AddChunkAndTryAssemble(packet);
             if (!string.IsNullOrWhiteSpace(addResult.ErrorCode))
             {
@@ -73,6 +92,7 @@ public sealed class FileReceiver
                 return FileReceiveResult.CreateFailure(ErrorCodes.FileAssemblyFailed, "파일 조립 결과가 비어 있습니다.");
             }
 
+            // 5. 전체 청크 조립 후 체크섬 검증
             if (!ChecksumUtility.VerifySha256(addResult.AssembledContent, packet.Checksum))
             {
                 return FileReceiveResult.CreateFailure(ErrorCodes.ChecksumMismatch, "청크 조립 후 체크섬 검증에 실패했습니다.");
@@ -93,16 +113,16 @@ public sealed class FileReceiver
             return FileReceiveResult.CreateFailure(ErrorCodes.InvalidFileName, ex.Message);
         }
         catch (InvalidOperationException ex) when (ex.Message == ErrorCodes.ChecksumMismatch ||
-                                                  ex.Message == ErrorCodes.ChecksumRequired ||
-                                                  ex.Message == ErrorCodes.InvalidFileName ||
-                                                  ex.Message == ErrorCodes.InvalidFileSize ||
-                                                  ex.Message == ErrorCodes.InvalidTotalChunks ||
-                                                  ex.Message == ErrorCodes.InvalidChunkIndex ||
-                                                  ex.Message == ErrorCodes.InvalidFilePayloadLength ||
-                                                  ex.Message == ErrorCodes.EmptyChunkPayload ||
-                                                  ex.Message == ErrorCodes.FileChunkPending ||
-                                                  ex.Message == ErrorCodes.FileChunkMetadataMismatch ||
-                                                  ex.Message == ErrorCodes.FileAssemblyFailed)
+                                                   ex.Message == ErrorCodes.ChecksumRequired ||
+                                                   ex.Message == ErrorCodes.InvalidFileName ||
+                                                   ex.Message == ErrorCodes.InvalidFileSize ||
+                                                   ex.Message == ErrorCodes.InvalidTotalChunks ||
+                                                   ex.Message == ErrorCodes.InvalidChunkIndex ||
+                                                   ex.Message == ErrorCodes.InvalidFilePayloadLength ||
+                                                   ex.Message == ErrorCodes.EmptyChunkPayload ||
+                                                   ex.Message == ErrorCodes.FileChunkPending ||
+                                                   ex.Message == ErrorCodes.FileChunkMetadataMismatch ||
+                                                   ex.Message == ErrorCodes.FileAssemblyFailed)
         {
             return FileReceiveResult.CreateFailure(ex.Message, "파일 패킷 메타데이터 검증 실패 또는 유효하지 않은 청크 정보입니다.");
         }

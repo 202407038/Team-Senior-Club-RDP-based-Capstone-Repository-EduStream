@@ -34,9 +34,24 @@ public sealed class FileDistributor
         }
 
         var fileInfo = new FileInfo(filePath);
+
+        // 💡 [수정] 0byte 파일인 경우 예외를 던지지 않고 빈 패킷 생성
         if (fileInfo.Length == 0)
         {
-            throw new InvalidOperationException("전송할 파일이 비어 있습니다.");
+            var emptyContent = Array.Empty<byte>();
+            var emptyPacket = PacketFactory.CreateFileChunk(
+                senderId: "Server",
+                fileName: Path.GetFileName(filePath),
+                fileSize: 0,
+                checksum: ChecksumUtility.ComputeSha256(emptyContent),
+                transferId: Guid.NewGuid(),
+                chunkIndex: 0,
+                totalChunks: 1,
+                content: emptyContent);
+
+            FileTransferUtility.ValidatePacketMetadata(emptyPacket);
+            _logSink.Write($"빈 파일 패킷 생성: {emptyPacket.FileName}, 크기=0 byte");
+            return emptyPacket;
         }
 
         var content = await File.ReadAllBytesAsync(filePath);
@@ -77,9 +92,25 @@ public sealed class FileDistributor
         }
 
         var fileInfo = new FileInfo(filePath);
+
+        // 💡 [수정] 0byte 파일인 경우 단일 0byte 청크 패킷 리스트 반환
         if (fileInfo.Length == 0)
         {
-            throw new InvalidOperationException("전송할 파일이 비어 있습니다.");
+            var emptyContent = Array.Empty<byte>();
+            var emptyPacket = PacketFactory.CreateFileChunk(
+                senderId: senderId,
+                fileName: Path.GetFileName(filePath),
+                fileSize: 0,
+                checksum: ChecksumUtility.ComputeSha256(emptyContent),
+                transferId: Guid.NewGuid(),
+                chunkIndex: 0,
+                totalChunks: 1,
+                content: emptyContent,
+                sessionId: sessionId);
+
+            FileTransferUtility.ValidatePacketMetadata(emptyPacket);
+            _logSink.Write($"빈 파일 청크 패킷 생성: {Path.GetFileName(filePath)}, 청크 수=1, 청크 크기=0 byte");
+            return new List<FilePacket> { emptyPacket };
         }
 
         var content = await File.ReadAllBytesAsync(filePath);
