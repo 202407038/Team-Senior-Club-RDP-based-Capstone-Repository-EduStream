@@ -91,6 +91,7 @@ public sealed class FileDistributor
             throw new FileNotFoundException("전송할 파일을 찾을 수 없습니다.", filePath);
         }
 
+        FileTransferUtility.ValidateChunkSize(chunkSize);
         var fileInfo = new FileInfo(filePath);
 
         // 💡 [수정] 0byte 파일인 경우 단일 0byte 청크 패킷 리스트 반환
@@ -114,7 +115,6 @@ public sealed class FileDistributor
         }
 
         var content = await File.ReadAllBytesAsync(filePath);
-        FileTransferUtility.ValidateChunkSize(chunkSize);
         var checksum = ChecksumUtility.ComputeSha256(content);
         var transferId = Guid.NewGuid();
         var totalChunks = FileTransferUtility.CalculateTotalChunks(content.LongLength, chunkSize);

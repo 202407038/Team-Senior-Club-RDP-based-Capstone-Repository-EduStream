@@ -34,49 +34,56 @@ public sealed class FileReceiver
     {
         try
         {
-            // 1. 0byte 파일 사전 처리 (청크 검증이나 체크섬 검사 없이 바로 빈 파일 생성)
-            if (packet.FileSize == 0 || (!packet.IsChunkedTransfer && (packet.Content == null || packet.Content.Length == 0)))
-            {
-                Directory.CreateDirectory(targetDirectory);
-                var emptyFilePath = Path.Combine(targetDirectory, packet.FileName);
+            ArgumentNullException.ThrowIfNull(packet);
+            FileTransferUtility.ValidatePacketMetadata(packet);
+            var targetPath = ResolveTargetPath(targetDirectory, packet.FileName);
 
-                // 빈 파일 생성 및 즉시 성공 반환
-                await File.WriteAllBytesAsync(emptyFilePath, Array.Empty<byte>());
+            if (packet.FileSize == 0)
+            {
+                if (!ChecksumUtility.VerifySha256(packet.Content, packet.Checksum))
+                {
+                    return FileReceiveResult.CreateFailure(
+                        ErrorCodes.ChecksumMismatch,
+                        "빈 파일 체크섬 검증에 실패했습니다.",
+                        canRetry: true);
+                }
+
+                Directory.CreateDirectory(targetDirectory);
+                await File.WriteAllBytesAsync(targetPath, Array.Empty<byte>());
 
                 return FileReceiveResult.CreateSuccess(
-                    emptyFilePath,
+                    targetPath,
                     $"{packet.FileName} (0byte) 저장 완료",
                     receivedChunkCount: 1,
                     totalChunks: 1);
             }
 
-            // 2. 패킷 메타데이터 검증
-            FileTransferUtility.ValidatePacketMetadata(packet);
-
-            // 3. 단일 패킷 전송 (Chunked가 아닌 경우)
             if (!packet.IsChunkedTransfer)
             {
                 if (!ChecksumUtility.VerifySha256(packet.Content, packet.Checksum))
                 {
-                    return FileReceiveResult.CreateFailure(ErrorCodes.ChecksumMismatch, "체크섬 불일치. 데이터가 손상되었거나 중복 전송이 발생했습니다.");
+                    return FileReceiveResult.CreateFailure(
+                        ErrorCodes.ChecksumMismatch,
+                        "체크섬 불일치. 데이터가 손상되었거나 중복 전송이 발생했습니다.",
+                        canRetry: true);
                 }
 
                 Directory.CreateDirectory(targetDirectory);
-                var singlePath = Path.Combine(targetDirectory, packet.FileName);
-
-                await File.WriteAllBytesAsync(singlePath, packet.Content);
+                await File.WriteAllBytesAsync(targetPath, packet.Content);
                 return FileReceiveResult.CreateSuccess(
-                    singlePath,
+                    targetPath,
                     $"{packet.FileName} 저장 완료",
                     receivedChunkCount: 1,
                     totalChunks: 1);
             }
 
-            // 4. 청크 분할 전송 처리
             var addResult = AddChunkAndTryAssemble(packet);
             if (!string.IsNullOrWhiteSpace(addResult.ErrorCode))
             {
-                return FileReceiveResult.CreateFailure(addResult.ErrorCode, addResult.ErrorMessage ?? "청크 처리 중 오류가 발생했습니다.");
+                return FileReceiveResult.CreateFailure(
+                    addResult.ErrorCode,
+                    addResult.ErrorMessage ?? "청크 처리 중 오류가 발생했습니다.",
+                    canRetry: true);
             }
 
             if (addResult.Pending)
@@ -89,26 +96,35 @@ public sealed class FileReceiver
 
             if (addResult.AssembledContent is null)
             {
-                return FileReceiveResult.CreateFailure(ErrorCodes.FileAssemblyFailed, "파일 조립 결과가 비어 있습니다.");
+                return FileReceiveResult.CreateFailure(
+                    ErrorCodes.FileAssemblyFailed,
+                    "파일 조립 결과가 비어 있습니다.",
+                    canRetry: true);
             }
 
-            // 5. 전체 청크 조립 후 체크섬 검증
             if (!ChecksumUtility.VerifySha256(addResult.AssembledContent, packet.Checksum))
             {
-                return FileReceiveResult.CreateFailure(ErrorCodes.ChecksumMismatch, "청크 조립 후 체크섬 검증에 실패했습니다.");
+                return FileReceiveResult.CreateFailure(
+                    ErrorCodes.ChecksumMismatch,
+                    "청크 조립 후 체크섬 검증에 실패했습니다.",
+                    canRetry: true,
+                    receivedChunkCount: packet.TotalChunks,
+                    totalChunks: packet.TotalChunks);
             }
 
             Directory.CreateDirectory(targetDirectory);
-            var savePath = Path.Combine(targetDirectory, packet.FileName);
-
-            await File.WriteAllBytesAsync(savePath, addResult.AssembledContent);
+            await File.WriteAllBytesAsync(targetPath, addResult.AssembledContent);
             return FileReceiveResult.CreateSuccess(
-                savePath,
+                targetPath,
                 $"{packet.FileName} 저장 완료",
                 packet.TotalChunks,
                 packet.TotalChunks);
         }
         catch (ArgumentNullException ex)
+        {
+            return FileReceiveResult.CreateFailure(ErrorCodes.InvalidFileName, ex.Message);
+        }
+        catch (ArgumentException ex)
         {
             return FileReceiveResult.CreateFailure(ErrorCodes.InvalidFileName, ex.Message);
         }
@@ -124,7 +140,10 @@ public sealed class FileReceiver
                                                    ex.Message == ErrorCodes.FileChunkMetadataMismatch ||
                                                    ex.Message == ErrorCodes.FileAssemblyFailed)
         {
-            return FileReceiveResult.CreateFailure(ex.Message, "파일 패킷 메타데이터 검증 실패 또는 유효하지 않은 청크 정보입니다.");
+            return FileReceiveResult.CreateFailure(
+                ex.Message,
+                "파일 패킷 메타데이터 검증 실패 또는 유효하지 않은 청크 정보입니다.",
+                canRetry: IsRetryable(ex.Message));
         }
         catch (UnauthorizedAccessException ex)
         {
@@ -136,16 +155,39 @@ public sealed class FileReceiver
         }
         catch (DirectoryNotFoundException ex)
         {
-            return FileReceiveResult.CreateFailure("DIRECTORY_NOT_FOUND", ex.Message);
+            return FileReceiveResult.CreateFailure("DIRECTORY_NOT_FOUND", ex.Message, canRetry: true);
         }
         catch (IOException ex)
         {
-            return FileReceiveResult.CreateFailure("FILE_IO_ERROR", ex.Message);
+            return FileReceiveResult.CreateFailure("FILE_IO_ERROR", ex.Message, canRetry: true);
         }
         catch (Exception ex)
         {
             return FileReceiveResult.CreateFailure("UNKNOWN_ERROR", ex.Message);
         }
+    }
+
+    private static string ResolveTargetPath(string targetDirectory, string fileName)
+    {
+        if (string.IsNullOrWhiteSpace(targetDirectory))
+        {
+            throw new ArgumentException("대상 폴더가 비어 있습니다.", nameof(targetDirectory));
+        }
+
+        return Path.Combine(targetDirectory, fileName);
+    }
+
+    private static bool IsRetryable(string errorCode)
+    {
+        return errorCode is ErrorCodes.ChecksumMismatch
+            or ErrorCodes.ChecksumRequired
+            or ErrorCodes.InvalidChunkIndex
+            or ErrorCodes.InvalidTotalChunks
+            or ErrorCodes.InvalidFilePayloadLength
+            or ErrorCodes.EmptyChunkPayload
+            or ErrorCodes.FileChunkPending
+            or ErrorCodes.FileChunkMetadataMismatch
+            or ErrorCodes.FileAssemblyFailed;
     }
 
     private ChunkAddResult AddChunkAndTryAssemble(FilePacket packet)
