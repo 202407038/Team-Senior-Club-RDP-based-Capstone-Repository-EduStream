@@ -161,6 +161,59 @@ public sealed class SessionMultiClientTests
         Assert.Equal(0, rig.SessionManager.ParticipantCount);
     }
 
+    [Fact]
+    public async Task PoisonPacketFromOneParticipant_ShouldNotDropSessionOrOtherParticipants()
+    {
+        // 7월 3주차 2번: 교수자 1명·수강생 2명 통합 실행 중 한 연결에서 서버 예외가 나도
+        // 세션 전체가 끊기지 않고 나머지 참가자가 유지되며 계속 동작해야 한다.
+        await using var rig = await TestRig.OpenAsync();
+
+        var alice = await rig.ConnectAndJoinAsync("Alice");
+        var bob = await rig.ConnectAndJoinAsync("Bob");
+        await WaitUntilAsync(() => rig.SessionManager.ParticipantCount == 2, DefaultWait);
+
+        var sessionId = rig.SessionManager.CurrentSession?.SessionId;
+
+        // 통합 흐름 기준선: 예외 이전에도 채팅이 정상적으로 브로드캐스트되는지 먼저 확인한다.
+        await alice.SendAsync(PacketFactory.CreateChat(
+            senderId: "Alice", sender: "Alice", message: "before-fault", sessionId: sessionId));
+        await WaitUntilAsync(
+            () => rig.ServerLog.Snapshot().Any(entry => entry.Contains("[Chat] 브로드캐스트") && entry.Contains("Alice")),
+            DefaultWait);
+
+        // Alice가 프레이밍/직렬화는 정상이지만 메타데이터가 잘못된 화면 패킷을 보낸다.
+        // 서버 핸들러의 ScreenTransferUtility.ValidatePacketMetadata가 예외를 던지고,
+        // OnPacketReceivedAsync의 try/catch가 이를 흡수해야 한다. (frameIndex<=0 → InvalidFrameDimensions)
+        await alice.SendAsync(PacketFactory.CreateScreenFrame(
+            senderId: "Alice",
+            frameIndex: 0,
+            frameDescription: "poison-frame",
+            width: 1920,
+            height: 1080,
+            encoding: ScreenEncodings.Png,
+            content: new byte[] { 1, 2, 3 },
+            sessionId: sessionId));
+
+        await WaitUntilAsync(
+            () => rig.ServerLog.Snapshot().Any(entry =>
+                entry.Contains("[Packet] 처리 오류") &&
+                entry.Contains(ErrorCodes.InvalidFrameDimensions)),
+            DefaultWait);
+
+        // 예외 이후에도 세션은 열려 있고 두 참가자가 모두 유지되어야 한다.
+        Assert.True(rig.SessionManager.IsSessionOpen);
+        Assert.Equal(2, rig.SessionManager.ParticipantCount);
+        Assert.Contains("Alice", rig.SessionManager.ParticipantNames);
+        Assert.Contains("Bob", rig.SessionManager.ParticipantNames);
+
+        // 나머지 참가자(Bob)의 채팅이 여전히 브로드캐스트되어야 세션이 실제로 살아있다고 볼 수 있다.
+        await bob.SendAsync(PacketFactory.CreateChat(
+            senderId: "Bob", sender: "Bob", message: "after-fault", sessionId: sessionId));
+        await WaitUntilAsync(
+            () => rig.ServerLog.Snapshot().Any(entry => entry.Contains("[Chat] 브로드캐스트") && entry.Contains("Bob")),
+            DefaultWait);
+    }
+
     private static async Task WaitUntilAsync(
         Func<bool> condition,
         TimeSpan timeout,
