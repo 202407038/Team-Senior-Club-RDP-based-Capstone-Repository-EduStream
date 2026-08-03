@@ -15,6 +15,8 @@ public sealed class FeatureOperationResult
 
     public string Message { get; init; } = string.Empty;
 
+    public string DisplayMessage { get; init; } = string.Empty;
+
     public bool IsRecoverable { get; init; }
 
     public int? ProgressPercent { get; init; }
@@ -31,6 +33,13 @@ public sealed class FeatureOperationResult
 
     public bool IsTerminal => State is OperationState.Succeeded or OperationState.Failed or OperationState.Stopped;
 
+    public bool CanRetry => State == OperationState.Failed && IsRecoverable;
+
+    public bool CanTransitionTo(OperationState nextState)
+    {
+        return OperationStateTransitionPolicy.CanTransition(State, nextState, CanRetry);
+    }
+
     public static FeatureOperationResult FromAck(FeatureArea feature, AckPacket packet)
     {
         ArgumentNullException.ThrowIfNull(packet);
@@ -43,6 +52,7 @@ public sealed class FeatureOperationResult
             State = OperationState.Succeeded,
             Code = packet.AckCode,
             Message = packet.Message,
+            DisplayMessage = packet.Message,
             SessionId = packet.SessionId,
             CorrelationId = packet.CorrelationId,
             OccurredAt = packet.CreatedAt
@@ -54,6 +64,7 @@ public sealed class FeatureOperationResult
         ArgumentNullException.ThrowIfNull(packet);
         ValidateFeature(feature);
         PacketContractUtility.ValidateErrorCode(packet.ErrorCode);
+        var errorInfo = FeatureErrorCatalog.Resolve(packet.ErrorCode);
 
         return new FeatureOperationResult
         {
@@ -61,6 +72,7 @@ public sealed class FeatureOperationResult
             State = OperationState.Failed,
             Code = packet.ErrorCode,
             Message = packet.Message,
+            DisplayMessage = errorInfo.UserMessage,
             IsRecoverable = packet.IsRecoverable,
             SessionId = packet.SessionId,
             CorrelationId = packet.CorrelationId,
@@ -98,6 +110,7 @@ public sealed class FeatureOperationResult
             State = state,
             Code = code ?? string.Empty,
             Message = message,
+            DisplayMessage = message,
             IsRecoverable = isRecoverable,
             ProgressPercent = progressPercent,
             SessionId = sessionId,
