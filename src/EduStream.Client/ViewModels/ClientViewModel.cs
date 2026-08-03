@@ -64,6 +64,7 @@ public sealed class ClientViewModel : ObservableObject
         SyncLogs();
     }
 
+
     public string HostAddress
     {
         get => _hostAddress;
@@ -396,12 +397,12 @@ public sealed class ClientViewModel : ObservableObject
                 _ = _sessionClient.ApplyJoinAckAsync(packet, HostAddress, Port);
                 IsConnected = true;
 
-                // 💡 연결 성공 시중앙 로딩 비활성화 및 시스템 알림창 메시지 정상 주입
                 IsConnecting = false;
-                IsStatusError = false;
-                StatusMessage = "강의 세션 연결에 성공했습니다. 실시간 스트리밍 및 채팅이 가능합니다.";
+                // 💡 변경: Success 우선순위 적용
+                UpdateStatus("강의 세션 연결에 성공했습니다. 실시간 스트리밍 및 채팅이 가능합니다.", StatusPriority.Success);
 
                 ConnectionState = "연결됨";
+               
                 SessionSummary = $"{_sessionClient.CurrentSession?.SessionName} / {HostAddress}:{Port}";
                 LastSuccessMessage = "세션 참가 성공";
                 LastErrorMessage = "오류 없음";
@@ -412,8 +413,8 @@ public sealed class ClientViewModel : ObservableObject
             {
                 IsConnected = false;
                 IsConnecting = false;
-                IsStatusError = false;
-                StatusMessage = "세션에서 정상적으로 퇴장했습니다.";
+                // 💡 변경: Info 우선순위 적용
+                UpdateStatus("세션에서 정상적으로 퇴장했습니다.", StatusPriority.Info);
 
                 ConnectionState = "연결 종료";
                 SessionSummary = "아직 참가한 세션이 없습니다.";
@@ -435,10 +436,9 @@ public sealed class ClientViewModel : ObservableObject
             LastErrorMessage = $"{packet.ErrorCode}: {packet.Message}";
             LastServerMessage = packet.Message;
 
-            // 💡 서버에서 에러 패킷을 수신했을 때 시스템 경고창을 연동시키는 로직
             IsConnecting = false;
-            IsStatusError = true;
-            StatusMessage = $"[서버 에러] {packet.Message}";
+            // 💡 변경: Error 우선순위 적용 (isError: true)
+            UpdateStatus($"[서버 에러] {packet.Message}", StatusPriority.Error, isError: true);
 
             if (!IsConnected)
             {
@@ -487,6 +487,10 @@ public sealed class ClientViewModel : ObservableObject
                 LastServerMessage = "화면 프레임을 수신했습니다.";
                 LastSuccessMessage = $"화면 프레임 #{packet.FrameIndex} 수신 성공";
                 ScreenDetail = $"{packet.Width}x{packet.Height} / {packet.Encoding} / {packet.ContentLength} bytes / {packet.CapturedAt:HH:mm:ss}";
+
+                // 💡 낮은 우선순위(Info) 적용 -> 파일 수신 중이나 오류 문구를 가리지 않음
+                UpdateStatus("화면 프레임 수신 중", StatusPriority.Info);
+
                 _logSink.Write($"[Screen] 화면 프레임 수신: #{packet.FrameIndex}, {packet.Width}x{packet.Height}, {packet.Encoding}");
                 SyncLogs();
             });
@@ -498,31 +502,54 @@ public sealed class ClientViewModel : ObservableObject
                 RenderStatus = $"화면 수신 실패: {ex.Message}";
                 ScreenDetail = "프레임 메타데이터 검증 실패";
                 LastErrorMessage = $"SCREEN_RENDER_FAILED: {ex.Message}";
+
+                // 💡 catch 블록: 화면 수신 실패 시 Error 우선순위(isError: true)로 갱신
+                UpdateStatus($"화면 수신 실패: {ex.Message}", StatusPriority.Error, isError: true);
+
                 _logSink.Write($"화면 수신 실패: {ex.Message}");
                 SyncLogs();
             });
         }
     }
+    private int _lastProgressPercent = -1;
 
     private async Task HandleFileAsync(FilePacket packet)
     {
         try
         {
-            var result = await _fileReceiver.TrySaveAsync(packet, Path.Combine(Path.GetTempPath(), "EduStreamClient"));
+            // 🟢 1. 클라이언트 프로세스 ID별 독립된 임시 폴더 생성
+            string baseTempPath = Path.Combine(Path.GetTempPath(), "EduStreamClient", Environment.ProcessId.ToString());
 
+            // 🟢 2. 파일 저장 처리(I/O)를 백그라운드 스레드에서 수행하여 UI Freeze(응답 없음) 방지
+            var result = await Task.Run(() => _fileReceiver.TrySaveAsync(packet, baseTempPath));
+
+            // 🟢 3. 진행 중 (Pending)
             if (result.Pending)
             {
-                RunOnUiThread(() =>
+                // UI 폭주 방지: 진행률(%)이 이전과 다를 때만 UI 업데이트 실행
+                if (_lastProgressPercent != result.ProgressPercent)
                 {
-                    DownloadStatus = result.StatusMessage;
-                    FileTransferDetail = BuildFileTransferDetail(packet, result);
-                    LastServerMessage = "파일을 수신 중입니다.";
-                    _logSink.Write($"파일 청크 수신 중: transfer={packet.TransferId}, progress={result.ReceivedChunkCount}/{result.TotalChunks}");
-                    SyncLogs();
-                });
+                    _lastProgressPercent = result.ProgressPercent;
+
+                    RunOnUiThread(() =>
+                    {
+                        DownloadStatus = result.StatusMessage;
+                        FileTransferDetail = BuildFileTransferDetail(packet, result);
+                        LastServerMessage = "파일을 수신 중입니다.";
+
+                        // 진행 중 status 반영
+                        UpdateStatus($"파일 수신 중: {result.ProgressPercent}% ({packet.FileName})", StatusPriority.Progress);
+
+                        _logSink.Write($"파일 청크 수신 중: transfer={packet.TransferId}, progress={result.ReceivedChunkCount}/{result.TotalChunks}");
+                        SyncLogs();
+                    });
+                }
 
                 return;
             }
+
+            // 🟢 4. 완료 처리 준비 (진행률 변수 초기화)
+            _lastProgressPercent = -1;
 
             if (!result.Success || string.IsNullOrWhiteSpace(result.FilePath))
             {
@@ -533,6 +560,7 @@ public sealed class ClientViewModel : ObservableObject
 
             var path = result.FilePath;
 
+            // 🟢 5. 수신 및 저장 완료 UI 반영
             RunOnUiThread(() =>
             {
                 DownloadedFiles.Insert(0, Path.GetFileName(path));
@@ -540,17 +568,26 @@ public sealed class ClientViewModel : ObservableObject
                 LastServerMessage = "파일 수신이 완료되었습니다.";
                 LastSuccessMessage = result.StatusMessage;
                 FileTransferDetail = $"{BuildFileTransferDetail(packet, result)} / 저장 위치 {path}";
+
+                // 수신 완료 메시지 확정
+                UpdateStatus($"파일 수신 완료: {Path.GetFileName(path)} (100%)", StatusPriority.Success);
+
                 _logSink.Write($"파일 저장 완료: {path}");
                 SyncLogs();
             });
         }
         catch (Exception ex)
         {
+            _lastProgressPercent = -1; // 예외 발생 시 진행률 리셋
+
             RunOnUiThread(() =>
             {
                 DownloadStatus = $"파일 저장 실패: {ex.Message}";
                 FileTransferDetail = $"{packet.FileName} 저장 실패";
                 LastErrorMessage = $"FILE_RECEIVE_FAILED: {ex.Message}";
+
+                UpdateStatus($"파일 저장 실패: {ex.Message}", StatusPriority.Error, isError: true);
+
                 _logSink.Write($"파일 저장 실패: {ex.Message}");
                 SyncLogs();
             });
@@ -576,9 +613,8 @@ public sealed class ClientViewModel : ObservableObject
                 IsConnected = false;
                 IsConnecting = false;
 
-                // 💡 비정상적으로 연결이 끊겼을 때 알림창을 에러 상태로 전환
-                IsStatusError = true;
-                StatusMessage = $"서버와의 연결이 차단되었습니다: {reason}";
+                // 💡 UpdateStatus 내부에서 IsStatusError = true 처리까지 완료됩니다.
+                UpdateStatus($"서버와의 연결이 차단되었습니다: {reason}", StatusPriority.Error, isError: true);
 
                 ConnectionState = "연결 끊김";
                 LastServerMessage = reason;
@@ -596,10 +632,10 @@ public sealed class ClientViewModel : ObservableObject
 
     private void ApplyJoinError(ErrorPacket error)
     {
-        // 💡 에러 발생 시 UI 단에서 변수를 인지하여 반응하도록 값 주입
         IsConnecting = false;
-        IsStatusError = true;
-        StatusMessage = error.Message;
+
+        // 💡 직접 할당 대신 UpdateStatus를 호출하여 최우선순위(Error)로 에러 메시지 주입
+        UpdateStatus(error.Message, StatusPriority.Error, isError: true);
 
         ConnectionState = "연결 실패";
         LastServerMessage = "세션 참가 요청이 거절되었습니다.";
@@ -619,6 +655,48 @@ public sealed class ClientViewModel : ObservableObject
         }
     }
 
+    /// <summary>
+    /// UI 상단/하단 상태 메시지의 표시 우선순위를 정의합니다.
+    /// 숫자가 높을수록 높은 우선순위를 가집니다.
+    /// </summary>
+    public enum StatusPriority
+    {
+        Idle = 0,         // 기본 대기 상태
+        Info = 1,         // 일반 정보 (화면 프레임 수신, 단순 안내 등)
+        Success = 2,      // 작업 완료/성공 (파일 저장 완료, 세션 참가 등)
+        Progress = 3,     // 진행 중인 주요 작업 (파일 다운로드 중)
+        Error = 4         // 오류 및 연결 끊김 (최우선 표시)
+    }
+
+    private StatusPriority _currentStatusPriority = StatusPriority.Idle;
+
+    /// <summary>
+    /// 우선순위에 따라 시스템 상태 메시지를 안전하게 갱신합니다.
+    /// </summary>
+    private void UpdateStatus(string message, StatusPriority priority, bool isError = false)
+    {
+        RunOnUiThread(() =>
+        {
+            // 현재 표기 중인 상태보다 낮거나 같은 우선순위의 단순 정보는 덮어쓰지 않음
+            // (단, 같은 우선순위의 Error나 Progress, Success는 최신 내용으로 갱신)
+            if (priority < _currentStatusPriority)
+            {
+                return;
+            }
+
+            _currentStatusPriority = priority;
+            IsStatusError = isError;
+            StatusMessage = message;
+        });
+    }
+
+    /// <summary>
+    /// 일정한 성공/완료 메시지 표시 후 기본 상태(Idle)로 복귀할 때 사용합니다.
+    /// </summary>
+    private void ResetStatusPriority()
+    {
+        _currentStatusPriority = StatusPriority.Idle;
+    }
     private static void RunOnUiThread(Action action)
     {
         if (Application.Current?.Dispatcher is { } dispatcher && !dispatcher.CheckAccess())
