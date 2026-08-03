@@ -96,6 +96,7 @@ public sealed class FileReceiver
 
             if (addResult.AssembledContent is null)
             {
+                RemoveChunkBuffer(packet.TransferId);
                 return FileReceiveResult.CreateFailure(
                     ErrorCodes.FileAssemblyFailed,
                     "파일 조립 결과가 비어 있습니다.",
@@ -104,6 +105,7 @@ public sealed class FileReceiver
 
             if (!ChecksumUtility.VerifySha256(addResult.AssembledContent, packet.Checksum))
             {
+                RemoveChunkBuffer(packet.TransferId);
                 return FileReceiveResult.CreateFailure(
                     ErrorCodes.ChecksumMismatch,
                     "청크 조립 후 체크섬 검증에 실패했습니다.",
@@ -122,10 +124,12 @@ public sealed class FileReceiver
         }
         catch (ArgumentNullException ex)
         {
+            RemoveChunkBuffer(packet?.TransferId ?? Guid.Empty);
             return FileReceiveResult.CreateFailure(ErrorCodes.InvalidFileName, ex.Message);
         }
         catch (ArgumentException ex)
         {
+            RemoveChunkBuffer(packet.TransferId);
             return FileReceiveResult.CreateFailure(ErrorCodes.InvalidFileName, ex.Message);
         }
         catch (InvalidOperationException ex) when (ex.Message == ErrorCodes.ChecksumMismatch ||
@@ -140,6 +144,7 @@ public sealed class FileReceiver
                                                    ex.Message == ErrorCodes.FileChunkMetadataMismatch ||
                                                    ex.Message == ErrorCodes.FileAssemblyFailed)
         {
+            RemoveChunkBuffer(packet.TransferId);
             return FileReceiveResult.CreateFailure(
                 ex.Message,
                 "파일 패킷 메타데이터 검증 실패 또는 유효하지 않은 청크 정보입니다.",
@@ -147,22 +152,27 @@ public sealed class FileReceiver
         }
         catch (UnauthorizedAccessException ex)
         {
+            RemoveChunkBuffer(packet.TransferId);
             return FileReceiveResult.CreateFailure("FILE_WRITE_PERMISSION_DENIED", ex.Message);
         }
         catch (PathTooLongException ex)
         {
+            RemoveChunkBuffer(packet.TransferId);
             return FileReceiveResult.CreateFailure("FILE_PATH_TOO_LONG", ex.Message);
         }
         catch (DirectoryNotFoundException ex)
         {
+            RemoveChunkBuffer(packet.TransferId);
             return FileReceiveResult.CreateFailure("DIRECTORY_NOT_FOUND", ex.Message, canRetry: true);
         }
         catch (IOException ex)
         {
+            RemoveChunkBuffer(packet.TransferId);
             return FileReceiveResult.CreateFailure("FILE_IO_ERROR", ex.Message, canRetry: true);
         }
         catch (Exception ex)
         {
+            RemoveChunkBuffer(packet.TransferId);
             return FileReceiveResult.CreateFailure("UNKNOWN_ERROR", ex.Message);
         }
     }
@@ -188,6 +198,19 @@ public sealed class FileReceiver
             or ErrorCodes.FileChunkPending
             or ErrorCodes.FileChunkMetadataMismatch
             or ErrorCodes.FileAssemblyFailed;
+    }
+
+    private void RemoveChunkBuffer(Guid transferId)
+    {
+        if (transferId == Guid.Empty)
+        {
+            return;
+        }
+
+        lock (_syncRoot)
+        {
+            _chunkBuffers.Remove(transferId);
+        }
     }
 
     private ChunkAddResult AddChunkAndTryAssemble(FilePacket packet)
