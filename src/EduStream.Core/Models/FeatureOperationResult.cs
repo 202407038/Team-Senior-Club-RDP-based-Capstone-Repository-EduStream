@@ -104,6 +104,16 @@ public sealed class FeatureOperationResult
             throw new ArgumentOutOfRangeException(nameof(progressPercent), "진행률은 0에서 100 사이여야 합니다.");
         }
 
+        if (state == OperationState.Succeeded && progressPercent is not null and not 100)
+        {
+            throw new ArgumentException("완료 상태의 진행률은 100이어야 합니다.", nameof(progressPercent));
+        }
+
+        if (state == OperationState.Idle && progressPercent is > 0)
+        {
+            throw new ArgumentException("대기 상태의 진행률은 0이어야 합니다.", nameof(progressPercent));
+        }
+
         return new FeatureOperationResult
         {
             Feature = feature,
