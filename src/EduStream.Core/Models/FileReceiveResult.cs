@@ -7,6 +7,7 @@ public sealed class FileReceiveResult
     public OperationState State { get; set; }
     public bool Success => State == OperationState.Succeeded;
     public bool Pending => State is OperationState.Pending or OperationState.InProgress;
+    public bool CanRetry { get; set; }
     public string? FilePath { get; set; }
     public string? ErrorCode { get; set; }
     public string? ErrorMessage { get; set; }
@@ -31,7 +32,8 @@ public sealed class FileReceiveResult
             sessionId,
             correlationId,
             occurredAt,
-            ErrorCode);
+            ErrorCode,
+            CanRetry);
     }
 
     public static FileReceiveResult CreateSuccess(string path, string message = "파일 수신 완료", int receivedChunkCount = 0, int totalChunks = 0)
@@ -59,14 +61,22 @@ public sealed class FileReceiveResult
         };
     }
 
-    public static FileReceiveResult CreateFailure(string errorCode, string errorMessage)
+    public static FileReceiveResult CreateFailure(
+        string errorCode,
+        string errorMessage,
+        bool canRetry = false,
+        int receivedChunkCount = 0,
+        int totalChunks = 0)
     {
         return new()
         {
             State = OperationState.Failed,
             ErrorCode = errorCode,
             ErrorMessage = errorMessage,
-            StatusMessage = errorMessage
+            StatusMessage = errorMessage,
+            CanRetry = canRetry,
+            ReceivedChunkCount = receivedChunkCount,
+            TotalChunks = totalChunks
         };
     }
 }
