@@ -12,6 +12,8 @@ namespace EduStream.FileTransfer.Tests;
 /// </summary>
 public sealed class ScreenShareStateTransitionTests
 {
+    private static readonly TimeSpan DefaultWait = TimeSpan.FromSeconds(5);
+
     [Fact]
     public void State_Initial_IsIdle()
     {
@@ -56,32 +58,105 @@ public sealed class ScreenShareStateTransitionTests
     public async Task State_TransmissionFailure_ChangesToFailed()
     {
         var log = new InMemoryLogSink();
-        var tcpServer = new TcpServerService(log, new PacketSerializer());
+        var serializer = new ControllablePacketSerializer { FailScreenPackets = true };
+        var tcpServer = new TcpServerService(log, serializer);
         var sessionManager = new SessionManager(log, tcpServer);
-        var service = new ScreenShareService(sessionManager, log);
+        var service = CreateService(sessionManager, log);
 
-        await service.StartContinuousBroadcastAsync();
+        try
+        {
+            await service.StartContinuousBroadcastAsync();
+            await WaitUntilAsync(() => service.State == OperationState.Failed, DefaultWait);
 
-        // 송신 실패 상황 시뮬레이션
-        // 실제로는 BroadcastLoopAsync에서 예외 발생 시 Failed로 설정됨
-        // 여기서는 상태 전환 로직이 있는지 확인
-
-        await service.StopContinuousBroadcastAsync();
+            Assert.Equal(OperationState.Failed, service.State);
+            Assert.Contains("화면 프레임 전송 실패", service.LatestStatus);
+            Assert.Equal(0, service.BroadcastFrameCount);
+        }
+        finally
+        {
+            await service.StopContinuousBroadcastAsync();
+        }
     }
 
     [Fact]
     public async Task State_RecoveryAfterFailure_ChangesToInProgress()
     {
         var log = new InMemoryLogSink();
-        var tcpServer = new TcpServerService(log, new PacketSerializer());
+        var serializer = new ControllablePacketSerializer { FailScreenPackets = true };
+        var tcpServer = new TcpServerService(log, serializer);
         var sessionManager = new SessionManager(log, tcpServer);
-        var service = new ScreenShareService(sessionManager, log);
+        var service = CreateService(sessionManager, log);
 
-        await service.StartContinuousBroadcastAsync();
+        try
+        {
+            await service.StartContinuousBroadcastAsync();
+            await WaitUntilAsync(() => service.State == OperationState.Failed, DefaultWait);
 
-        // 실패 후 정상 복구 시 InProgress로 복구되는지 확인
-        // BroadcastLoopAsync에서 정상 전송 후 InProgress로 복구됨
+            serializer.FailScreenPackets = false;
+            await WaitUntilAsync(
+                () => service.State == OperationState.InProgress && service.BroadcastFrameCount > 0,
+                DefaultWait);
 
-        await service.StopContinuousBroadcastAsync();
+            Assert.Equal(OperationState.InProgress, service.State);
+            Assert.True(service.BroadcastFrameCount > 0);
+        }
+        finally
+        {
+            await service.StopContinuousBroadcastAsync();
+        }
+    }
+
+    private static ScreenShareService CreateService(SessionManager sessionManager, ILogSink log)
+    {
+        return new ScreenShareService(
+            sessionManager,
+            log,
+            new ScreenCaptureSettings
+            {
+                TargetFrameIntervalMilliseconds = ScreenTransferRules.MinimumFrameIntervalMilliseconds
+            });
+    }
+
+    private static async Task WaitUntilAsync(Func<bool> condition, TimeSpan timeout)
+    {
+        var deadline = DateTime.UtcNow + timeout;
+        while (DateTime.UtcNow < deadline)
+        {
+            if (condition())
+            {
+                return;
+            }
+
+            await Task.Delay(20);
+        }
+
+        throw new TimeoutException($"조건이 {timeout.TotalSeconds:F1}초 안에 충족되지 않았습니다.");
+    }
+
+    private sealed class ControllablePacketSerializer : IPacketSerializer
+    {
+        private readonly PacketSerializer _inner = new();
+        private int _failScreenPackets;
+
+        public bool FailScreenPackets
+        {
+            get => Volatile.Read(ref _failScreenPackets) == 1;
+            set => Volatile.Write(ref _failScreenPackets, value ? 1 : 0);
+        }
+
+        public byte[] Serialize<TPacket>(TPacket packet) where TPacket : BasePacket
+        {
+            if (packet is ScreenPacket && FailScreenPackets)
+            {
+                throw new IOException("화면 프레임 전송 실패 테스트");
+            }
+
+            return _inner.Serialize(packet);
+        }
+
+        public TPacket? Deserialize<TPacket>(byte[] payload) where TPacket : BasePacket
+        {
+            return _inner.Deserialize<TPacket>(payload);
+        }
     }
 }
