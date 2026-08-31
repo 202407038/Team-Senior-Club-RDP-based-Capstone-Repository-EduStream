@@ -101,16 +101,8 @@ public sealed class ScreenShareService
 
     public async Task<ScreenPacket> CaptureAndBroadcastPreviewAsync()
     {
-        var frame = _capturer.CapturePreviewFrame();
-
-        if (IsPlaceholderFrame(frame))
-        {
-            _logSink.Write($"[Screen] 화면 캡처 fallback: #{frame.FrameIndex}, 플레이스홀더 프레임 사용");
-            UpdateStatus($"화면 캡처 fallback: 프레임#{frame.FrameIndex} 플레이스홀더 사용");
-        }
-
-        await BroadcastFrameAsync(frame);
-        return frame;
+        var result = await CaptureAndBroadcastFrameAsync();
+        return result.Frame;
     }
 
     public Task StartContinuousBroadcastAsync()
@@ -180,9 +172,11 @@ public sealed class ScreenShareService
             {
                 try
                 {
-                    await CaptureAndBroadcastPreviewAsync();
-                    // 정상 전송 후 상태를 InProgress로 복구
-                    UpdateStatus("화면 프레임 전송 중", OperationState.InProgress);
+                    var result = await CaptureAndBroadcastFrameAsync();
+                    if (result.BroadcastSucceeded)
+                    {
+                        UpdateStatus("화면 프레임 전송 중", OperationState.InProgress);
+                    }
                 }
                 catch (Exception ex)
                 {
@@ -215,7 +209,21 @@ public sealed class ScreenShareService
         }
     }
 
-    private async Task BroadcastFrameAsync(ScreenPacket frame)
+    private async Task<(ScreenPacket Frame, bool BroadcastSucceeded)> CaptureAndBroadcastFrameAsync()
+    {
+        var frame = _capturer.CapturePreviewFrame();
+
+        if (IsPlaceholderFrame(frame))
+        {
+            _logSink.Write($"[Screen] 화면 캡처 fallback: #{frame.FrameIndex}, 플레이스홀더 프레임 사용");
+            UpdateStatus($"화면 캡처 fallback: 프레임#{frame.FrameIndex} 플레이스홀더 사용");
+        }
+
+        var broadcastSucceeded = await BroadcastFrameAsync(frame);
+        return (frame, broadcastSucceeded);
+    }
+
+    private async Task<bool> BroadcastFrameAsync(ScreenPacket frame)
     {
         frame.DataLength = frame.Content.Length;
 
@@ -232,11 +240,13 @@ public sealed class ScreenShareService
             }
 
             StatusChanged?.Invoke();
+            return true;
         }
         catch (Exception ex)
         {
             _logSink.Write($"[Screen] 화면 프레임 전송 실패: #{frame.FrameIndex}, {ex.GetType().Name}: {ex.Message}");
-            UpdateStatus($"화면 프레임 전송 실패: #{frame.FrameIndex}, {ex.Message}");
+            UpdateStatus($"화면 프레임 전송 실패: #{frame.FrameIndex}, {ex.Message}", OperationState.Failed);
+            return false;
         }
     }
 
