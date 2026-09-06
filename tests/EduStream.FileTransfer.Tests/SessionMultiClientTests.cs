@@ -214,6 +214,149 @@ public sealed class SessionMultiClientTests
             DefaultWait);
     }
 
+    [Fact]
+    public async Task AbruptDisconnect_ThenRejoinWithSameName_ShouldEventuallySucceedQuickly()
+    {
+        // 8월 2주차 2번: 네트워크 오류로 소켓이 끊긴 뒤 같은 이름으로 재접속을 시도하면,
+        // 이전 참가자 정보가 남아 거부되지 않고 짧은 시간 안에 재입장할 수 있어야 한다.
+        await using var rig = await TestRig.OpenAsync();
+
+        var alice = await rig.ConnectAndJoinAsync("Alice");
+        await WaitUntilAsync(() => rig.SessionManager.ParticipantCount == 1, DefaultWait);
+
+        alice.Dispose();
+        rig.ForgetClient(alice);
+
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(2);
+        var lastResponse = PacketType.Unknown;
+        while (DateTime.UtcNow < deadline)
+        {
+            var (client, responseType) = await rig.ConnectAndAttemptJoinAsync("Alice");
+            lastResponse = responseType;
+            if (responseType == PacketType.Ack)
+                break;
+
+            client.Dispose();
+            rig.ForgetClient(client);
+            await Task.Delay(50);
+        }
+
+        Assert.Equal(PacketType.Ack, lastResponse);
+        await WaitUntilAsync(() => rig.SessionManager.ParticipantCount == 1, DefaultWait);
+        Assert.Contains("Alice", rig.SessionManager.ParticipantNames);
+    }
+
+    [Fact]
+    public async Task GracefulLeave_ShouldRemoveOnlyThatParticipant_AndKeepOthersFunctional()
+    {
+        // 8월 3주차 2번: SessionLeave로 정상 이탈한 뒤에도 참가자 수/목록이 정확히 갱신되고
+        // 나머지 참가자는 계속 정상 동작해야 한다(abnormal disconnect뿐 아니라 정상 이탈도 검증).
+        await using var rig = await TestRig.OpenAsync();
+
+        var alice = await rig.ConnectAndJoinAsync("Alice");
+        var bob = await rig.ConnectAndJoinAsync("Bob");
+        await WaitUntilAsync(() => rig.SessionManager.ParticipantCount == 2, DefaultWait);
+
+        var sessionId = rig.SessionManager.CurrentSession?.SessionId;
+        var leavePacket = PacketFactory.CreateSessionLeave(
+            senderId: "Alice",
+            displayName: "Alice",
+            reason: "사용자 요청",
+            sessionId: sessionId);
+        var serializer = new PacketSerializer();
+        var leaveAckReceived = new TaskCompletionSource<AckPacket>(TaskCreationOptions.RunContinuationsAsynchronously);
+        alice.PacketReceived += (packetType, payload) =>
+        {
+            if (packetType == PacketType.Ack)
+            {
+                var ack = serializer.Deserialize<AckPacket>(payload);
+                if (ack?.AckCode == AckCodes.SessionLeft &&
+                    ack.CorrelationId == leavePacket.CorrelationId)
+                {
+                    leaveAckReceived.TrySetResult(ack);
+                }
+            }
+            return Task.CompletedTask;
+        };
+
+        await alice.SendAsync(leavePacket);
+
+        var leaveAck = await leaveAckReceived.Task.WaitAsync(DefaultWait);
+        Assert.Equal(AckCodes.SessionLeft, leaveAck.AckCode);
+        Assert.Equal(leavePacket.CorrelationId, leaveAck.CorrelationId);
+        await WaitUntilAsync(() => rig.SessionManager.ParticipantCount == 1, DefaultWait);
+
+        Assert.DoesNotContain("Alice", rig.SessionManager.ParticipantNames);
+        Assert.Contains("Bob", rig.SessionManager.ParticipantNames);
+        Assert.Contains(rig.ServerLog.Snapshot(), e => e.Contains("Alice님이 세션에서 나갔습니다"));
+
+        // 남은 Bob은 계속 정상 동작해야 한다.
+        await bob.SendAsync(PacketFactory.CreateChat(
+            senderId: "Bob", sender: "Bob", message: "after-leave", sessionId: sessionId));
+        await WaitUntilAsync(
+            () => rig.ServerLog.Snapshot().Any(entry => entry.Contains("[Chat] 브로드캐스트") && entry.Contains("Bob")),
+            DefaultWait);
+    }
+
+    [Fact]
+    public async Task LongRunningSession_SurvivesMultipleHeartbeatCycles_SilentClientTimesOutWhileActiveStays()
+    {
+        // 8월 4주차 2번: 짧은 주기로 여러 heartbeat 사이클을 반복해 장시간 세션 운영을 흉내 내고,
+        // 그 중간에 응답 없는 클라이언트만 타임아웃되고 활성 클라이언트와 세션 자체는 유지되는지 검증한다.
+        await using var rig = await TestRig.OpenAsync(
+            heartbeatSendInterval: TimeSpan.FromMilliseconds(100),
+            heartbeatTimeout: TimeSpan.FromMilliseconds(350),
+            heartbeatStaleCheckInterval: TimeSpan.FromMilliseconds(50));
+
+        var active = await rig.ConnectAndJoinAsync("Active");
+        await WaitUntilAsync(() => rig.SessionManager.ParticipantCount == 1, DefaultWait);
+
+        var sessionId = rig.SessionManager.CurrentSession?.SessionId;
+
+        // 활성 클라이언트는 여러 heartbeat 송신 주기 동안 계속 응답한다.
+        using var keepAliveCts = new CancellationTokenSource();
+        var keepAliveTask = Task.Run(async () =>
+        {
+            while (!keepAliveCts.IsCancellationRequested)
+            {
+                try
+                {
+                    await active.SendAsync(PacketFactory.CreateHeartbeat(senderId: "Active", sessionId: sessionId));
+                }
+                catch { }
+                await Task.Delay(80);
+            }
+        });
+
+        // 여러 사이클이 지나는 동안 세션이 유지되는지 먼저 확인한다.
+        await Task.Delay(500);
+        Assert.Equal(1, rig.SessionManager.ParticipantCount);
+
+        // 이후 응답을 전혀 보내지 않는 클라이언트를 추가한다.
+        await rig.ConnectAndJoinAsync("Silent");
+        await WaitUntilAsync(() => rig.SessionManager.ParticipantCount == 2, DefaultWait);
+
+        // Silent는 타임아웃으로 제거되고, Active는 계속 응답 중이므로 세션에 남아 있어야 한다.
+        await WaitUntilAsync(() => rig.SessionManager.ParticipantCount == 1, TimeSpan.FromSeconds(3));
+
+        Assert.Equal(1, rig.SessionManager.ParticipantCount);
+        Assert.Contains("Active", rig.SessionManager.ParticipantNames);
+        Assert.DoesNotContain("Silent", rig.SessionManager.ParticipantNames);
+
+        var timeoutCount = rig.ServerLog.Snapshot().Count(e => e.Contains("[Heartbeat] 타임아웃 disconnect"));
+        Assert.Equal(1, timeoutCount);
+
+        keepAliveCts.Cancel();
+        await keepAliveTask;
+
+        // 여러 사이클을 거친 뒤에도 세션이 실제로 정상 동작하는지 채팅으로 확인한다.
+        await active.SendAsync(PacketFactory.CreateChat(
+            senderId: "Active", sender: "Active", message: "still-alive-after-cycles", sessionId: sessionId));
+        await WaitUntilAsync(
+            () => rig.ServerLog.Snapshot().Any(entry => entry.Contains("[Chat] 브로드캐스트") && entry.Contains("Active")),
+            DefaultWait);
+    }
+
     private static async Task WaitUntilAsync(
         Func<bool> condition,
         TimeSpan timeout,
@@ -314,6 +457,38 @@ public sealed class SessionMultiClientTests
         public void ForgetClient(TcpClientService client)
         {
             _clients.Remove(client);
+        }
+
+        /// <summary>
+        /// 접속 후 join을 시도하고, 서버 응답(Ack 또는 Error)의 타입을 반환합니다.
+        /// 재접속 시나리오처럼 거부 여부를 직접 확인해야 하는 테스트에서 사용합니다.
+        /// </summary>
+        public async Task<(TcpClientService Client, PacketType ResponseType)> ConnectAndAttemptJoinAsync(string displayName)
+        {
+            var serializer = new PacketSerializer();
+            var clientLog = new InMemoryLogSink();
+            var client = new TcpClientService(clientLog, serializer);
+            var responseReceived = new TaskCompletionSource<PacketType>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+            client.PacketReceived += (packetType, _) =>
+            {
+                if (packetType is PacketType.Ack or PacketType.Error)
+                    responseReceived.TrySetResult(packetType);
+                return Task.CompletedTask;
+            };
+
+            await client.ConnectAsync("127.0.0.1", Port);
+
+            var joinPacket = PacketFactory.CreateSessionJoin(
+                senderId: displayName,
+                displayName: displayName,
+                targetAddress: "127.0.0.1",
+                targetPort: Port);
+            await client.SendAsync(joinPacket);
+
+            _clients.Add(client);
+            var responseType = await responseReceived.Task.WaitAsync(TimeSpan.FromSeconds(3));
+            return (client, responseType);
         }
 
         public async ValueTask DisposeAsync()
