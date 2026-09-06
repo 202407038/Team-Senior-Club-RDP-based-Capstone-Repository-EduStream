@@ -257,22 +257,33 @@ public sealed class SessionMultiClientTests
         var bob = await rig.ConnectAndJoinAsync("Bob");
         await WaitUntilAsync(() => rig.SessionManager.ParticipantCount == 2, DefaultWait);
 
-        var leaveAckReceived = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-        alice.PacketReceived += (packetType, _) =>
-        {
-            if (packetType == PacketType.Ack)
-                leaveAckReceived.TrySetResult(true);
-            return Task.CompletedTask;
-        };
-
         var sessionId = rig.SessionManager.CurrentSession?.SessionId;
-        await alice.SendAsync(PacketFactory.CreateSessionLeave(
+        var leavePacket = PacketFactory.CreateSessionLeave(
             senderId: "Alice",
             displayName: "Alice",
             reason: "사용자 요청",
-            sessionId: sessionId));
+            sessionId: sessionId);
+        var serializer = new PacketSerializer();
+        var leaveAckReceived = new TaskCompletionSource<AckPacket>(TaskCreationOptions.RunContinuationsAsynchronously);
+        alice.PacketReceived += (packetType, payload) =>
+        {
+            if (packetType == PacketType.Ack)
+            {
+                var ack = serializer.Deserialize<AckPacket>(payload);
+                if (ack?.AckCode == AckCodes.SessionLeft &&
+                    ack.CorrelationId == leavePacket.CorrelationId)
+                {
+                    leaveAckReceived.TrySetResult(ack);
+                }
+            }
+            return Task.CompletedTask;
+        };
 
-        await leaveAckReceived.Task.WaitAsync(DefaultWait);
+        await alice.SendAsync(leavePacket);
+
+        var leaveAck = await leaveAckReceived.Task.WaitAsync(DefaultWait);
+        Assert.Equal(AckCodes.SessionLeft, leaveAck.AckCode);
+        Assert.Equal(leavePacket.CorrelationId, leaveAck.CorrelationId);
         await WaitUntilAsync(() => rig.SessionManager.ParticipantCount == 1, DefaultWait);
 
         Assert.DoesNotContain("Alice", rig.SessionManager.ParticipantNames);
