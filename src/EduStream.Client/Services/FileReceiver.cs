@@ -49,7 +49,7 @@ public sealed class FileReceiver
                 }
 
                 Directory.CreateDirectory(targetDirectory);
-                await File.WriteAllBytesAsync(targetPath, Array.Empty<byte>());
+                await WriteAtomicallyAsync(targetPath, Array.Empty<byte>());
 
                 return FileReceiveResult.CreateSuccess(
                     targetPath,
@@ -69,7 +69,7 @@ public sealed class FileReceiver
                 }
 
                 Directory.CreateDirectory(targetDirectory);
-                await File.WriteAllBytesAsync(targetPath, packet.Content);
+                await WriteAtomicallyAsync(targetPath, packet.Content);
                 return FileReceiveResult.CreateSuccess(
                     targetPath,
                     $"{packet.FileName} 저장 완료",
@@ -115,7 +115,7 @@ public sealed class FileReceiver
             }
 
             Directory.CreateDirectory(targetDirectory);
-            await File.WriteAllBytesAsync(targetPath, addResult.AssembledContent);
+            await WriteAtomicallyAsync(targetPath, addResult.AssembledContent);
             return FileReceiveResult.CreateSuccess(
                 targetPath,
                 $"{packet.FileName} 저장 완료",
@@ -174,6 +174,22 @@ public sealed class FileReceiver
         {
             RemoveChunkBuffer(packet.TransferId);
             return FileReceiveResult.CreateFailure("UNKNOWN_ERROR", ex.Message);
+        }
+    }
+
+    private static async Task WriteAtomicallyAsync(string targetPath, byte[] content)
+    {
+        // 같은 볼륨의 임시 파일을 완성한 뒤 교체하여 실패 시 기존 파일을 보존합니다.
+        var temporaryPath = targetPath + "." + Guid.NewGuid().ToString("N") + ".partial";
+        try
+        {
+            await File.WriteAllBytesAsync(temporaryPath, content);
+            File.Move(temporaryPath, targetPath, overwrite: true);
+        }
+        finally
+        {
+            if (File.Exists(temporaryPath))
+                File.Delete(temporaryPath);
         }
     }
 
@@ -244,7 +260,14 @@ public sealed class FileReceiver
                 return ChunkAddResult.CreatePending(buffer.ReceivedChunkCount);
             }
 
+            if (packet.Content.LongLength > buffer.FileSize - buffer.ReceivedBytes)
+            {
+                _chunkBuffers.Remove(packet.TransferId);
+                return ChunkAddResult.Failure(ErrorCodes.FileAssemblyFailed, "청크 누적 크기가 선언된 파일 크기를 초과합니다.");
+            }
+
             buffer.Chunks[packet.ChunkIndex] = packet.Content.ToArray();
+            buffer.ReceivedBytes += packet.Content.LongLength;
             buffer.ReceivedChunkCount++;
 
             if (buffer.ReceivedChunkCount < buffer.TotalChunks)
@@ -296,6 +319,7 @@ public sealed class FileReceiver
         public string Checksum { get; }
         public int TotalChunks { get; }
         public int ReceivedChunkCount { get; set; }
+        public long ReceivedBytes { get; set; }
         public byte[][] Chunks { get; }
     }
 

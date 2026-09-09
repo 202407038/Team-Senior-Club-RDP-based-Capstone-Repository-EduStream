@@ -383,26 +383,30 @@ public sealed class ServerViewModel : ObservableObject
 
         try
         {
-            var packets = await _fileDistributor.BuildFilePacketsAsync(
-                filePath,
-                senderId: "Server",
-                sessionId: _sessionManager.CurrentSession?.SessionId,
-                chunkSize: FileTransferRules.MinChunkSize);
-
-            FileShareStatus = $"{label} 전송 중: {Path.GetFileName(filePath)} / {packets.Count} chunks";
+            var sessionId = _sessionManager.CurrentSession?.SessionId;
+            FilePacket? firstPacket = null;
+            var sentChunks = 0;
+            FileShareStatus = $"{label} 전송 준비 중: {Path.GetFileName(filePath)}";
             IsStatusError = false;
             SyncLogs();
 
-            foreach (var packet in packets)
+            await foreach (var packet in _fileDistributor.StreamFilePacketsAsync(
+                filePath, "Server", sessionId, FileTransferRules.MinChunkSize))
             {
+                if (!IsSessionOpen || _sessionManager.CurrentSession?.SessionId != sessionId)
+                    throw new InvalidOperationException("파일 전송 중 강의 세션이 변경되었습니다.");
+                firstPacket ??= packet;
                 await _sessionManager.BroadcastPacketAsync(packet);
+                sentChunks++;
+                FileShareStatus = $"{label} 전송 중: {packet.FileName} / {sentChunks}/{packet.TotalChunks} chunks";
             }
 
-            var firstPacket = packets[0];
-            FileShareStatus = $"{label} 전송 완료: {firstPacket.FileName} / {packets.Count} chunks / {firstPacket.FileSize} byte";
+            if (firstPacket is null)
+                throw new InvalidOperationException("파일 패킷이 생성되지 않았습니다.");
+            FileShareStatus = $"{label} 전송 완료: {firstPacket.FileName} / {sentChunks} chunks / {firstPacket.FileSize} byte";
             StatusMessage = FileShareStatus;
-            SharedFiles.Insert(0, $"{firstPacket.FileName} ({firstPacket.FileSize} byte, {packets.Count} chunks)");
-            _logSink.Write($"파일 전송 완료: {firstPacket.FileName}, chunks={packets.Count}, checksum={firstPacket.Checksum[..Math.Min(12, firstPacket.Checksum.Length)]}...");
+            SharedFiles.Insert(0, $"{firstPacket.FileName} ({firstPacket.FileSize} byte, {sentChunks} chunks)");
+            _logSink.Write($"파일 전송 완료: {firstPacket.FileName}, chunks={sentChunks}, checksum={firstPacket.Checksum[..Math.Min(12, firstPacket.Checksum.Length)]}...");
             SyncLogs();
         }
         catch (Exception ex)
