@@ -94,6 +94,13 @@ DataLength는 초대 ConnectionString의 UTF-8 바이트 수, 요청/폐기 패�
 
 대역 검증을 실제 RDP 성공으로 기록하지 않습니다. 공유·수신 방식 선택은 이 문서로 확정했으므로 팀원이 다른 방식을 임의로 골라 구현하지 않습니다. 실제 연결 장애가 발견되면 원인과 재현 환경을 공유하고 계약 변경을 팀장이 결정합니다.
 
+## 자동 검증 결과
+
+- 빌드 경고 0/오류 0, 신규 초대 계약 테스트 8/8 통과.
+- 전체 최종 재실행 142/142 통과.
+- 앞선 전체 실행에서 기존 ScreenShareHeartbeatConcurrencyTests가 대기하여 중단됐습니다. 30초 제한 재현 실행도 같은 테스트 대기를 보고했습니다. 해당 테스트 단독 실행은 main/보완 브랜치 모두 통과했고 이후 전체 재실행은 통과했습니다. 원인 미확정의 간헐 현상으로 통합 QA에서 추적합니다.
+- 실제 RDP viewer 연결 성공·영상 수신·학생 2명 동시 공유는 아직 별도 통합 검증 대상입니다.
+
 ## 공식 근거
 
 - [Windows Desktop Sharing 개요](https://learn.microsoft.com/en-us/previous-versions/windows/desktop/rdp/about-windows-desktop-sharing)
