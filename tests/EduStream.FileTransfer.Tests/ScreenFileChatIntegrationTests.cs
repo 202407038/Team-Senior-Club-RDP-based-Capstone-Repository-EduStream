@@ -64,18 +64,22 @@ public sealed class ScreenFileChatIntegrationTests
                 DefaultWait);
 
             var framesBeforeFile = screenCounts.ToDictionary(entry => entry.Key, entry => entry.Value);
-            var packets = await fileDistributor.BuildFilePacketsAsync(
+            var packets = fileDistributor.StreamFilePacketsAsync(
                 sourcePath,
                 senderId: "Server",
                 sessionId: sessionManager.CurrentSession?.SessionId,
                 chunkSize: FileTransferRules.MinChunkSize);
 
-            Assert.True(packets.Count > 1);
-            foreach (var packet in packets)
+            var sentChunks = 0;
+            await foreach (var packet in packets)
             {
                 await sessionManager.BroadcastPacketAsync(packet);
+                sentChunks++;
+                await sessionManager.BroadcastPacketAsync(PacketFactory.CreateSystemChat(
+                    $"파일 청크 {sentChunks} 송신", sessionManager.CurrentSession?.SessionId));
                 await Task.Delay(10);
             }
+            Assert.True(sentChunks > 1);
 
             const string completionChat = "파일 전송 완료 후 화면 공유 유지 확인";
             await sessionManager.BroadcastPacketAsync(PacketFactory.CreateSystemChat(
@@ -102,6 +106,8 @@ public sealed class ScreenFileChatIntegrationTests
                 Assert.Equal(100, result.ProgressPercent);
                 Assert.Contains("저장 완료", result.StatusMessage);
                 Assert.Contains(completionChat, chatMessages[name]);
+                for (var index = 1; index <= sentChunks; index++)
+                    Assert.Contains($"파일 청크 {index} 송신", chatMessages[name]);
                 Assert.True(screenCounts[name] > framesBeforeFile[name]);
                 Assert.Equal(sourceContent, await File.ReadAllBytesAsync(result.FilePath!));
             }
