@@ -13,5 +13,8 @@ public enum PacketType
     Screen = 5,
     Ack = 6,
     Error = 7,
-    Heartbeat = 8
+    Heartbeat = 8,
+    RdpInvitation = 9,
+    RdpInvitationRequest = 10,
+    RdpInvitationRevoked = 11
 }
