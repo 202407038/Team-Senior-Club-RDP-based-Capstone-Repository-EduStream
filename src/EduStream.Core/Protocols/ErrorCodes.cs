@@ -25,6 +25,10 @@ public static class ErrorCodes
     public const string FileChunkPending = "FILE_CHUNK_PENDING";
     public const string FileChunkMetadataMismatch = "FILE_CHUNK_METADATA_MISMATCH";
     public const string FileAssemblyFailed = "FILE_ASSEMBLY_FAILED";
+    public const string FileWritePermissionDenied = "FILE_WRITE_PERMISSION_DENIED";
+    public const string FilePathTooLong = "FILE_PATH_TOO_LONG";
+    public const string DirectoryNotFound = "DIRECTORY_NOT_FOUND";
+    public const string FileIoError = "FILE_IO_ERROR";
     public const string AlreadyJoined = "ALREADY_JOINED";
     public const string InvalidFrameDimensions = "INVALID_FRAME_DIMENSIONS";
     public const string InvalidFrameInterval = "INVALID_FRAME_INTERVAL";

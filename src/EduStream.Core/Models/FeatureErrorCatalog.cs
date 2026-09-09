@@ -35,6 +35,10 @@ public static class FeatureErrorCatalog
             [ErrorCodes.FileChunkPending] = File(ErrorCodes.FileChunkPending, "파일 청크를 수신 중입니다.", true),
             [ErrorCodes.FileChunkMetadataMismatch] = File(ErrorCodes.FileChunkMetadataMismatch, "파일 청크 정보가 서로 다릅니다. 다시 전송해 주세요.", true),
             [ErrorCodes.FileAssemblyFailed] = File(ErrorCodes.FileAssemblyFailed, "파일 조립에 실패했습니다. 다시 전송해 주세요.", true),
+            [ErrorCodes.FileWritePermissionDenied] = File(ErrorCodes.FileWritePermissionDenied, "저장 폴더 권한 또는 파일 잠금을 확인해 주세요.", false),
+            [ErrorCodes.FilePathTooLong] = File(ErrorCodes.FilePathTooLong, "더 짧은 저장 경로를 선택해 주세요.", false),
+            [ErrorCodes.DirectoryNotFound] = File(ErrorCodes.DirectoryNotFound, "저장 폴더를 확인한 뒤 다시 전송해 주세요.", true),
+            [ErrorCodes.FileIoError] = File(ErrorCodes.FileIoError, "파일 잠금 및 저장 공간을 확인한 뒤 다시 전송해 주세요.", true),
 
             [ErrorCodes.InvalidFrameDimensions] = Screen(ErrorCodes.InvalidFrameDimensions, "화면 프레임 크기가 올바르지 않습니다.", true),
             [ErrorCodes.InvalidFrameInterval] = Screen(ErrorCodes.InvalidFrameInterval, "화면 전송 간격 설정이 올바르지 않습니다.", true),
