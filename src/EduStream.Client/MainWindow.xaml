@@ -76,6 +76,16 @@
                                FontWeight="SemiBold"
                                Text="{Binding RenderStatus}" />
                 </Border>
+                <Border VerticalAlignment="Top"
+        HorizontalAlignment="Right"
+        Margin="16"
+        Padding="10,6"
+        Background="#CC000000"
+        CornerRadius="8">
+                    <TextBlock Foreground="{StaticResource BrushTextMuted}"
+               FontWeight="SemiBold"
+               Text="{Binding FrameFreshness}" />
+                </Border>
             </Grid>
         </Border>
 
