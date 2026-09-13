@@ -74,6 +74,12 @@ public sealed class SessionManager
     public int ParticipantCount => _participants.Count;
 
     /// <summary>
+    /// 현재 활성 상태인 RDP 초대 수입니다. 세션 종료/이탈 정리가 실제로
+    /// 잔류 초대 없이 끝났는지 테스트/모니터링에서 확인할 때 사용합니다.
+    /// </summary>
+    public int RdpInvitationCount => _rdpInvitations.Count;
+
+    /// <summary>
     /// 지정한 참가자에게 인계할 RDP 초대 비밀번호가 남아 있으면 반환합니다.
     /// 교수자 앱이 <see cref="RdpInvitationPasswordReady"/>를 놓쳤을 때 다시 조회하는 용도입니다.
     /// </summary>
@@ -453,6 +459,10 @@ public sealed class SessionManager
             return;
         }
 
+        // 초대 생성은 await로 시간이 걸릴 수 있어(3번 구현/COM 호출), 그 사이 세션 종료나
+        // 본인 이탈이 끼어들 수 있다. 생성 완료 후 이 스냅샷과 비교해 경합을 감지한다.
+        var sessionAtRequest = CurrentSession;
+
         if (!_clientDisplayNames.TryGetValue(clientId, out var participantId))
         {
             await _tcpServer.SendToClientAsync(clientId,
@@ -500,6 +510,24 @@ public sealed class SessionManager
             await _tcpServer.SendToClientAsync(clientId,
                 CreateError(ErrorCodes.RdpInvitationFailed, "RDP 초대를 생성하지 못했습니다.", true, request));
             _logSink.Write($"[Rdp] 초대 생성 실패: participant={participantId}, {ex.GetType().Name}");
+            return;
+        }
+
+        // 초대 발급 중(위 await) 세션 종료·공유 해제·본인 이탈이 끼어들었는지 재확인한다.
+        // 그렇지 않으면 종료 이후에 뒤늦게 도착한 초대가 아무도 정리하지 않는 채로 남는다.
+        var isStaleAfterCreation =
+            CurrentSession is null ||
+            CurrentSession.SessionId != sessionAtRequest.SessionId ||
+            !ReferenceEquals(_rdpSharingService, sharingService) ||
+            !_clientDisplayNames.TryGetValue(clientId, out var participantIdAfterCreation) ||
+            !string.Equals(participantIdAfterCreation, participantId, StringComparison.Ordinal);
+
+        if (isStaleAfterCreation)
+        {
+            _rdpInvitations[participantId] = invitation;
+            await RevokeRdpInvitationAsync(participantId, RdpFailureReason.SessionClosed, notifyClientId: null);
+            _logSink.Write(
+                $"[Rdp] 초대 발급-이탈/종료 경합 감지, 즉시 폐기: participant={participantId}, invitation={invitation.InvitationId}");
             return;
         }
 
