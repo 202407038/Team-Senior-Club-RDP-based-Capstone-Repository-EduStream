@@ -315,6 +315,7 @@ public sealed class ClientViewModel : ObservableObject
 
     private async Task SimulateScreenRenderAsync()
     {
+
         // 즉석에서 400x300 단색 PNG 생성
         var visual = new DrawingVisual();
         using (var dc = visual.RenderOpen())
@@ -340,7 +341,6 @@ public sealed class ClientViewModel : ObservableObject
         using var ms = new MemoryStream();
         encoder.Save(ms);
         var pngBytes = ms.ToArray();
-
         var fakePacket = new ScreenPacket
         {
             FrameIndex = new Random().Next(1, 9999),
@@ -621,8 +621,8 @@ public sealed class ClientViewModel : ObservableObject
             return;
         }
 
-   
         BitmapImage? bitmap = null;
+        string? decodeError = null;
         try
         {
             bitmap = await Task.Run(() =>
@@ -639,23 +639,34 @@ public sealed class ClientViewModel : ObservableObject
         }
         catch (Exception ex)
         {
+            decodeError = ex.Message;
             _logSink.Write($"프레임 디코딩 실패: {ex.Message}");
         }
 
         RunOnUiThread(() =>
         {
-            if (bitmap is not null)
+            // 프레임 신선도/누락 감지는 디코딩 성공 여부와 무관하게 기록 (패킷 자체는 도착했으므로)
+            _lastFrameReceivedAt = DateTimeOffset.UtcNow;
+            if (_lastFrameIndex.HasValue && packet.FrameIndex > _lastFrameIndex.Value + 1)
             {
-                DisplaySource = bitmap;
-                _lastFrameReceivedAt = DateTimeOffset.UtcNow;
-                if (_lastFrameIndex.HasValue && packet.FrameIndex > _lastFrameIndex.Value + 1)
-                {
-                    var missedCount = packet.FrameIndex - _lastFrameIndex.Value - 1;
-                    _logSink.Write($"[Screen] 프레임 누락 감지: #{_lastFrameIndex.Value} 이후 {missedCount}개 프레임 누락, 현재 #{packet.FrameIndex}");
-                }
-                _lastFrameIndex = packet.FrameIndex;
-                HasRemoteFrame = true;
+                var missedCount = packet.FrameIndex - _lastFrameIndex.Value - 1;
+                _logSink.Write($"[Screen] 프레임 누락 감지: #{_lastFrameIndex.Value} 이후 {missedCount}개 프레임 누락, 현재 #{packet.FrameIndex}");
             }
+            _lastFrameIndex = packet.FrameIndex;
+
+            if (decodeError is not null)
+            {
+                RenderStatus = $"프레임 #{packet.FrameIndex} 디코딩 실패: {decodeError}";
+                ScreenDetail = $"{packet.Width}x{packet.Height} / {packet.Encoding} / {packet.ContentLength} bytes — 디코딩 실패";
+                LastErrorMessage = $"SCREEN_DECODE_FAILED: {decodeError}";
+                UpdateStatus($"화면 프레임 디코딩 실패 (#{packet.FrameIndex})", StatusPriority.Error, isError: true);
+                _logSink.Write($"[Screen] 프레임 디코딩 실패: #{packet.FrameIndex}, {decodeError}");
+                SyncLogs();
+                return;
+            }
+
+            DisplaySource = bitmap;
+            HasRemoteFrame = true;
 
             RenderStatus = renderStatus;
             LastServerMessage = "화면 프레임을 수신했습니다.";
