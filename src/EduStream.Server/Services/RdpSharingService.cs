@@ -10,11 +10,25 @@ namespace EduStream.Server.Services;
 /// </summary>
 public sealed class RdpSharingService : IRdpSharingService
 {
+    /// <summary>
+    /// 초대 정보를 추적하기 위한 내부 클래스
+    /// </summary>
+    private sealed class InvitationInfo
+    {
+        public Guid InvitationId { get; init; }
+        public string ParticipantId { get; init; } = string.Empty;
+        public Guid ConnectionId { get; init; }
+        public DateTimeOffset ExpiresAt { get; init; }
+        public bool IsRevoked { get; set; }
+    }
+
     private readonly ILogSink _logSink;
     private readonly object _lock = new();
     private object? _rdpSession;
     private Guid _sharingId;
     private bool _disposed;
+    private readonly Dictionary<Guid, InvitationInfo> _invitations = new(); // InvitationId -> InvitationInfo
+    private const int MaxAttendees = 2;
 
     public RdpSharingService(ILogSink logSink)
     {
@@ -89,13 +103,30 @@ public sealed class RdpSharingService : IRdpSharingService
 
                 try
                 {
+                    // 활성 초대 수 확인 (다중 학생 공유 지원)
+                    var activeInvitations = _invitations.Values.Count(i => !i.IsRevoked && i.ExpiresAt > DateTimeOffset.UtcNow);
+                    if (activeInvitations >= MaxAttendees)
+                    {
+                        throw new InvalidOperationException($"최대 참가자 수({MaxAttendees})를 초과했습니다.");
+                    }
+
                     var invitationId = Guid.NewGuid();
 
                     // WDS 초대 생성 (실제 구현에서는 COM 메서드 호출 필요)
                     // AttendeeLimit=1, 비밀번호 설정
                     var connectionString = $"rdp://invitation:{invitationId};password:{invitationPassword}";
 
-                    _logSink.Write($"[RDP] 초대 생성: ParticipantId={participantId}, InvitationId={invitationId}");
+                    // 초대 정보 추적
+                    _invitations[invitationId] = new InvitationInfo
+                    {
+                        InvitationId = invitationId,
+                        ParticipantId = participantId,
+                        ConnectionId = connectionId,
+                        ExpiresAt = expiresAt,
+                        IsRevoked = false
+                    };
+
+                    _logSink.Write($"[RDP] 초대 생성: ParticipantId={participantId}, InvitationId={invitationId}, 활성 초대={activeInvitations + 1}/{MaxAttendees}");
 
                     return new RdpInvitationPacket
                     {
@@ -133,8 +164,18 @@ public sealed class RdpSharingService : IRdpSharingService
 
                 try
                 {
+                    // 초대 정보 추적 업데이트
+                    if (_invitations.TryGetValue(invitationId, out var invitation))
+                    {
+                        invitation.IsRevoked = true;
+                        _logSink.Write($"[RDP] 초대 폐기: InvitationId={invitationId}, ParticipantId={invitation.ParticipantId}");
+                    }
+                    else
+                    {
+                        _logSink.Write($"[RDP] 초대 폐기: InvitationId={invitationId} (존재하지 않음)");
+                    }
+
                     // WDS 초대 폐기 (실제 구현에서는 COM 메서드 호출 필요)
-                    _logSink.Write($"[RDP] 초대 폐기: InvitationId={invitationId}");
                 }
                 catch (Exception ex)
                 {
@@ -157,6 +198,9 @@ public sealed class RdpSharingService : IRdpSharingService
 
                 try
                 {
+                    // 모든 초대 정리
+                    _invitations.Clear();
+
                     // WDS 공유 종료 (실제 구현에서는 COM 메서드 호출 필요)
                     if (_rdpSession is not null)
                     {
