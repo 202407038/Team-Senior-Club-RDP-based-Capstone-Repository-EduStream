@@ -24,6 +24,7 @@ public sealed class SessionManager
     private readonly ConcurrentDictionary<string, string> _clientDisplayNames = new(); // clientId → displayName
     private readonly ConcurrentDictionary<string, DateTimeOffset> _clientLastSeen = new(); // clientId → 마지막 수신 시각
     private readonly ConcurrentDictionary<string, RdpInvitationPacket> _rdpInvitations = new(); // participantId(displayName) → 발급된 초대
+    private readonly ConcurrentDictionary<string, RdpInvitationHandoff> _pendingInvitationHandoffs = new(); // participantId → 인계 대기 중인 비밀번호
     private readonly object _sessionLock = new();
     private IRdpSharingService? _rdpSharingService;
     private Guid _rdpSharingId;
@@ -38,6 +39,19 @@ public sealed class SessionManager
     /// (sender, message)
     /// </summary>
     public event Action<string, string>? ChatReceived;
+
+    /// <summary>
+    /// RDP 초대 비밀번호가 발급되어 교수자 앱이 별도 채널(화면 표시, 구두 전달 등)로
+    /// 학생에게 인계할 수 있게 됐을 때 발생합니다. 비밀번호는 이 이벤트로만 전달되며
+    /// TCP 패킷에는 실리지 않습니다.
+    /// </summary>
+    public event Action<RdpInvitationHandoff>? RdpInvitationPasswordReady;
+
+    /// <summary>
+    /// 인계 대기 중이던 비밀번호가 재발급/이탈/세션 종료 등으로 더 이상 유효하지 않게 됐을 때
+    /// 발생합니다. 교수자 앱은 표시 중인 비밀번호를 이 알림을 받으면 즉시 화면에서 지워야 합니다.
+    /// </summary>
+    public event Action<string>? RdpInvitationPasswordWithdrawn;
 
     public SessionManager(ILogSink logSink, TcpServerService tcpServer)
     {
@@ -58,6 +72,13 @@ public sealed class SessionManager
     public IReadOnlyCollection<string> ParticipantNames => _participants.Keys.ToList().AsReadOnly();
 
     public int ParticipantCount => _participants.Count;
+
+    /// <summary>
+    /// 지정한 참가자에게 인계할 RDP 초대 비밀번호가 남아 있으면 반환합니다.
+    /// 교수자 앱이 <see cref="RdpInvitationPasswordReady"/>를 놓쳤을 때 다시 조회하는 용도입니다.
+    /// </summary>
+    public RdpInvitationHandoff? TryGetPendingInvitationHandoff(string participantId) =>
+        _pendingInvitationHandoffs.TryGetValue(participantId, out var handoff) ? handoff : null;
 
     /// <summary>
     /// 마지막 수신 시각이 지정한 임계를 넘어선 클라이언트 ID 목록을 반환합니다.
@@ -482,7 +503,12 @@ public sealed class SessionManager
             return;
         }
 
+        var handoff = new RdpInvitationHandoff(
+            participantId, request.ConnectionId, invitation.InvitationId, invitationPassword, expiresAt);
+        _pendingInvitationHandoffs[participantId] = handoff;
         _rdpInvitations[participantId] = invitation;
+        RdpInvitationPasswordReady?.Invoke(handoff);
+
         // 요청한 학생에게만 개별 전송한다 — 브로드캐스트 금지.
         await _tcpServer.SendToClientAsync(clientId, invitation);
         _logSink.Write($"[Rdp] 초대 발급: participant={participantId}, connectionId={request.ConnectionId}");
@@ -496,6 +522,9 @@ public sealed class SessionManager
     {
         if (!_rdpInvitations.TryRemove(participantId, out var invitation))
             return;
+
+        if (_pendingInvitationHandoffs.TryRemove(participantId, out _))
+            RdpInvitationPasswordWithdrawn?.Invoke(participantId);
 
         if (_rdpSharingService is not null)
         {
