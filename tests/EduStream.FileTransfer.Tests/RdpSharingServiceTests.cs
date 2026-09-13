@@ -130,4 +130,57 @@ public class RdpSharingServiceTests
         await _service.DisposeAsync();
         Assert.Contains("공유 종료", string.Join("\n", _logSink.Snapshot()));
     }
+
+    [Fact]
+    public async Task CreateInvitationAsync_AllowsMultipleInvitations()
+    {
+        var sessionId = Guid.NewGuid();
+        var sharingId = await _service.StartAsync(sessionId);
+        var expiresAt = DateTimeOffset.UtcNow.AddMinutes(5);
+
+        var invitation1 = await _service.CreateInvitationAsync(
+            sessionId, sharingId, "student1", Guid.NewGuid(), "pass1", expiresAt);
+        var invitation2 = await _service.CreateInvitationAsync(
+            sessionId, sharingId, "student2", Guid.NewGuid(), "pass2", expiresAt);
+
+        Assert.NotEqual(invitation1.InvitationId, invitation2.InvitationId);
+        Assert.Contains("활성 초대=1/2", string.Join("\n", _logSink.Snapshot()));
+        Assert.Contains("활성 초대=2/2", string.Join("\n", _logSink.Snapshot()));
+    }
+
+    [Fact]
+    public async Task CreateInvitationAsync_ThrowsWhenMaxAttendeesExceeded()
+    {
+        var sessionId = Guid.NewGuid();
+        var sharingId = await _service.StartAsync(sessionId);
+        var expiresAt = DateTimeOffset.UtcNow.AddMinutes(5);
+
+        await _service.CreateInvitationAsync(sessionId, sharingId, "student1", Guid.NewGuid(), "pass1", expiresAt);
+        await _service.CreateInvitationAsync(sessionId, sharingId, "student2", Guid.NewGuid(), "pass2", expiresAt);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            _service.CreateInvitationAsync(sessionId, sharingId, "student3", Guid.NewGuid(), "pass3", expiresAt));
+    }
+
+    [Fact]
+    public async Task RevokeInvitationAsync_AllowsNewInvitationAfterRevocation()
+    {
+        var sessionId = Guid.NewGuid();
+        var sharingId = await _service.StartAsync(sessionId);
+        var expiresAt = DateTimeOffset.UtcNow.AddMinutes(5);
+
+        var invitation1 = await _service.CreateInvitationAsync(
+            sessionId, sharingId, "student1", Guid.NewGuid(), "pass1", expiresAt);
+        var invitation2 = await _service.CreateInvitationAsync(
+            sessionId, sharingId, "student2", Guid.NewGuid(), "pass2", expiresAt);
+
+        await _service.RevokeInvitationAsync(invitation1.InvitationId);
+
+        // 폐기 후 새로운 초대 가능
+        var invitation3 = await _service.CreateInvitationAsync(
+            sessionId, sharingId, "student3", Guid.NewGuid(), "pass3", expiresAt);
+
+        Assert.NotEqual(invitation1.InvitationId, invitation3.InvitationId);
+        Assert.Contains("초대 폐기", string.Join("\n", _logSink.Snapshot()));
+    }
 }
