@@ -105,11 +105,17 @@ public sealed class TcpClientService : IDisposable
     {
         try
         {
-            while (!ct.IsCancellationRequested && _stream is not null)
+            while (!ct.IsCancellationRequested)
             {
+                var stream = _stream;
+                if (stream is null)
+                {
+                    break;
+                }
+
                 // 4바이트 길이 헤더 읽기
                 var headerBuf = new byte[4];
-                await ReadExactAsync(_stream, headerBuf, ct);
+                await ReadExactAsync(stream, headerBuf, ct);
                 var length = BitConverter.ToInt32(headerBuf, 0);
 
                 if (length <= 0 || length > MaxPacketSize)
@@ -120,7 +126,7 @@ public sealed class TcpClientService : IDisposable
 
                 // 본문 읽기
                 var payload = new byte[length];
-                await ReadExactAsync(_stream, payload, ct);
+                await ReadExactAsync(stream, payload, ct);
 
                 // MessageType 추출
                 var packetType = ExtractPacketType(payload);
@@ -132,6 +138,7 @@ public sealed class TcpClientService : IDisposable
             }
         }
         catch (OperationCanceledException) { }
+        catch (ObjectDisposedException) { }   
         catch (Exception ex)
         {
             _logSink.Write($"서버 수신 오류: {ex.Message}");
