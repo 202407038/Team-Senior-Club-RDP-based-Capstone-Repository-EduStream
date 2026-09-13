@@ -1,8 +1,10 @@
 using System.Collections.Concurrent;
+using System.Security.Cryptography;
 using System.Text.Json;
 using EduStream.Core.Factories;
 using EduStream.Core.Logging;
 using EduStream.Core.Models;
+using EduStream.Core.Network;
 using EduStream.Core.Protocols;
 using EduStream.Core.Utils;
 
@@ -21,7 +23,10 @@ public sealed class SessionManager
     private readonly ConcurrentDictionary<string, string> _participants = new(); // displayName → clientId
     private readonly ConcurrentDictionary<string, string> _clientDisplayNames = new(); // clientId → displayName
     private readonly ConcurrentDictionary<string, DateTimeOffset> _clientLastSeen = new(); // clientId → 마지막 수신 시각
+    private readonly ConcurrentDictionary<string, RdpInvitationPacket> _rdpInvitations = new(); // participantId(displayName) → 발급된 초대
     private readonly object _sessionLock = new();
+    private IRdpSharingService? _rdpSharingService;
+    private Guid _rdpSharingId;
 
     /// <summary>
     /// 참여자 목록이 변경되었을 때 발생합니다.
@@ -72,6 +77,35 @@ public sealed class SessionManager
         return stale;
     }
 
+    /// <summary>
+    /// 3번이 구현한 RDP 공유 서비스를 연결합니다. 화면 공유가 실제로 시작된 뒤 팀장이 호출합니다.
+    /// 연결 전에는 RdpInvitationRequest를 RdpSharingNotStarted로 거부합니다.
+    /// </summary>
+    public void AttachRdpSharing(IRdpSharingService sharingService, Guid sharingId)
+    {
+        ArgumentNullException.ThrowIfNull(sharingService);
+        if (sharingId == Guid.Empty)
+            throw new ArgumentException("공유 ID가 필요합니다.", nameof(sharingId));
+
+        _rdpSharingService = sharingService;
+        _rdpSharingId = sharingId;
+        _logSink.Write($"[Rdp] 공유 서비스 연결: sharingId={sharingId}");
+    }
+
+    /// <summary>
+    /// 화면 공유가 종료될 때 팀장이 호출합니다. 남아 있는 초대를 모두 정리합니다.
+    /// </summary>
+    public async Task DetachRdpSharingAsync()
+    {
+        if (_rdpSharingService is null)
+            return;
+
+        await RevokeAllRdpInvitationsAsync(RdpFailureReason.SessionClosed);
+        _rdpSharingService = null;
+        _rdpSharingId = Guid.Empty;
+        _logSink.Write("[Rdp] 공유 서비스 연결 해제");
+    }
+
     public Task<SessionInfo> OpenSessionAsync(string sessionName, int port)
     {
         lock (_sessionLock)
@@ -103,6 +137,8 @@ public sealed class SessionManager
         {
             await BroadcastSystemMessageAsync("교수자가 세션을 종료했습니다. 연결이 해제됩니다.");
         }
+
+        await RevokeAllRdpInvitationsAsync(RdpFailureReason.SessionClosed);
 
         lock (_sessionLock)
         {
@@ -186,8 +222,17 @@ public sealed class SessionManager
 
                         if (response is AckPacket && !string.IsNullOrWhiteSpace(leaveName))
                         {
+                            await RevokeRdpInvitationAsync(leaveName, RdpFailureReason.SessionClosed, notifyClientId: null);
                             await BroadcastSystemMessageAsync($"{leaveName}님이 세션에서 나갔습니다.");
                         }
+                    }
+                    break;
+
+                case PacketType.RdpInvitationRequest:
+                    var rdpRequest = JsonSerializer.Deserialize<RdpInvitationRequestPacket>(payload);
+                    if (rdpRequest is not null)
+                    {
+                        await HandleRdpInvitationRequestAsync(clientId, rdpRequest);
                     }
                     break;
 
@@ -245,6 +290,8 @@ public sealed class SessionManager
         var displayName = RemoveParticipant(clientId);
         if (displayName is null)
             return;
+
+        await RevokeRdpInvitationAsync(displayName, RdpFailureReason.NetworkInterrupted, notifyClientId: null);
 
         // 세션 계층 로그에는 TCP 계층이 모르는 sessionId까지 남겨 추적성을 확보한다.
         _logSink.Write(
@@ -370,6 +417,120 @@ public sealed class SessionManager
             message: "세션 이탈이 처리되었습니다.",
             sessionId: CurrentSession.SessionId,
             correlationId: packet.CorrelationId);
+    }
+
+    /// <summary>
+    /// 강의 세션 참가 자격을 검증한 뒤 요청한 학생 한 명에게만 RDP 초대를 발급합니다.
+    /// 신원은 패킷 주장값이 아니라 참가 승인된 연결(_clientDisplayNames)에서 얻습니다.
+    /// </summary>
+    private async Task HandleRdpInvitationRequestAsync(string clientId, RdpInvitationRequestPacket request)
+    {
+        if (CurrentSession is null)
+        {
+            await _tcpServer.SendToClientAsync(clientId,
+                CreateError(ErrorCodes.SessionNotOpen, "현재 열려 있는 세션이 없습니다.", false, request));
+            return;
+        }
+
+        if (!_clientDisplayNames.TryGetValue(clientId, out var participantId))
+        {
+            await _tcpServer.SendToClientAsync(clientId,
+                CreateError(ErrorCodes.NotParticipant, "세션에 참여하지 않은 상태에서는 RDP 초대를 요청할 수 없습니다.", true, request));
+            _logSink.Write($"[Rdp] 비참가자 초대 요청 차단: clientId={clientId}");
+            return;
+        }
+
+        try
+        {
+            RdpInvitationContract.ValidateRequest(request, CurrentSession.SessionId, participantId);
+        }
+        catch (ArgumentException ex)
+        {
+            await _tcpServer.SendToClientAsync(clientId,
+                CreateError(ErrorCodes.NotParticipant, ex.Message, true, request));
+            _logSink.Write($"[Rdp] 초대 요청 검증 실패: participant={participantId}, {ex.Message}");
+            return;
+        }
+
+        var sharingService = _rdpSharingService;
+        if (sharingService is null)
+        {
+            await _tcpServer.SendToClientAsync(clientId,
+                CreateError(ErrorCodes.RdpSharingNotStarted, "현재 화면 공유가 시작되지 않았습니다.", true, request));
+            _logSink.Write($"[Rdp] 공유 미시작 상태에서 초대 요청 거부: participant={participantId}");
+            return;
+        }
+
+        // 이미 발급된 초대/연결이 있으면 정리한 뒤 재발급한다 (재접속 등).
+        await RevokeRdpInvitationAsync(participantId, RdpFailureReason.SessionClosed, notifyClientId: null);
+
+        var invitationPassword = Convert.ToBase64String(RandomNumberGenerator.GetBytes(18));
+        var expiresAt = DateTimeOffset.UtcNow + RdpInvitationContract.InvitationAcceptanceLifetime;
+
+        RdpInvitationPacket invitation;
+        try
+        {
+            invitation = await sharingService.CreateInvitationAsync(
+                CurrentSession.SessionId, _rdpSharingId, participantId, request.ConnectionId,
+                invitationPassword, expiresAt);
+        }
+        catch (Exception ex)
+        {
+            await _tcpServer.SendToClientAsync(clientId,
+                CreateError(ErrorCodes.RdpInvitationFailed, "RDP 초대를 생성하지 못했습니다.", true, request));
+            _logSink.Write($"[Rdp] 초대 생성 실패: participant={participantId}, {ex.GetType().Name}");
+            return;
+        }
+
+        _rdpInvitations[participantId] = invitation;
+        // 요청한 학생에게만 개별 전송한다 — 브로드캐스트 금지.
+        await _tcpServer.SendToClientAsync(clientId, invitation);
+        _logSink.Write($"[Rdp] 초대 발급: participant={participantId}, connectionId={request.ConnectionId}");
+    }
+
+    /// <summary>
+    /// 참가자 한 명의 활성 RDP 초대를 폐기하고 연결 정보를 정리합니다.
+    /// notifyClientId가 있으면 해당 연결에 폐기 패킷을 보냅니다(이탈/연결 종료 당사자에게는 보낼 필요가 없습니다).
+    /// </summary>
+    private async Task RevokeRdpInvitationAsync(string participantId, RdpFailureReason reason, string? notifyClientId)
+    {
+        if (!_rdpInvitations.TryRemove(participantId, out var invitation))
+            return;
+
+        if (_rdpSharingService is not null)
+        {
+            try
+            {
+                await _rdpSharingService.RevokeInvitationAsync(invitation.InvitationId);
+            }
+            catch (Exception ex)
+            {
+                _logSink.Write($"[Rdp] 초대 폐기 실패: participant={participantId}, {ex.GetType().Name}: {ex.Message}");
+            }
+        }
+
+        if (notifyClientId is not null)
+        {
+            var revoked = PacketFactory.CreateRdpInvitationRevoked(
+                senderId: "Server",
+                sessionId: CurrentSession?.SessionId ?? invitation.SessionId ?? Guid.Empty,
+                participantId: participantId,
+                invitationId: invitation.InvitationId,
+                connectionId: invitation.ConnectionId,
+                reason: reason);
+            await _tcpServer.SendToClientAsync(notifyClientId, revoked);
+        }
+
+        _logSink.Write($"[Rdp] 초대 정리: participant={participantId}, 사유={reason}");
+    }
+
+    private async Task RevokeAllRdpInvitationsAsync(RdpFailureReason reason)
+    {
+        foreach (var participantId in _rdpInvitations.Keys.ToList())
+        {
+            _participants.TryGetValue(participantId, out var clientId);
+            await RevokeRdpInvitationAsync(participantId, reason, clientId);
+        }
     }
 
     private string? GetDisplayName(string clientId, string? packetDisplayName)
