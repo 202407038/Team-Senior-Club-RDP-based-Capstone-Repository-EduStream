@@ -12,6 +12,11 @@ using EduStream.Core.Serialization;
 using EduStream.Core.Utils;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
+using Application = System.Windows.Application;
+using Color = System.Windows.Media.Color;
+using Point = System.Windows.Point;
+using Brushes = System.Windows.Media.Brushes;
+using FlowDirection = System.Windows.FlowDirection;
 
 
 namespace EduStream.Client.ViewModels;
