@@ -103,65 +103,25 @@
                                Text="수강생 클라이언트" />
                 </StackPanel>
 
-                <Border Style="{StaticResource PanelCard}" Margin="0,0,0,12">
-                    <StackPanel>
-                        <TextBlock Style="{StaticResource SectionTitle}" Text="세션 연결" />
-
-                        <StackPanel Visibility="{Binding IsConnected, Converter={StaticResource BoolToVis}, ConverterParameter=Invert}">
-                            <TextBlock Style="{StaticResource FieldLabel}" Margin="0,14,0,6" Text="표시 이름" />
-                            <TextBox Style="{StaticResource DarkTextBox}"
-                                     Text="{Binding DisplayName, UpdateSourceTrigger=PropertyChanged}" />
-
-                            <Grid Margin="0,12,0,0">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="2*" />
-                                    <ColumnDefinition Width="8" />
-                                    <ColumnDefinition Width="*" />
-                                </Grid.ColumnDefinitions>
-                                <StackPanel Grid.Column="0">
-                                    <TextBlock Style="{StaticResource FieldLabel}" Text="호스트" />
-                                    <TextBox Style="{StaticResource DarkTextBox}"
-                                             Text="{Binding HostAddress, UpdateSourceTrigger=PropertyChanged}" />
-                                </StackPanel>
-                                <StackPanel Grid.Column="2">
-                                    <TextBlock Style="{StaticResource FieldLabel}" Text="포트" />
-                                    <TextBox Style="{StaticResource DarkTextBox}"
-                                             Text="{Binding Port, UpdateSourceTrigger=PropertyChanged}" />
-                                </StackPanel>
-                            </Grid>
-
-                            <Button Style="{StaticResource PrimaryButton}"
-                                    Margin="0,14,0,0"
-                                    Height="36"
-                                    Content="세션 참여"
-                                    Command="{Binding JoinSessionCommand}" />
-                        </StackPanel>
-
-                        <StackPanel Visibility="{Binding IsConnected, Converter={StaticResource BoolToVis}}">
-                            <Border Margin="0,14,0,0"
-                                    Padding="12"
-                                    CornerRadius="8"
-                                    Background="{StaticResource BrushBgElevated}">
-                                <StackPanel Orientation="Horizontal">
-                                    <Ellipse Style="{StaticResource StatusDot}"
-                                             Fill="{Binding ConnectionState, Converter={StaticResource StateToBrush}}"
-                                             Width="8" Height="8" Margin="0,0,10,0" VerticalAlignment="Center"/>
-                                    <StackPanel>
-                                        <TextBlock Foreground="{StaticResource BrushTextSecondary}" FontSize="11" Text="강의 세션 연결 상태" />
-                                        <TextBlock Margin="0,2,0,0" Foreground="{StaticResource BrushTextPrimary}" FontWeight="Bold" FontSize="14"
-                                                   Text="{Binding DisplayName, StringFormat='{}{0} 님으로 수강 중'}" />
-                                    </StackPanel>
-                                </StackPanel>
-                            </Border>
-
-                            <Button Style="{StaticResource SecondaryButton}"
-                                    Margin="0,12,0,0"
-                                    Height="36"
-                                    Content="연결 종료"
-                                    Command="{Binding DisconnectCommand}" />
-                        </StackPanel>
-                    </StackPanel>
-                </Border>
+               <Border Margin="0,0,0,12"
+        Padding="12"
+        CornerRadius="8"
+        Background="{StaticResource BrushBgElevated}">
+    <StackPanel Orientation="Horizontal">
+        <Ellipse Width="8" Height="8" Margin="0,0,10,0" VerticalAlignment="Center"
+                  Fill="{Binding ConnectionState, Converter={StaticResource StateToBrush}}" />
+        <TextBlock VerticalAlignment="Center"
+                   Foreground="{StaticResource BrushTextPrimary}"
+                   FontWeight="SemiBold">
+            <TextBlock.Text>
+                <MultiBinding StringFormat="{}{0} · {1}">
+                    <Binding Path="DisplayName" />
+                    <Binding Path="ConnectionState" />
+                </MultiBinding>
+            </TextBlock.Text>
+        </TextBlock>
+    </StackPanel>
+</Border>
 
                 <Border Style="{StaticResource PanelCard}" Margin="0,0,0,12">
                     <StackPanel>
@@ -199,64 +159,103 @@
                     </StackPanel>
                 </Border>
 
-                <Border Style="{StaticResource PanelCard}" Margin="0,0,0,12">
-                    <StackPanel>
-                        <TextBlock Style="{StaticResource SectionTitle}" Text="실시간 채팅" />
+                <TabControl Style="{StaticResource DarkTabControl}" Margin="0,0,0,12">
+                    <TabItem Header="채팅" Margin="0,0,-1,0">
+                        <StackPanel Margin="0,10,0,0">
+                            <ListBox Height="220"
+                     Style="{StaticResource DarkListBox}"
+                     ItemsSource="{Binding ChatMessages}"
+                     ItemTemplate="{StaticResource ChatBubbleTemplate}" />
+                            <DockPanel Margin="0,10,0,0">
+                                <Button DockPanel.Dock="Right"
+                        Width="88"
+                        Margin="8,0,0,0"
+                        Style="{StaticResource PrimaryButton}"
+                        Content="전송"
+                        Command="{Binding SendChatCommand}" />
+                                <TextBox Style="{StaticResource DarkTextBox}"
+                         Text="{Binding ChatInput, UpdateSourceTrigger=PropertyChanged}" />
+                            </DockPanel>
+                        </StackPanel>
+                    </TabItem>
 
+                    <TabItem Header="파일" Margin="4,0,-5,0">
+                        <StackPanel Margin="0,10,0,0">
+                            <TextBlock Foreground="{StaticResource BrushTextSecondary}"
+                       Text="{Binding DownloadStatus}" />
+                            <ListBox Margin="0,10,0,0"
+                     Height="160"
+                     Style="{StaticResource DarkListBox}"
+                     ItemsSource="{Binding DownloadedFiles}"
+                     ItemTemplate="{StaticResource FileLineTemplate}" />
+                        </StackPanel>
+                    </TabItem>
+
+                    <TabItem Header="로그" Margin="8,0,-8,0">
                         <ListBox Margin="0,10,0,0"
-                                 Height="180" 
-                                 Style="{StaticResource DarkListBox}"
-                                 ItemsSource="{Binding ChatMessages}"
-                                 ItemTemplate="{StaticResource ChatBubbleTemplate}" />
+                 Height="220"
+                 Style="{StaticResource DarkListBox}"
+                 ItemsSource="{Binding ActivityLogs}"
+                 ItemTemplate="{StaticResource LogLineTemplate}" />
+                    </TabItem>
+                    <TabItem Header="설정" Margin="11,0,-11,0">
+                        <StackPanel Margin="0,10,0,0">
+                            <StackPanel Margin="0,0,0,16">
+                                <TextBlock Style="{StaticResource SectionTitle}" Text="테스트" />
+                                <WrapPanel Margin="0,10,0,0">
+                                    <Button Style="{StaticResource GhostButton}"
+                Margin="0,0,8,0"
+                Content="화면 수신 테스트"
+                Command="{Binding SimulateScreenRenderCommand}" />
+                                    <Button Style="{StaticResource GhostButton}"
+                Content="파일 수신 테스트"
+                Command="{Binding SimulateFileReceiveCommand}" />
+                                </WrapPanel>
+                            </StackPanel>
+                            <StackPanel Visibility="{Binding IsConnected, Converter={StaticResource BoolToVis}, ConverterParameter=Invert}">
+                                <TextBlock Style="{StaticResource FieldLabel}" Margin="0,0,0,6" Text="표시 이름" />
+                                <TextBox Style="{StaticResource DarkTextBox}"
+                                         Text="{Binding DisplayName, UpdateSourceTrigger=PropertyChanged}" />
 
-                        <DockPanel Margin="0,10,0,0">
-                            <Button DockPanel.Dock="Right"
-                                    Width="88"
-                                    Margin="8,0,0,0"
-                                    Style="{StaticResource PrimaryButton}"
-                                    Content="전송"
-                                    Command="{Binding SendChatCommand}" />
-                            <TextBox Style="{StaticResource DarkTextBox}"
-                                     Text="{Binding ChatInput, UpdateSourceTrigger=PropertyChanged}" />
-                        </DockPanel>
-                    </StackPanel>
-                </Border>
+                                <Grid Margin="0,12,0,0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="2*" />
+                                        <ColumnDefinition Width="8" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel Grid.Column="0">
+                                        <TextBlock Style="{StaticResource FieldLabel}" Text="호스트" />
+                                        <TextBox Style="{StaticResource DarkTextBox}"
+                                                 Text="{Binding HostAddress, UpdateSourceTrigger=PropertyChanged}" />
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="2">
+                                        <TextBlock Style="{StaticResource FieldLabel}" Text="포트" />
+                                        <TextBox Style="{StaticResource DarkTextBox}"
+                                                 Text="{Binding Port, UpdateSourceTrigger=PropertyChanged}" />
+                                    </StackPanel>
+                                </Grid>
 
-                <Border Style="{StaticResource PanelCard}" Margin="0,0,0,12">
-                    <StackPanel>
-                        <TextBlock Style="{StaticResource SectionTitle}" Text="파일 수신" />
-                        <TextBlock Margin="0,8,0,0"
-                                   Foreground="{StaticResource BrushTextSecondary}"
-                                   Text="{Binding DownloadStatus}" />
+                                <Button Style="{StaticResource PrimaryButton}"
+                                        Margin="0,14,0,0"
+                                        Height="36"
+                                        Content="세션 참여"
+                                        Command="{Binding JoinSessionCommand}" />
+                            </StackPanel>
 
-                        <ListBox Margin="0,10,0,0"
-                                 Height="90"
-                                 Style="{StaticResource DarkListBox}"
-                                 ItemsSource="{Binding DownloadedFiles}"
-                                 ItemTemplate="{StaticResource FileLineTemplate}" />
-
-                        <WrapPanel Margin="0,10,0,0">
-                            <Button Style="{StaticResource GhostButton}"
-                                    Margin="0,0,8,0"
-                                    Content="화면 수신 테스트"
-                                    Command="{Binding SimulateScreenRenderCommand}" />
-                            <Button Style="{StaticResource GhostButton}"
-                                    Content="파일 수신 테스트"
-                                    Command="{Binding SimulateFileReceiveCommand}" />
-                        </WrapPanel>
-                    </StackPanel>
-                </Border>
-
-                <Border Style="{StaticResource PanelCard}">
-                    <StackPanel>
-                        <TextBlock Style="{StaticResource SectionTitle}" Text="활동 로그" />
-                        <ListBox Margin="0,10,0,0"
-                                 MaxHeight="140"
-                                 Style="{StaticResource DarkListBox}"
-                                 ItemsSource="{Binding ActivityLogs}"
-                                 ItemTemplate="{StaticResource LogLineTemplate}" />
-                    </StackPanel>
-                </Border>
+                            <StackPanel Visibility="{Binding IsConnected, Converter={StaticResource BoolToVis}}">
+                                <TextBlock Foreground="{StaticResource BrushTextSecondary}"
+                                           Text="현재 연결된 세션 정보입니다. 연결을 끊으려면 아래 버튼을 누르세요." 
+                                           TextWrapping="Wrap" />
+                                <Button Style="{StaticResource SecondaryButton}"
+                                        Margin="0,14,0,0"
+                                        Height="36"
+                                        Content="연결 종료"
+                                        Command="{Binding DisconnectCommand}" />
+                            </StackPanel>
+                        </StackPanel>
+                    </TabItem>
+     
+                </TabControl>
             </StackPanel>
         </ScrollViewer>
     </Grid>
