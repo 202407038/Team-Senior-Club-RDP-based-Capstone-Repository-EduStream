@@ -221,5 +221,19 @@ internal class MockRdpSession
 {
     public void Open() { }
     public void Close() { }
-    public object CreateAttendee() => new object();
+    public MockInvitations Invitations { get; } = new MockInvitations();
+}
+
+internal class MockInvitations
+{
+    public MockInvitation CreateInvitation(string groupName, string authString, string password, int attendeeLimit)
+    {
+        return new MockInvitation();
+    }
+}
+
+internal class MockInvitation
+{
+    public string ConnectionString => $"rdp://mock-invitation:{Guid.NewGuid()}";
+    public bool Revoked { get; set; }
 }
