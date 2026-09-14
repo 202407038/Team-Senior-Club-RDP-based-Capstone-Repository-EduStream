@@ -3,6 +3,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:wfi="clr-namespace:System.Windows.Forms.Integration;assembly=WindowsFormsIntegration"
         mc:Ignorable="d"
         Title="EduStream Client"
         Height="820"
@@ -28,7 +29,7 @@
                 <Viewbox Stretch="Uniform">
                     <Image Source="{Binding DisplaySource}" />
                 </Viewbox>
-
+                <wfi:WindowsFormsHost x:Name="RdpHost" />
                 <Border Background="#CC0A0A0A"
                         Visibility="{Binding HasRemoteFrame, Converter={StaticResource BoolToVis}, ConverterParameter=Invert}">
                     <StackPanel VerticalAlignment="Center"
@@ -103,25 +104,25 @@
                                Text="수강생 클라이언트" />
                 </StackPanel>
 
-               <Border Margin="0,0,0,12"
+                <Border Margin="0,0,0,12"
         Padding="12"
         CornerRadius="8"
         Background="{StaticResource BrushBgElevated}">
-    <StackPanel Orientation="Horizontal">
-        <Ellipse Width="8" Height="8" Margin="0,0,10,0" VerticalAlignment="Center"
+                    <StackPanel Orientation="Horizontal">
+                        <Ellipse Width="8" Height="8" Margin="0,0,10,0" VerticalAlignment="Center"
                   Fill="{Binding ConnectionState, Converter={StaticResource StateToBrush}}" />
-        <TextBlock VerticalAlignment="Center"
+                        <TextBlock VerticalAlignment="Center"
                    Foreground="{StaticResource BrushTextPrimary}"
                    FontWeight="SemiBold">
-            <TextBlock.Text>
-                <MultiBinding StringFormat="{}{0} · {1}">
-                    <Binding Path="DisplayName" />
-                    <Binding Path="ConnectionState" />
-                </MultiBinding>
-            </TextBlock.Text>
-        </TextBlock>
-    </StackPanel>
-</Border>
+                            <TextBlock.Text>
+                                <MultiBinding StringFormat="{}{0} · {1}">
+                                    <Binding Path="DisplayName" />
+                                    <Binding Path="ConnectionState" />
+                                </MultiBinding>
+                            </TextBlock.Text>
+                        </TextBlock>
+                    </StackPanel>
+                </Border>
 
                 <Border Style="{StaticResource PanelCard}" Margin="0,0,0,12">
                     <StackPanel>
@@ -201,7 +202,18 @@
                     <TabItem Header="설정" Margin="11,0,-11,0">
                         <StackPanel Margin="0,10,0,0">
                             <StackPanel Margin="0,0,0,16">
-                                <TextBlock Style="{StaticResource SectionTitle}" Text="테스트" />
+                                <TextBlock Style="{StaticResource SectionTitle}" Text="RDP" />
+                                <TextBlock Margin="0,8,0,0"
+               Foreground="{StaticResource BrushTextSecondary}"
+               Text="{Binding RdpStatusText}" />
+                                <Button Style="{StaticResource GhostButton}"
+            Margin="0,8,0,0"
+            Content="RDP 재접속"
+            Command="{Binding ReconnectRdpCommand}" />
+                            </StackPanel>
+
+                            <StackPanel Margin="0,0,0,16">
+                                <TextBlock Style="{StaticResource SectionTitle}" Text="개발자 테스트" />
                                 <WrapPanel Margin="0,10,0,0">
                                     <Button Style="{StaticResource GhostButton}"
                 Margin="0,0,8,0"
@@ -254,7 +266,7 @@
                             </StackPanel>
                         </StackPanel>
                     </TabItem>
-     
+
                 </TabControl>
             </StackPanel>
         </ScrollViewer>

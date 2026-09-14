@@ -9,5 +9,9 @@ public partial class MainWindow : Window
     {
         InitializeComponent();
         DataContext = new ClientViewModel();
+        if (DataContext is ClientViewModel vm)
+        {
+            vm.AttachRdpHost(RdpHost);
+        }
     }
 }
