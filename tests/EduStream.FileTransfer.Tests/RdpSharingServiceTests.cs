@@ -12,7 +12,8 @@ public class RdpSharingServiceTests
     public RdpSharingServiceTests()
     {
         _logSink = new InMemoryLogSink();
-        _service = new RdpSharingService(_logSink);
+        // 테스트 대역: 모의 RDPSession 객체 사용
+        _service = new RdpSharingService(_logSink, () => new MockRdpSession());
     }
 
     [Fact]
@@ -26,13 +27,13 @@ public class RdpSharingServiceTests
     }
 
     [Fact]
-    public async Task StartAsync_ReturnsSameSharingIdWhenAlreadyStarted()
+    public async Task StartAsync_ThrowsWhenAlreadyStarted()
     {
         var sessionId = Guid.NewGuid();
-        var firstSharingId = await _service.StartAsync(sessionId);
-        var secondSharingId = await _service.StartAsync(sessionId);
+        await _service.StartAsync(sessionId);
 
-        Assert.Equal(firstSharingId, secondSharingId);
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            _service.StartAsync(sessionId));
     }
 
     [Fact]
@@ -57,6 +58,7 @@ public class RdpSharingServiceTests
         Assert.Equal("windows-desktop-sharing", invitation.Provider);
         Assert.True(invitation.ViewOnly);
         Assert.Contains("초대 생성", string.Join("\n", _logSink.Snapshot()));
+        Assert.DoesNotContain("password", invitation.ConnectionString);
     }
 
     [Fact]
@@ -86,6 +88,22 @@ public class RdpSharingServiceTests
 
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
             _service.CreateInvitationAsync(sessionId, wrongSharingId, participantId, connectionId, invitationPassword, expiresAt));
+    }
+
+    [Fact]
+    public async Task CreateInvitationAsync_IncludesDataLength()
+    {
+        var sessionId = Guid.NewGuid();
+        var sharingId = await _service.StartAsync(sessionId);
+        var participantId = "student1";
+        var connectionId = Guid.NewGuid();
+        var invitationPassword = "test123";
+        var expiresAt = DateTimeOffset.UtcNow.AddMinutes(5);
+
+        var invitation = await _service.CreateInvitationAsync(
+            sessionId, sharingId, participantId, connectionId, invitationPassword, expiresAt);
+
+        Assert.True(invitation.DataLength > 0);
     }
 
     [Fact]
@@ -183,4 +201,25 @@ public class RdpSharingServiceTests
         Assert.NotEqual(invitation1.InvitationId, invitation3.InvitationId);
         Assert.Contains("초대 폐기", string.Join("\n", _logSink.Snapshot()));
     }
+
+    [Fact]
+    public async Task StopAsync_AllowsRestartWithNewSharingId()
+    {
+        var sessionId = Guid.NewGuid();
+        var firstSharingId = await _service.StartAsync(sessionId);
+        await _service.StopAsync();
+
+        var secondSharingId = await _service.StartAsync(sessionId);
+        Assert.NotEqual(firstSharingId, secondSharingId);
+    }
+}
+
+/// <summary>
+/// 테스트 대역용 모의 RDPSession 객체
+/// </summary>
+internal class MockRdpSession
+{
+    public void Open() { }
+    public void Close() { }
+    public object CreateAttendee() => new object();
 }
