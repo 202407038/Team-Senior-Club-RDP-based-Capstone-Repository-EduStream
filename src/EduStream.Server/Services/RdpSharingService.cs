@@ -1,3 +1,6 @@
+using System.Collections.Concurrent;
+using System.Reflection;
+using System.Runtime.InteropServices;
 using EduStream.Core.Logging;
 using EduStream.Core.Models;
 using EduStream.Core.Network;
@@ -6,13 +9,10 @@ namespace EduStream.Server.Services;
 
 /// <summary>
 /// Windows Desktop Sharing API를 사용한 교수자 화면 공유 서비스.
-/// 내부에서 STA/UI 스레드 호출과 COM 수명을 관리합니다.
+/// 단일 전용 STA 스레드 작업 큐를 통해 COM 생명주기 및 스레드 안전성을 보장합니다.
 /// </summary>
 public sealed class RdpSharingService : IRdpSharingService
 {
-    /// <summary>
-    /// 초대 정보를 추적하기 위한 내부 클래스
-    /// </summary>
     private sealed class InvitationInfo
     {
         public Guid InvitationId { get; init; }
@@ -20,35 +20,127 @@ public sealed class RdpSharingService : IRdpSharingService
         public Guid ConnectionId { get; init; }
         public DateTimeOffset ExpiresAt { get; init; }
         public bool IsRevoked { get; set; }
-        public object? ComInvitation { get; init; } // WDS COM 초대 객체
+        public object? ComInvitation { get; init; }
+    }
+
+    /// <summary>
+    /// 모든 COM 작업을 격리 실행하는 단일 STA 백그라운드 워커
+    /// </summary>
+    private sealed class StaTaskRunner : IDisposable
+    {
+        private readonly BlockingCollection<Action> _queue = new();
+        private readonly Thread _thread;
+        private bool _disposed;
+
+        public StaTaskRunner()
+        {
+            _thread = new Thread(Run)
+            {
+                IsBackground = true,
+                Name = "RdpSharingService-STA"
+            };
+            _thread.SetApartmentState(ApartmentState.STA);
+            _thread.Start();
+        }
+
+        private void Run()
+        {
+            foreach (var action in _queue.GetConsumingEnumerable())
+            {
+                try
+                {
+                    action();
+                }
+                catch
+                {
+                    // 예외는 TaskCompletionSource로 전달됨
+                }
+            }
+        }
+
+        public Task<T> InvokeAsync<T>(Func<T> func)
+        {
+            var tcs = new TaskCompletionSource<T>(TaskCreationOptions.RunContinuationsAsynchronously);
+            try
+            {
+                _queue.Add(() =>
+                {
+                    try
+                    {
+                        tcs.SetResult(func());
+                    }
+                    catch (Exception ex)
+                    {
+                        tcs.SetException(ex);
+                    }
+                });
+            }
+            catch (Exception ex)
+            {
+                tcs.SetException(ex);
+            }
+            return tcs.Task;
+        }
+
+        public Task InvokeAsync(Action action)
+        {
+            var tcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            try
+            {
+                _queue.Add(() =>
+                {
+                    try
+                    {
+                        action();
+                        tcs.SetResult();
+                    }
+                    catch (Exception ex)
+                    {
+                        tcs.SetException(ex);
+                    }
+                });
+            }
+            catch (Exception ex)
+            {
+                tcs.SetException(ex);
+            }
+            return tcs.Task;
+        }
+
+        public void Dispose()
+        {
+            if (_disposed) return;
+            _disposed = true;
+            _queue.CompleteAdding();
+            _thread.Join(1500);
+            _queue.Dispose();
+        }
     }
 
     private readonly ILogSink _logSink;
-    private readonly object _lock = new();
+    private readonly Func<object?> _rdpSessionFactory;
+    private readonly StaTaskRunner _staRunner = new();
+    private readonly Dictionary<Guid, InvitationInfo> _invitations = new();
+    private const int MaxAttendees = 2;
+
     private object? _rdpSession;
     private Guid _sharingId;
     private bool _disposed;
-    private readonly Dictionary<Guid, InvitationInfo> _invitations = new(); // InvitationId -> InvitationInfo
-    private const int MaxAttendees = 2;
-    private readonly Func<object?> _rdpSessionFactory; // 테스트 대역을 위한 팩토리
 
     public RdpSharingService(ILogSink logSink) : this(logSink, CreateRdpSession) { }
 
-    // 테스트 대역을 위한 생성자
     public RdpSharingService(ILogSink logSink, Func<object?> rdpSessionFactory)
     {
         _logSink = logSink;
         _rdpSessionFactory = rdpSessionFactory;
     }
 
-    // 실제 RDPSession COM 객체 생성
     private static object? CreateRdpSession()
     {
-        // RDP_IMPLEMENTATION_CONTRACT.md에 따라 CLSID 사용
         var rdpSessionType = Type.GetTypeFromCLSID(new Guid("9B78F0E6-3E05-4A5B-B2E8-E743A8956B65"), true);
         if (rdpSessionType is null)
         {
-            throw new PlatformNotSupportedException("RDPSession COM 객체를 찾을 수 없습니다. Windows Desktop Sharing API가 설치되지 않았거나 지원되지 않는 플랫폼입니다.");
+            throw new PlatformNotSupportedException("RDPSession COM 객체를 찾을 수 없습니다.");
         }
 
         var rdpSession = Activator.CreateInstance(rdpSessionType);
@@ -60,352 +152,297 @@ public sealed class RdpSharingService : IRdpSharingService
         return rdpSession;
     }
 
-    public async Task<Guid> StartAsync(Guid sessionId, CancellationToken cancellationToken = default)
+    public Task<Guid> StartAsync(Guid sessionId, CancellationToken cancellationToken = default)
     {
-        var tcs = new TaskCompletionSource<Guid>();
-
-        var staThread = new Thread(() =>
+        return _staRunner.InvokeAsync(() =>
         {
+            if (_rdpSession is not null)
+            {
+                throw new InvalidOperationException("공유가 이미 시작되었습니다. 먼저 StopAsync를 호출하여 종료해야 합니다.");
+            }
+
             try
             {
-                lock (_lock)
+                _rdpSession = _rdpSessionFactory();
+                if (_rdpSession is null)
                 {
-                    if (_rdpSession is not null)
-                    {
-                        tcs.SetException(new InvalidOperationException("공유가 이미 시작되었습니다. 먼저 StopAsync를 호출하여 종료해야 합니다."));
-                        return;
-                    }
-
-                    try
-                    {
-                        // WDS RDPSession 생성 (STA 스레드에서 실행)
-                        _rdpSession = _rdpSessionFactory();
-                        if (_rdpSession is null)
-                        {
-                            throw new InvalidOperationException("RDPSession 생성 실패");
-                        }
-
-                        // RDPSession 초기화 (실제 WDS 메서드 호출)
-                        // Open 메서드를 호출하여 공유 세션 시작
-                        var rdpSessionType = _rdpSession.GetType();
-                        var openMethod = rdpSessionType.GetMethod("Open");
-                        if (openMethod is not null)
-                        {
-                            openMethod.Invoke(_rdpSession, null);
-                            _logSink.Write("[RDP] RDPSession.Open() 호출 성공");
-                        }
-
-                        _sharingId = Guid.NewGuid();
-                        _logSink.Write($"[RDP] 공유 시작: SessionId={sessionId}, SharingId={_sharingId}");
-
-                        tcs.SetResult(_sharingId);
-                    }
-                    catch (Exception ex)
-                    {
-                        _logSink.Write($"[RDP] 공유 시작 실패: {ex.Message}");
-                        tcs.SetException(ex);
-                    }
+                    throw new InvalidOperationException("RDPSession 생성 실패");
                 }
+
+                // 실제 WDS Open() 호출
+                InvokeComMethod(_rdpSession, "Open");
+                _logSink.Write("[RDP] RDPSession.Open() 호출 성공");
+
+                _sharingId = Guid.NewGuid();
+                _logSink.Write($"[RDP] 공유 시작: SessionId={sessionId}, SharingId={_sharingId}");
+                return _sharingId;
             }
             catch (Exception ex)
             {
-                tcs.SetException(ex);
+                _logSink.Write($"[RDP] 공유 시작 실패: {ex.Message}");
+                if (_rdpSession is not null)
+                {
+                    TryReleaseCom(_rdpSession);
+                    _rdpSession = null;
+                }
+                throw;
             }
         });
-
-        staThread.SetApartmentState(ApartmentState.STA);
-        staThread.Start();
-        staThread.Join();
-
-        return await tcs.Task;
     }
 
-    public async Task<RdpInvitationPacket> CreateInvitationAsync(Guid sessionId, Guid sharingId,
+    public Task<RdpInvitationPacket> CreateInvitationAsync(Guid sessionId, Guid sharingId,
         string participantId, Guid connectionId, string invitationPassword,
         DateTimeOffset expiresAt, CancellationToken cancellationToken = default)
     {
-        var tcs = new TaskCompletionSource<RdpInvitationPacket>();
-
-        var staThread = new Thread(() =>
+        return _staRunner.InvokeAsync(() =>
         {
+            if (_rdpSession is null)
+            {
+                throw new InvalidOperationException("공유가 시작되지 않았습니다.");
+            }
+
+            if (_sharingId != sharingId)
+            {
+                throw new InvalidOperationException("SharingId가 일치하지 않습니다.");
+            }
+
+            var activeInvitations = _invitations.Values.Count(i => !i.IsRevoked && i.ExpiresAt > DateTimeOffset.UtcNow);
+            if (activeInvitations >= MaxAttendees)
+            {
+                throw new InvalidOperationException($"최대 참가자 수({MaxAttendees})를 초과했습니다.");
+            }
+
             try
             {
-                lock (_lock)
+                var invitations = GetComProperty(_rdpSession, "Invitations");
+                if (invitations is null)
                 {
-                    if (_rdpSession is null)
-                    {
-                        tcs.SetException(new InvalidOperationException("공유가 시작되지 않았습니다."));
-                        return;
-                    }
-
-                    if (_sharingId != sharingId)
-                    {
-                        tcs.SetException(new InvalidOperationException("SharingId가 일치하지 않습니다."));
-                        return;
-                    }
-
-                    try
-                    {
-                        // 활성 초대 수 확인 (다중 학생 공유 지원)
-                        var activeInvitations = _invitations.Values.Count(i => !i.IsRevoked && i.ExpiresAt > DateTimeOffset.UtcNow);
-                        if (activeInvitations >= MaxAttendees)
-                        {
-                            tcs.SetException(new InvalidOperationException($"최대 참가자 수({MaxAttendees})를 초과했습니다."));
-                            return;
-                        }
-
-                        var invitationId = Guid.NewGuid();
-
-                        // WDS 초대 생성 (실제 WDS 메서드 호출)
-                        // RDP_IMPLEMENTATION_CONTRACT.md에 따라 Invitations.CreateInvitation() 호출
-                        var rdpSessionType = _rdpSession?.GetType();
-                        string connectionString = string.Empty;
-                        object? comInvitation = null;
-
-                        if (rdpSessionType is not null)
-                        {
-                            // Invitations 속성 가져오기
-                            var invitationsProperty = rdpSessionType.GetProperty("Invitations");
-                            if (invitationsProperty is not null)
-                            {
-                                var invitations = invitationsProperty.GetValue(_rdpSession);
-                                if (invitations is not null)
-                                {
-                                    var invitationsType = invitations.GetType();
-                                    // CreateInvitation 메서드 호출 (groupName, authString, password, attendeeLimit)
-                                    var createInvitationMethod = invitationsType.GetMethod("CreateInvitation");
-                                    if (createInvitationMethod is not null)
-                                    {
-                                        // invitationPassword는 내부 값이므로 사용하지 않고 임의 비밀번호 생성
-                                        var tempPassword = Guid.NewGuid().ToString("N");
-                                        comInvitation = createInvitationMethod.Invoke(invitations, new object[] { "EduStream", participantId, tempPassword, 1 });
-                                        _logSink.Write("[RDP] Invitations.CreateInvitation() 호출 성공");
-
-                                        // ConnectionString 속성 가져오기
-                                        if (comInvitation is not null)
-                                        {
-                                            var connectionStringProperty = comInvitation.GetType().GetProperty("ConnectionString");
-                                            if (connectionStringProperty is not null)
-                                            {
-                                                var connectionStringValue = connectionStringProperty.GetValue(comInvitation);
-                                                if (connectionStringValue is not null)
-                                                {
-                                                    connectionString = (string)connectionStringValue;
-                                                    if (string.IsNullOrWhiteSpace(connectionString))
-                                                    {
-                                                        tcs.SetException(new InvalidOperationException("WDS 초대 문자열이 비어있습니다."));
-                                                        return;
-                                                    }
-                                                    _logSink.Write("[RDP] ConnectionString 획득 성공");
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-
-                        // 초대 정보 추적 (COM 초대 객체 포함)
-                        _invitations[invitationId] = new InvitationInfo
-                        {
-                            InvitationId = invitationId,
-                            ParticipantId = participantId,
-                            ConnectionId = connectionId,
-                            ExpiresAt = expiresAt,
-                            IsRevoked = false,
-                            ComInvitation = comInvitation // COM 객체 저장
-                        };
-
-                        _logSink.Write($"[RDP] 초대 생성: ParticipantId={participantId}, InvitationId={invitationId}, 활성 초대={activeInvitations + 1}/{MaxAttendees}");
-
-                        var invitationPacket = new RdpInvitationPacket
-                        {
-                            SessionId = sessionId,
-                            SharingId = sharingId,
-                            InvitationId = invitationId,
-                            ConnectionId = connectionId,
-                            ParticipantId = participantId,
-                            ConnectionString = connectionString,
-                            ExpiresAt = expiresAt,
-                            ContractVersion = 1,
-                            Provider = "windows-desktop-sharing",
-                            ViewOnly = true,
-                            DataLength = System.Text.Encoding.UTF8.GetByteCount(connectionString)
-                        };
-
-                        tcs.SetResult(invitationPacket);
-                    }
-                    catch (Exception ex)
-                    {
-                        _logSink.Write($"[RDP] 초대 생성 실패: {ex.Message}");
-                        tcs.SetException(ex);
-                    }
+                    throw new InvalidOperationException("WDS Invitations 관리자를 가져올 수 없습니다.");
                 }
+
+                // 전달받은 비밀번호를 그대로 사용
+                var comInvitation = InvokeComMethod(invitations, "CreateInvitation", participantId, $"EduStream_{participantId}", invitationPassword ?? string.Empty, 1);
+                if (comInvitation is null)
+                {
+                    throw new InvalidOperationException("WDS CreateInvitation 호출 결과가 null입니다.");
+                }
+
+                _logSink.Write("[RDP] Invitations.CreateInvitation() 호출 성공");
+
+                // ConnectionString 속성 획득
+                var connStrObj = GetComProperty(comInvitation, "ConnectionString");
+                string connectionString = connStrObj?.ToString() ?? string.Empty;
+
+                if (string.IsNullOrWhiteSpace(connectionString))
+                {
+                    throw new InvalidOperationException("WDS 초대 문자열이 비어있습니다.");
+                }
+
+                _logSink.Write("[RDP] ConnectionString 획득 성공");
+
+                var invitationId = Guid.NewGuid();
+                _invitations[invitationId] = new InvitationInfo
+                {
+                    InvitationId = invitationId,
+                    ParticipantId = participantId,
+                    ConnectionId = connectionId,
+                    ExpiresAt = expiresAt,
+                    IsRevoked = false,
+                    ComInvitation = comInvitation
+                };
+
+                // 단위 테스트 검증용 로그 포맷 유지 ("활성 초대=X/Y")
+                _logSink.Write($"[RDP] 초대 생성: ParticipantId={participantId}, InvitationId={invitationId}, 활성 초대={activeInvitations + 1}/{MaxAttendees}");
+
+                return new RdpInvitationPacket
+                {
+                    SessionId = sessionId,
+                    SharingId = sharingId,
+                    InvitationId = invitationId,
+                    ConnectionId = connectionId,
+                    ParticipantId = participantId,
+                    ConnectionString = connectionString,
+                    ExpiresAt = expiresAt,
+                    ContractVersion = 1,
+                    Provider = "windows-desktop-sharing",
+                    ViewOnly = true,
+                    DataLength = System.Text.Encoding.UTF8.GetByteCount(connectionString)
+                };
             }
             catch (Exception ex)
             {
-                tcs.SetException(ex);
+                _logSink.Write($"[RDP] 초대 생성 실패: {ex.Message}");
+                throw;
             }
         });
-
-        staThread.SetApartmentState(ApartmentState.STA);
-        staThread.Start();
-        staThread.Join();
-
-        return await tcs.Task;
     }
 
-    public async Task RevokeInvitationAsync(Guid invitationId, CancellationToken cancellationToken = default)
+    public Task RevokeInvitationAsync(Guid invitationId, CancellationToken cancellationToken = default)
     {
-        var tcs = new TaskCompletionSource<bool>();
-
-        var staThread = new Thread(() =>
+        return _staRunner.InvokeAsync(() =>
         {
-            try
-            {
-                lock (_lock)
-                {
-                    if (_rdpSession is null)
-                    {
-                        tcs.SetResult(true);
-                        return;
-                    }
+            if (_rdpSession is null) return;
 
+            if (_invitations.TryGetValue(invitationId, out var invitation))
+            {
+                invitation.IsRevoked = true;
+                _logSink.Write($"[RDP] 초대 폐기: InvitationId={invitationId}, ParticipantId={invitation.ParticipantId}");
+
+                DisconnectAttendee(invitation.ParticipantId);
+
+                if (invitation.ComInvitation is not null)
+                {
                     try
                     {
-                        // 초대 정보 추적 업데이트
-                        if (_invitations.TryGetValue(invitationId, out var invitation))
-                        {
-                            invitation.IsRevoked = true;
-                            _logSink.Write($"[RDP] 초대 폐기: InvitationId={invitationId}, ParticipantId={invitation.ParticipantId}");
-
-                            // WDS 초대 폐기 (실제 COM 메서드 호출)
-                            if (invitation.ComInvitation is not null)
-                            {
-                                var revokedProperty = invitation.ComInvitation.GetType().GetProperty("Revoked");
-                                if (revokedProperty is not null)
-                                {
-                                    revokedProperty.SetValue(invitation.ComInvitation, true);
-                                    _logSink.Write("[RDP] COM 초대 Revoked 설정 성공");
-                                }
-
-                                // COM 객체 해제
-                                if (System.Runtime.InteropServices.Marshal.IsComObject(invitation.ComInvitation))
-                                {
-                                    System.Runtime.InteropServices.Marshal.ReleaseComObject(invitation.ComInvitation);
-                                    _logSink.Write("[RDP] COM 초대 객체 해제 성공");
-                                }
-                            }
-                        }
-                        else
-                        {
-                            _logSink.Write($"[RDP] 초대 폐기: InvitationId={invitationId} (존재하지 않음)");
-                        }
-
-                        tcs.SetResult(true);
+                        SetComProperty(invitation.ComInvitation, "Revoked", true);
+                        _logSink.Write("[RDP] COM 초대 Revoked 설정 성공");
                     }
                     catch (Exception ex)
                     {
-                        _logSink.Write($"[RDP] 초대 폐기 실패: {ex.Message}");
-                        tcs.SetException(ex);
+                        _logSink.Write($"[RDP] Revoked 설정 경고: {ex.Message}");
                     }
+
+                    TryReleaseCom(invitation.ComInvitation);
+                    _logSink.Write("[RDP] COM 초대 객체 해제 성공");
                 }
             }
-            catch (Exception ex)
+            else
             {
-                tcs.SetException(ex);
+                _logSink.Write($"[RDP] 초대 폐기: InvitationId={invitationId} (존재하지 않음)");
             }
         });
-
-        staThread.SetApartmentState(ApartmentState.STA);
-        staThread.Start();
-        staThread.Join();
-
-        await tcs.Task;
     }
 
-    public async Task StopAsync(CancellationToken cancellationToken = default)
+    public Task StopAsync(CancellationToken cancellationToken = default)
     {
-        var tcs = new TaskCompletionSource<bool>();
-
-        var staThread = new Thread(() =>
+        return _staRunner.InvokeAsync(() =>
         {
+            if (_rdpSession is null) return;
+
             try
             {
-                lock (_lock)
-                {
-                    if (_rdpSession is null)
-                    {
-                        tcs.SetResult(true);
-                        return;
-                    }
+                DisconnectAttendee(null);
 
+                foreach (var invitation in _invitations.Values)
+                {
+                    if (invitation.ComInvitation is not null)
+                    {
+                        try { SetComProperty(invitation.ComInvitation, "Revoked", true); } catch { }
+                        TryReleaseCom(invitation.ComInvitation);
+                    }
+                }
+                _invitations.Clear();
+
+                if (_rdpSession is not null)
+                {
                     try
                     {
-                        // 모든 초대 정리
-                        foreach (var invitation in _invitations.Values)
-                        {
-                            if (invitation.ComInvitation is not null)
-                            {
-                                if (System.Runtime.InteropServices.Marshal.IsComObject(invitation.ComInvitation))
-                                {
-                                    System.Runtime.InteropServices.Marshal.ReleaseComObject(invitation.ComInvitation);
-                                }
-                            }
-                        }
-                        _invitations.Clear();
-
-                        // WDS 공유 종료 (실제 WDS 메서드 호출)
-                        if (_rdpSession is not null)
-                        {
-                            var rdpSessionType = _rdpSession.GetType();
-                            var closeMethod = rdpSessionType.GetMethod("Close");
-                            if (closeMethod is not null)
-                            {
-                                closeMethod.Invoke(_rdpSession, null);
-                                _logSink.Write("[RDP] RDPSession.Close() 호출 성공");
-                            }
-
-                            // 실제 COM 객체인 경우에만 ReleaseComObject 호출
-                            if (System.Runtime.InteropServices.Marshal.IsComObject(_rdpSession))
-                            {
-                                System.Runtime.InteropServices.Marshal.ReleaseComObject(_rdpSession);
-                            }
-                        }
-                        _rdpSession = null;
-                        _sharingId = Guid.Empty;
-
-                        _logSink.Write("[RDP] 공유 종료");
-                        tcs.SetResult(true);
+                        InvokeComMethod(_rdpSession, "Close");
+                        _logSink.Write("[RDP] RDPSession.Close() 호출 성공");
                     }
                     catch (Exception ex)
                     {
-                        _logSink.Write($"[RDP] 공유 종료 실패: {ex.Message}");
-                        tcs.SetException(ex);
+                        _logSink.Write($"[RDP] Close() 호출 중 오류: {ex.Message}");
                     }
+
+                    TryReleaseCom(_rdpSession);
                 }
+
+                _rdpSession = null;
+                _sharingId = Guid.Empty;
+
+                // 단위 테스트 검증용 필수 로그 ("공유 종료")
+                _logSink.Write("[RDP] 공유 종료");
             }
             catch (Exception ex)
             {
-                tcs.SetException(ex);
+                _logSink.Write($"[RDP] 공유 종료 실패: {ex.Message}");
+                throw;
             }
         });
-
-        staThread.SetApartmentState(ApartmentState.STA);
-        staThread.Start();
-        staThread.Join();
-
-        await tcs.Task;
     }
 
     public async ValueTask DisposeAsync()
     {
-        if (_disposed)
-        {
-            return;
-        }
-
+        if (_disposed) return;
         await StopAsync();
+        _staRunner.Dispose();
         _disposed = true;
     }
+
+    private void DisconnectAttendee(string? participantId)
+    {
+        if (_rdpSession is null) return;
+
+        try
+        {
+            var attendees = GetComProperty(_rdpSession, "Attendees");
+            if (attendees is System.Collections.IEnumerable enumerable)
+            {
+                foreach (var attendee in enumerable)
+                {
+                    try
+                    {
+                        var remoteName = GetComProperty(attendee, "RemoteName")?.ToString();
+                        if (string.IsNullOrEmpty(participantId) || remoteName == participantId)
+                        {
+                            InvokeComMethod(attendee, "TerminateConnection");
+                            _logSink.Write($"[RDP] Attendee 연결 해제 완료: {remoteName}");
+                        }
+                    }
+                    catch { }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logSink.Write($"[RDP] Attendee 정리 중 예외 (무시 가능): {ex.Message}");
+        }
+    }
+
+    #region COM & Reflection 유틸리티
+
+    private static object? InvokeComMethod(object target, string methodName, params object[] args)
+    {
+        var type = target.GetType();
+        var method = type.GetMethod(methodName);
+        if (method is not null)
+        {
+            return method.Invoke(target, args);
+        }
+        return type.InvokeMember(methodName, BindingFlags.InvokeMethod | BindingFlags.Public | BindingFlags.Instance, null, target, args);
+    }
+
+    private static object? GetComProperty(object target, string propertyName)
+    {
+        var type = target.GetType();
+        var prop = type.GetProperty(propertyName);
+        if (prop is not null)
+        {
+            return prop.GetValue(target);
+        }
+        return type.InvokeMember(propertyName, BindingFlags.GetProperty | BindingFlags.Public | BindingFlags.Instance, null, target, null);
+    }
+
+    private static void SetComProperty(object target, string propertyName, object value)
+    {
+        var type = target.GetType();
+        var prop = type.GetProperty(propertyName);
+        if (prop is not null)
+        {
+            prop.SetValue(target, value);
+            return;
+        }
+        type.InvokeMember(propertyName, BindingFlags.SetProperty | BindingFlags.Public | BindingFlags.Instance, null, target, new[] { value });
+    }
+
+    private static void TryReleaseCom(object obj)
+    {
+        if (Marshal.IsComObject(obj))
+        {
+            Marshal.ReleaseComObject(obj);
+        }
+    }
+
+    #endregion
 }
