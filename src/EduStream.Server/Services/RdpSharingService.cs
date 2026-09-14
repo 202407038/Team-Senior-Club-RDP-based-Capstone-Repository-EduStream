@@ -29,58 +29,93 @@ public sealed class RdpSharingService : IRdpSharingService
     private bool _disposed;
     private readonly Dictionary<Guid, InvitationInfo> _invitations = new(); // InvitationId -> InvitationInfo
     private const int MaxAttendees = 2;
+    private readonly Func<object?> _rdpSessionFactory; // 테스트 대역을 위한 팩토리
 
-    public RdpSharingService(ILogSink logSink)
+    public RdpSharingService(ILogSink logSink) : this(logSink, CreateRdpSession) { }
+
+    // 테스트 대역을 위한 생성자
+    public RdpSharingService(ILogSink logSink, Func<object?> rdpSessionFactory)
     {
         _logSink = logSink;
+        _rdpSessionFactory = rdpSessionFactory;
+    }
+
+    // 실제 RDPSession COM 객체 생성
+    private static object? CreateRdpSession()
+    {
+        var rdpSessionType = Type.GetTypeFromProgID("RDPSession");
+        if (rdpSessionType is null)
+        {
+            throw new PlatformNotSupportedException("RDPSession COM 객체를 찾을 수 없습니다. Windows Desktop Sharing API가 설치되지 않았거나 지원되지 않는 플랫폼입니다.");
+        }
+
+        var rdpSession = Activator.CreateInstance(rdpSessionType);
+        if (rdpSession is null)
+        {
+            throw new InvalidOperationException("RDPSession 생성 실패");
+        }
+
+        return rdpSession;
     }
 
     public async Task<Guid> StartAsync(Guid sessionId, CancellationToken cancellationToken = default)
     {
-        await Task.Run(() =>
-        {
-            lock (_lock)
-            {
-                if (_rdpSession is not null)
-                {
-                    _logSink.Write("[RDP] 공유가 이미 시작되었습니다.");
-                    return _sharingId;
-                }
+        var tcs = new TaskCompletionSource<Guid>();
 
-                try
+        var staThread = new Thread(() =>
+        {
+            try
+            {
+                lock (_lock)
                 {
-                    // WDS RDPSession 생성 (STA 스레드에서 실행 필요)
-                    // 실제 구현에서는 COM 객체 생성 및 초기화 필요
-                    var rdpSessionType = Type.GetTypeFromProgID("RDPSession");
-                    if (rdpSessionType is null)
+                    if (_rdpSession is not null)
                     {
-                        // 테스트 환경에서 COM 객체가 없는 경우를 대비해 모의 객체 생성
-                        _logSink.Write("[RDP] RDPSession COM 객체를 찾을 수 없어 모의 객체 생성");
-                        _rdpSession = new object();
+                        tcs.SetException(new InvalidOperationException("공유가 이미 시작되었습니다. 먼저 StopAsync를 호출하여 종료해야 합니다."));
+                        return;
                     }
-                    else
+
+                    try
                     {
-                        _rdpSession = Activator.CreateInstance(rdpSessionType);
+                        // WDS RDPSession 생성 (STA 스레드에서 실행)
+                        _rdpSession = _rdpSessionFactory();
                         if (_rdpSession is null)
                         {
                             throw new InvalidOperationException("RDPSession 생성 실패");
                         }
+
+                        // RDPSession 초기화 (실제 WDS 메서드 호출)
+                        // Open 메서드를 호출하여 공유 세션 시작
+                        var rdpSessionType = _rdpSession.GetType();
+                        var openMethod = rdpSessionType.GetMethod("Open");
+                        if (openMethod is not null)
+                        {
+                            openMethod.Invoke(_rdpSession, null);
+                            _logSink.Write("[RDP] RDPSession.Open() 호출 성공");
+                        }
+
+                        _sharingId = Guid.NewGuid();
+                        _logSink.Write($"[RDP] 공유 시작: SessionId={sessionId}, SharingId={_sharingId}");
+
+                        tcs.SetResult(_sharingId);
                     }
-
-                    _sharingId = Guid.NewGuid();
-                    _logSink.Write($"[RDP] 공유 시작: SessionId={sessionId}, SharingId={_sharingId}");
-
-                    return _sharingId;
-                }
-                catch (Exception ex)
-                {
-                    _logSink.Write($"[RDP] 공유 시작 실패: {ex.Message}");
-                    throw;
+                    catch (Exception ex)
+                    {
+                        _logSink.Write($"[RDP] 공유 시작 실패: {ex.Message}");
+                        tcs.SetException(ex);
+                    }
                 }
             }
-        }, cancellationToken);
+            catch (Exception ex)
+            {
+                tcs.SetException(ex);
+            }
+        });
 
-        return _sharingId;
+        staThread.SetApartmentState(ApartmentState.STA);
+        staThread.Start();
+        staThread.Join();
+
+        return await tcs.Task;
     }
 
     public async Task<RdpInvitationPacket> CreateInvitationAsync(Guid sessionId, Guid sharingId,
@@ -112,9 +147,21 @@ public sealed class RdpSharingService : IRdpSharingService
 
                     var invitationId = Guid.NewGuid();
 
-                    // WDS 초대 생성 (실제 구현에서는 COM 메서드 호출 필요)
-                    // AttendeeLimit=1, 비밀번호 설정
-                    var connectionString = $"rdp://invitation:{invitationId};password:{invitationPassword}";
+                    // WDS 초대 생성 (실제 WDS 메서드 호출)
+                    var rdpSessionType = _rdpSession?.GetType();
+                    if (rdpSessionType is not null)
+                    {
+                        // CreateAttendee 메서드를 호출하여 초대 생성
+                        var createAttendeeMethod = rdpSessionType.GetMethod("CreateAttendee");
+                        if (createAttendeeMethod is not null)
+                        {
+                            var attendee = createAttendeeMethod.Invoke(_rdpSession, null);
+                            _logSink.Write("[RDP] RDPSession.CreateAttendee() 호출 성공");
+                        }
+                    }
+
+                    // 비밀번호는 별도 경로로 전송
+                    var connectionString = $"rdp://invitation:{invitationId}";
 
                     // 초대 정보 추적
                     _invitations[invitationId] = new InvitationInfo
@@ -128,7 +175,7 @@ public sealed class RdpSharingService : IRdpSharingService
 
                     _logSink.Write($"[RDP] 초대 생성: ParticipantId={participantId}, InvitationId={invitationId}, 활성 초대={activeInvitations + 1}/{MaxAttendees}");
 
-                    return new RdpInvitationPacket
+                    var invitationPacket = new RdpInvitationPacket
                     {
                         SessionId = sessionId,
                         SharingId = sharingId,
@@ -139,8 +186,11 @@ public sealed class RdpSharingService : IRdpSharingService
                         ExpiresAt = expiresAt,
                         ContractVersion = 1,
                         Provider = "windows-desktop-sharing",
-                        ViewOnly = true
+                        ViewOnly = true,
+                        DataLength = System.Text.Encoding.UTF8.GetByteCount(connectionString)
                     };
+
+                    return invitationPacket;
                 }
                 catch (Exception ex)
                 {
@@ -187,36 +237,66 @@ public sealed class RdpSharingService : IRdpSharingService
 
     public async Task StopAsync(CancellationToken cancellationToken = default)
     {
-        await Task.Run(() =>
+        var tcs = new TaskCompletionSource<bool>();
+
+        var staThread = new Thread(() =>
         {
-            lock (_lock)
+            try
             {
-                if (_rdpSession is null)
+                lock (_lock)
                 {
-                    return;
-                }
-
-                try
-                {
-                    // 모든 초대 정리
-                    _invitations.Clear();
-
-                    // WDS 공유 종료 (실제 구현에서는 COM 메서드 호출 필요)
-                    if (_rdpSession is not null)
+                    if (_rdpSession is null)
                     {
-                        System.Runtime.InteropServices.Marshal.ReleaseComObject(_rdpSession);
+                        tcs.SetResult(true);
+                        return;
                     }
-                    _rdpSession = null;
-                    _sharingId = Guid.Empty;
 
-                    _logSink.Write("[RDP] 공유 종료");
-                }
-                catch (Exception ex)
-                {
-                    _logSink.Write($"[RDP] 공유 종료 실패: {ex.Message}");
+                    try
+                    {
+                        // 모든 초대 정리
+                        _invitations.Clear();
+
+                        // WDS 공유 종료 (실제 WDS 메서드 호출)
+                        if (_rdpSession is not null)
+                        {
+                            var rdpSessionType = _rdpSession.GetType();
+                            var closeMethod = rdpSessionType.GetMethod("Close");
+                            if (closeMethod is not null)
+                            {
+                                closeMethod.Invoke(_rdpSession, null);
+                                _logSink.Write("[RDP] RDPSession.Close() 호출 성공");
+                            }
+
+                            // 실제 COM 객체인 경우에만 ReleaseComObject 호출
+                            if (System.Runtime.InteropServices.Marshal.IsComObject(_rdpSession))
+                            {
+                                System.Runtime.InteropServices.Marshal.ReleaseComObject(_rdpSession);
+                            }
+                        }
+                        _rdpSession = null;
+                        _sharingId = Guid.Empty;
+
+                        _logSink.Write("[RDP] 공유 종료");
+                        tcs.SetResult(true);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logSink.Write($"[RDP] 공유 종료 실패: {ex.Message}");
+                        tcs.SetException(ex);
+                    }
                 }
             }
-        }, cancellationToken);
+            catch (Exception ex)
+            {
+                tcs.SetException(ex);
+            }
+        });
+
+        staThread.SetApartmentState(ApartmentState.STA);
+        staThread.Start();
+        staThread.Join();
+
+        await tcs.Task;
     }
 
     public async ValueTask DisposeAsync()
