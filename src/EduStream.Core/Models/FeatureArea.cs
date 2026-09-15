@@ -10,5 +10,6 @@ public enum FeatureArea
     Screen = 2,
     File = 3,
     Chat = 4,
-    Protocol = 5
+    Protocol = 5,
+    Rdp = 6
 }

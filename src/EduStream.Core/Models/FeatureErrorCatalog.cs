@@ -46,7 +46,10 @@ public static class FeatureErrorCatalog
             [ErrorCodes.EmptyScreenPayload] = Screen(ErrorCodes.EmptyScreenPayload, "비어 있는 화면 프레임을 수신했습니다.", true),
 
             [ErrorCodes.EmptyMessage] = Chat(ErrorCodes.EmptyMessage, "채팅 메시지를 입력해 주세요.", true),
-            [ErrorCodes.MessageTooLong] = Chat(ErrorCodes.MessageTooLong, "채팅 메시지가 너무 깁니다.", true)
+            [ErrorCodes.MessageTooLong] = Chat(ErrorCodes.MessageTooLong, "채팅 메시지가 너무 깁니다.", true),
+
+            [ErrorCodes.RdpSharingNotStarted] = Rdp(ErrorCodes.RdpSharingNotStarted, "화면 공유가 아직 시작되지 않았습니다. 잠시 후 다시 시도해 주세요.", true),
+            [ErrorCodes.RdpInvitationFailed] = Rdp(ErrorCodes.RdpInvitationFailed, "RDP 초대 발급에 실패했습니다. 다시 시도해 주세요.", true)
         };
 
     public static FeatureErrorInfo Resolve(string errorCode)
@@ -83,4 +86,7 @@ public static class FeatureErrorCatalog
 
     private static FeatureErrorInfo Chat(string code, string message, bool recoverable) =>
         new(code, FeatureArea.Chat, message, recoverable);
+
+    private static FeatureErrorInfo Rdp(string code, string message, bool recoverable) =>
+        new(code, FeatureArea.Rdp, message, recoverable);
 }

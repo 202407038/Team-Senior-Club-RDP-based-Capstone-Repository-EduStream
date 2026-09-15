@@ -357,6 +357,100 @@ public sealed class SessionMultiClientTests
             DefaultWait);
     }
 
+    [Fact]
+    public async Task NonParticipant_SendingChat_ShouldBeRejectedAndNotBroadcast()
+    {
+        // 9월 3주차 2번: 참가 승인되지 않은 연결의 채팅은 거부되어야 하고, 참여 중인 다른
+        // 학생에게는 전달되지 않아야 한다(기존 코드에 로직은 있었으나 자동 검증이 없었음).
+        await using var rig = await TestRig.OpenAsync();
+
+        var bob = await rig.ConnectAndJoinAsync("Bob");
+        await WaitUntilAsync(() => rig.SessionManager.ParticipantCount == 1, DefaultWait);
+
+        var serializer = new PacketSerializer();
+        var ghostLog = new InMemoryLogSink();
+        var ghost = new TcpClientService(ghostLog, serializer);
+        await ghost.ConnectAsync("127.0.0.1", rig.Port);
+
+        var bobReceivedGhostMessage = false;
+        bob.PacketReceived += (packetType, payload) =>
+        {
+            if (packetType == PacketType.Chat)
+            {
+                var chat = serializer.Deserialize<ChatPacket>(payload);
+                if (chat?.Message == "ghost-message")
+                    bobReceivedGhostMessage = true;
+            }
+            return Task.CompletedTask;
+        };
+
+        var errorReceived = new TaskCompletionSource<ErrorPacket>(TaskCreationOptions.RunContinuationsAsynchronously);
+        ghost.PacketReceived += (packetType, payload) =>
+        {
+            if (packetType == PacketType.Error)
+                errorReceived.TrySetResult(serializer.Deserialize<ErrorPacket>(payload)!);
+            return Task.CompletedTask;
+        };
+
+        await ghost.SendAsync(PacketFactory.CreateChat(
+            senderId: "Ghost", sender: "Ghost", message: "ghost-message",
+            sessionId: rig.SessionManager.CurrentSession?.SessionId));
+
+        var error = await errorReceived.Task.WaitAsync(DefaultWait);
+        Assert.Equal(ErrorCodes.NotParticipant, error.ErrorCode);
+
+        await WaitUntilAsync(
+            () => rig.ServerLog.Snapshot().Any(e => e.Contains("[Chat] 비참가자 차단")),
+            DefaultWait);
+
+        // 서버가 브로드캐스트 로그를 남길 충분한 시간을 준 뒤에도 Bob에게는 도달하지 않아야 한다.
+        await Task.Delay(200);
+        Assert.False(bobReceivedGhostMessage);
+        Assert.Equal(1, rig.SessionManager.ParticipantCount);
+
+        ghost.Dispose();
+    }
+
+    [Fact]
+    public async Task CloseSession_WithMultipleParticipants_ShouldBroadcastTerminationAndClearAll()
+    {
+        // 9월 3주차 2번: 교수자가 세션을 종료하면 남아 있는 모든 참가자에게 종료 알림이
+        // 브로드캐스트되고, 참가자 목록/인원이 전부 정리되어야 한다.
+        await using var rig = await TestRig.OpenAsync();
+
+        var alice = await rig.ConnectAndJoinAsync("Alice");
+        var bob = await rig.ConnectAndJoinAsync("Bob");
+        await WaitUntilAsync(() => rig.SessionManager.ParticipantCount == 2, DefaultWait);
+
+        var serializer = new PacketSerializer();
+        var aliceNotified = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var bobNotified = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        alice.PacketReceived += (packetType, payload) =>
+        {
+            if (packetType == PacketType.Chat &&
+                serializer.Deserialize<ChatPacket>(payload)?.Message.Contains("세션을 종료") == true)
+                aliceNotified.TrySetResult(true);
+            return Task.CompletedTask;
+        };
+        bob.PacketReceived += (packetType, payload) =>
+        {
+            if (packetType == PacketType.Chat &&
+                serializer.Deserialize<ChatPacket>(payload)?.Message.Contains("세션을 종료") == true)
+                bobNotified.TrySetResult(true);
+            return Task.CompletedTask;
+        };
+
+        await rig.SessionManager.CloseSessionAsync();
+
+        await aliceNotified.Task.WaitAsync(DefaultWait);
+        await bobNotified.Task.WaitAsync(DefaultWait);
+
+        Assert.False(rig.SessionManager.IsSessionOpen);
+        Assert.Equal(0, rig.SessionManager.ParticipantCount);
+        Assert.Empty(rig.SessionManager.ParticipantNames);
+        Assert.Contains(rig.ServerLog.Snapshot(), e => e.Contains("[Session] 종료"));
+    }
+
     private static async Task WaitUntilAsync(
         Func<bool> condition,
         TimeSpan timeout,
