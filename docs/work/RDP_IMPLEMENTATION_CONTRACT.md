@@ -1,6 +1,6 @@
 # RDP 구현 기준 및 역할 간 연결 계약
 
-기준일: 2026-09-09. 본 문서는 1번의 미확정 연결 방식/정보 계약을 보완합니다.
+계약 확정일: 2026-09-09. 구현/검증 갱신일: 2026-09-15, 코드 기준 main `ec994c6`.
 
 ## 확정 구성
 
@@ -31,7 +31,7 @@ powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File scripts/Test-RdpSha
 - 공유 Open 성공, AttendeeLimit=2 초대 생성 및 ConnectionString 존재 확인.
 - 초대 Revoked 설정과 공유 Close 성공.
 - 이 PC의 등록 DLL은 rdpsharercom.dll / rdpviewerax.dll. ProgID 검색 실패만으로 미지원으로 판단하지 않습니다.
-- 실제 viewer Connect/화면 수신/두 학생 동시 접속/방화벽 통과/15분 실행은 미검증.
+- 9월 15일 후속: 실제 viewer 두 개의 Connected 이벤트, 보기 전용 권한, 재접속/회수, 파일/채팅 병행을 현 PC에서 자동 검증했습니다. 다중 PC 화면 표시/방화벽 통과/지연/15분 실행은 미검증.
 - 점검 스크립트는 임의 비밀번호를 만들고 공유를 즉시 종료하며 초대 문자열과 비밀번호를 출력하지 않습니다.
 
 RDP 포트를 기존 강의 TCP 5000 또는 원격 데스크톱 3389로 고정 가정하지 않습니다. 3번이 생성한 초대와 실제 연결에서 주소/포트·방화벽 요구를 검증해 문서화합니다. OS 설정/방화벽을 자동으로 변경하지 않습니다.
@@ -59,7 +59,7 @@ Provider="windows-desktop-sharing", ContractVersion=1, ViewOnly=true.
 DataLength는 초대 ConnectionString의 UTF-8 바이트 수, 요청/폐기 패킷은 0입니다.
 초대 문자열 최대 64KiB는 이 프로젝트의 제어 패킷 제한이며 RDP 제품 자체 제한을 뜻하지 않습니다.
 
-새 패킷을 기존 ACK/Chat/Screen에 숨겨 전송하지 않습니다. 2·5번은 명시적인 switch 분기와 서버 개별 전송 경로를 추가합니다. 공유 시작 전 요청은 SessionNotOpen 오류로 거부하며, 구버전 클라이언트는 자동 RDP 접속하지 않습니다.
+새 패킷을 기존 ACK/Chat/Screen에 숨겨 전송하지 않습니다. 2·5번은 명시적인 switch 분기와 서버 개별 전송 경로를 추가합니다. 공유 시작 전 요청은 RdpSharingNotStarted 오류로 거부하며, 구버전 클라이언트는 자동 RDP 접속하지 않습니다.
 
 ### 학생 한 명의 흐름
 
@@ -68,7 +68,7 @@ DataLength는 초대 ConnectionString의 UTF-8 바이트 수, 요청/폐기 패�
 3. 2번: 학생에게 이미 발급한 초대/연결이 있으면 정리 후 3번 CreateInvitationAsync 호출.
 4. 3번: 같은 RDPSession에서 학생별 초대 생성. ConnectionString을 파싱/재작성하지 않고 반환. 초대 ID ↔ COM invitation ↔ 승인 참가자 매핑 유지.
 5. 2번: 요청한 학생에게만 초대 전달. 브로드캐스트 금지.
-6. 5번: Validate(invitation, expectedSession, expectedParticipant, expectedConnectionId, now) 후 ConnectAsync 호출.
+6. 5번: Validate(invitation, expectedSession, expectedParticipant, expectedConnectionId, now) 후 초대를 보관. 사용자가 별도로 받은 비밀번호를 입력하고 RDP 연결을 누르면 만료/식별자를 다시 확인하고 ConnectAsync 호출.
 7. 3번: OnAttendeeConnected에서 해당 invitation 매핑으로 허용 여부 확인 후 ControlLevel=2 적용. 표시 이름만으로 신원 판단 금지. 제어 권한 상승 요청 거부.
 8. 5번: 실제 연결 성공/실패/해제 이벤트를 RdpConnectionStatus로 변환해 UI에 전달.
 9. 2번: 이탈/세션 종료 때 3번 폐기 API 호출 및 필요 시 폐기 패킷 송신. 3번은 Revoked 설정뿐 아니라 활성 attendee도 해제.
@@ -94,12 +94,22 @@ DataLength는 초대 ConnectionString의 UTF-8 바이트 수, 요청/폐기 패�
 
 대역 검증을 실제 RDP 성공으로 기록하지 않습니다. 공유·수신 방식 선택은 이 문서로 확정했으므로 팀원이 다른 방식을 임의로 골라 구현하지 않습니다. 실제 연결 장애가 발견되면 원인과 재현 환경을 공유하고 계약 변경을 팀장이 결정합니다.
 
-## 자동 검증 결과
+## 자동 검증 결과 (이전 9월 9일 기준선)
 
 - 빌드 경고 0/오류 0, 신규 초대 계약 테스트 8/8 통과.
 - 전체 최종 재실행 142/142 통과.
 - 앞선 전체 실행에서 기존 ScreenShareHeartbeatConcurrencyTests가 대기하여 중단됐습니다. 30초 제한 재현 실행도 같은 테스트 대기를 보고했습니다. 해당 테스트 단독 실행은 main/보완 브랜치 모두 통과했고 이후 전체 재실행은 통과했습니다. 원인 미확정의 간헐 현상으로 통합 QA에서 추적합니다.
-- 실제 RDP viewer 연결 성공·영상 수신·학생 2명 동시 공유는 아직 별도 통합 검증 대상입니다.
+- 위 기록은 계약 확정 당시 결과입니다. 9월 15일 현 PC 실제 viewer 연결/두 학생 자동 통합은 완료했으며, 영상 픽셀의 수동 확인·다중 PC 지연·15분 실사용은 여전히 별도 검증 대상입니다.
+
+## 9월 15일 구현 대응
+
+- #36 SessionManager: 학생별 초대/발급 서비스 추적, 종료/교체 경합 회수, 비밀번호 별도 인계.
+- #37 RdpSharingService: 전용 STA/메시지 루프, CLSID 활성화, 초대별 고유 AuthString/GroupName, native invitation 기준 참가 승인과 보기 전용.
+- #38 RdpViewerService/ClientViewModel: UI STA에 실제 컨트롤 부착, Connected 이벤트 확인, 이전 연결 이벤트 차단, 사용자 비밀번호 입력.
+- #39 ServerViewModel: WDS 공유 시작 후 세션에 부착, 중지/창 종료 때 회수/종료. 교수자 화면에는 비밀번호·ConnectionString을 표시하지 않으며 선택 학생 비밀번호만 복사해 별도 전달.
+- #40 TCP 송신 대기 중 종료 시 잠금 폐기 경합 보완, #41 파일 진행→완료 및 재시도 알림 보정.
+- 현재 일반 전체 186 통과 / 실제 WDS 선택 실행 3항목 건너뜀. 실제 WDS 포함 선택 검증 11/11 통과. 상세 한계와 수동 인수는 [통합 검증](./SEPTEMBER_RDP_INTEGRATION.md) 참조.
+- 복사된 비밀번호도 민감 정보입니다. 공유 화면·공용 채팅에 붙여 넣거나 클립보드 기록/동기화에 보관하지 않도록 주의합니다. TCP 자체의 암호화/인터넷 배포 보안을 이번 구현 완료로 주장하지 않습니다.
 
 ## 공식 근거
 
