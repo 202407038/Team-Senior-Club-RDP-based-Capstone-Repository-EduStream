@@ -1,6 +1,7 @@
 ﻿[CmdletBinding()]
 param(
     [string]$OutputDirectory,
+    [ValidatePattern('^8\.0\.\d+$')][string]$RuntimeVersion = '8.0.31',
     [switch]$CreateDesktopShortcuts,
     [string]$ShortcutDirectory = [Environment]::GetFolderPath('Desktop')
 )
@@ -46,7 +47,7 @@ try {
     foreach ($app in $apps) {
         $project = Join-Path $repo ("src\EduStream." + $app.Role + "\EduStream." + $app.Role + ".csproj")
         $target = Join-Path $output $app.Role
-        & dotnet publish $project --configuration Release --runtime win-x64 --self-contained true --output $target --nologo '-p:UseAppHost=true' '-p:PublishSingleFile=false' '-p:PublishTrimmed=false'
+        & dotnet publish $project --configuration Release --runtime win-x64 --self-contained true --output $target --nologo '-p:UseAppHost=true' '-p:PublishSingleFile=false' '-p:PublishTrimmed=false' ("-p:RuntimeFrameworkVersion=" + $RuntimeVersion)
         if ($LASTEXITCODE -ne 0) { throw ("Publish failed: " + $app.Role) }
         foreach ($file in @(("EduStream." + $app.Role + ".exe"), 'coreclr.dll', 'hostfxr.dll')) {
             if (-not (Test-Path -LiteralPath (Join-Path $target $file) -PathType Leaf)) {
