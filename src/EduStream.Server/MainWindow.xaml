@@ -3,7 +3,6 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
-        xmlns:wfi="clr-namespace:System.Windows.Forms.Integration;assembly=WindowsFormsIntegration"
         mc:Ignorable="d"
         Title="EduStream Server"
         Height="820"
@@ -22,11 +21,7 @@
 
         <!-- Left: session controls + RDP preview -->
         <Grid Grid.Column="0">
-            <Grid.RowDefinitions>
-                <RowDefinition Height="Auto" />
-                <RowDefinition Height="12" />
-                <RowDefinition Height="*" MinHeight="280" />
-            </Grid.RowDefinitions>
+
 
             <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
                 <StackPanel>
@@ -74,13 +69,13 @@
 
                                 <Button Style="{StaticResource GhostButton}"
             Margin="0,0,8,8"
-            Content="화면 프레임 전송"
+            Content="보조 PNG 1회 전송"
             Command="{Binding StartScreenShareCommand}" />
 
                                 <Button Margin="0,0,8,8" Padding="14,0">
                                     <Button.Style>
                                         <Style TargetType="Button" BasedOn="{StaticResource GhostButton}">
-                                            <Setter Property="Content" Value="공유 시작" />
+                                            <Setter Property="Content" Value="보조 PNG 시작" />
                                             <Setter Property="Command" Value="{Binding StartAutoShareCommand}" />
                                             <Setter Property="Background" Value="#1B5E20" />
                                             <Setter Property="Foreground" Value="#A9F5A9" />
@@ -88,7 +83,7 @@
 
                                             <Style.Triggers>
                                                 <DataTrigger Binding="{Binding IsScreenSharing}" Value="True">
-                                                    <Setter Property="Content" Value="공유 중지" />
+                                                    <Setter Property="Content" Value="보조 PNG 중지" />
                                                     <Setter Property="Command" Value="{Binding StopAutoShareCommand}" />
                                                     <Setter Property="Background" Value="#C62828" />
                                                     <Setter Property="Foreground" Value="#FFCDD2" />
@@ -173,7 +168,7 @@
 
                     <Border Style="{StaticResource PanelCard}" Margin="0,0,0,12">
                         <StackPanel>
-                            <TextBlock Style="{StaticResource SectionTitle}" Text="화면 공유 상태" />
+                            <TextBlock Style="{StaticResource SectionTitle}" Text="보조 PNG 전송 상태" />
                             <TextBlock Margin="0,10,0,0"
                                        Foreground="{StaticResource BrushTextSecondary}"
                                        TextWrapping="Wrap"
@@ -183,74 +178,28 @@
 
                     <Border Style="{StaticResource PanelCard}">
                         <StackPanel>
-                            <TextBlock Style="{StaticResource SectionTitle}" Text="RDP 연동 테스트" />
-                            <TextBlock Margin="0,8,0,0"
-                                       Foreground="{StaticResource BrushTextMuted}"
-                                       TextWrapping="Wrap"
-                                       Text="Microsoft Remote Desktop ActiveX 컨트롤을 WPF WindowsFormsHost에 임베드합니다." />
-
-                            <TextBlock Style="{StaticResource FieldLabel}" Margin="0,14,0,6" Text="RDP 서버" />
-                            <TextBox Style="{StaticResource DarkTextBox}"
-                                     Text="{Binding RdpServerAddress, UpdateSourceTrigger=PropertyChanged}" />
-
-                            <TextBlock Style="{StaticResource FieldLabel}" Margin="0,12,0,6" Text="사용자 이름" />
-                            <TextBox Style="{StaticResource DarkTextBox}"
-                                     Text="{Binding RdpUserName, UpdateSourceTrigger=PropertyChanged}" />
-
-                            <TextBlock Style="{StaticResource FieldLabel}" Margin="0,12,0,6" Text="비밀번호" />
-                            <TextBox Style="{StaticResource DarkTextBox}"
-                                     Text="{Binding RdpPassword, UpdateSourceTrigger=PropertyChanged}" />
-
+                            <TextBlock Style="{StaticResource SectionTitle}" Text="실시간 RDP 화면 공유 (WDS)" />
+                            <TextBlock Margin="0,8,0,0" Foreground="{StaticResource BrushTextMuted}" TextWrapping="Wrap"
+                                       Text="교수자 데스크톱을 학생 최대 2명에게 보기 전용으로 공유합니다. Windows 로그인 비밀번호는 사용하지 않습니다." />
                             <WrapPanel Margin="0,14,0,0">
-                                <Button Style="{StaticResource PrimaryButton}"
-                                        Margin="0,0,8,0"
-                                        Padding="18,0"
-                                        Content="RDP 시작"
-                                        Command="{Binding StartRdpPreviewCommand}" />
+                                <Button Style="{StaticResource PrimaryButton}" Margin="0,0,8,0"
+                                        Content="WDS 공유 시작" Command="{Binding StartRdpShareCommand}" />
                                 <Button Style="{StaticResource SecondaryButton}"
-                                        Padding="18,0"
-                                        Content="RDP 중지"
-                                        Command="{Binding StopRdpPreviewCommand}" />
+                                        Content="WDS 공유 중지" Command="{Binding StopRdpShareCommand}" />
                             </WrapPanel>
-
-                            <TextBlock Margin="0,10,0,0"
-                                       Foreground="{StaticResource BrushAccentTeal}"
-                                       TextWrapping="Wrap"
-                                       Text="{Binding RdpStatus}" />
+                            <TextBlock Margin="0,10,0,0" Foreground="{StaticResource BrushAccentTeal}"
+                                       TextWrapping="Wrap" Text="{Binding RdpStatus}" />
+                            <TextBlock Margin="0,14,0,6" Foreground="{StaticResource BrushTextSecondary}"
+                                       Text="초대 비밀번호 전달 대상" />
+                            <ComboBox x:Name="InvitationParticipant" ItemsSource="{Binding RdpInvitationParticipants}" />
+                            <Button Margin="0,8,0,0" Style="{StaticResource GhostButton}"
+                                    Content="선택 학생의 초대 비밀번호 복사" Click="CopyInvitationPassword_Click" />
+                            <TextBlock Margin="0,8,0,0" Foreground="{StaticResource BrushTextMuted}" TextWrapping="Wrap"
+                                       Text="비밀번호는 화면과 로그에 표시하지 않습니다. 복사한 값은 해당 학생에게 별도 비공개 채널로 전달하세요. 공유 중인 화면에 붙여 넣지 마세요. 학생은 설정 → RDP 비밀번호 입력 → RDP 연결 순으로 진행합니다. 초대는 5분 이내 사용하며 재접속 시 새 비밀번호를 전달합니다." />
                         </StackPanel>
                     </Border>
                 </StackPanel>
             </ScrollViewer>
-
-            <!-- RDP preview surface -->
-            <Border Grid.Row="2"
-                    Background="#000000"
-                    CornerRadius="12"
-                    BorderBrush="#333333"
-                    BorderThickness="1"
-                    Padding="12">
-                <Grid>
-                    <TextBlock Margin="4"
-                               VerticalAlignment="Top"
-                               Panel.ZIndex="1"
-                               Foreground="{StaticResource BrushAccentTeal}"
-                               FontWeight="SemiBold"
-                               Text="RDP 미리보기" />
-
-                    <wfi:WindowsFormsHost x:Name="RdpPreviewHost" Margin="0,28,0,0" />
-
-                    <Border Background="#CC0A0A0A"
-                            Visibility="{Binding IsBusy, Converter={StaticResource BoolToVis}}">
-                        <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
-                            <ProgressBar Style="{StaticResource LoadingProgressBar}" />
-                            <TextBlock Margin="0,16,0,0"
-                                       Text="세션 처리 중..."
-                                       Foreground="{StaticResource BrushAccentPurple}"
-                                       FontWeight="SemiBold" />
-                        </StackPanel>
-                    </Border>
-                </Grid>
-            </Border>
         </Grid>
 
         <!-- Right sidebar -->
