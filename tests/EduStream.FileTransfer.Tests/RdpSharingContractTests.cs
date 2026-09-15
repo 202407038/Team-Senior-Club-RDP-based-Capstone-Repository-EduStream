@@ -4,6 +4,7 @@ using EduStream.Server.Services;
 
 namespace EduStream.FileTransfer.Tests;
 
+[Collection("WDS integration")]
 public sealed class RdpSharingContractTests
 {
     private readonly Xunit.Abstractions.ITestOutputHelper _output;
@@ -134,3 +135,6 @@ public sealed class WdsTheoryAttribute : TheoryAttribute
             Skip = "실제 Windows WDS 검증은 EDUSTREAM_WDS_SMOKE=1로 별도 실행";
     }
 }
+
+[CollectionDefinition("WDS integration", DisableParallelization = true)]
+public sealed class WdsIntegrationCollection { }
