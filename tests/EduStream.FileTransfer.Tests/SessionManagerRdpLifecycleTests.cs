@@ -19,6 +19,35 @@ public sealed class SessionManagerRdpLifecycleTests
 {
     private static readonly TimeSpan DefaultWait = TimeSpan.FromSeconds(2);
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task DetachDuringCreation_ShouldRevokeOnOriginalService(bool attachReplacement)
+    {
+        await using var rig = await Rig.OpenAsync();
+        rig.AttachFakeSharing();
+        var alice = await rig.ConnectAndJoinAsync("Alice");
+        var entered = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        rig.Fake.BeforeCreate = async () => { entered.TrySetResult(true); await release.Task; };
+        var request = rig.TryRequestInvitationAsync(alice, "Alice", Guid.NewGuid());
+        var replacement = new FakeRdpSharingService();
+        try
+        {
+            await entered.Task.WaitAsync(DefaultWait);
+            await rig.SessionManager.DetachRdpSharingAsync();
+            if (attachReplacement)
+                rig.SessionManager.AttachRdpSharing(replacement, replacement.SharingId);
+        }
+        finally { release.TrySetResult(true); }
+        await request;
+        Assert.Single(rig.Fake.CreatedInvitationIds);
+        Assert.Contains(rig.Fake.CreatedInvitationIds[0], rig.Fake.RevokedInvitationIds);
+        Assert.Empty(replacement.RevokedInvitationIds);
+        Assert.Equal(0, rig.SessionManager.RdpInvitationCount);
+        Assert.Null(rig.SessionManager.TryGetPendingInvitationHandoff("Alice"));
+    }
+
     [Fact]
     public async Task RequestBeforeSharingAttached_ShouldBeRejectedWithSharingNotStarted()
     {
@@ -431,6 +460,7 @@ public sealed class SessionManagerRdpLifecycleTests
         public List<Guid> CreatedInvitationIds { get; } = new();
 
         private TimeSpan? _nextCreateDelay;
+        public Func<Task>? BeforeCreate { get; set; }
 
         /// <summary>
         /// 다음 CreateInvitationAsync 호출을 지정한 시간만큼 지연시킨다.
@@ -446,6 +476,7 @@ public sealed class SessionManagerRdpLifecycleTests
             CancellationToken cancellationToken = default)
         {
             CreateInvitationCalls++;
+            if (BeforeCreate is not null) await BeforeCreate();
             if (_nextCreateDelay is { } delay)
             {
                 _nextCreateDelay = null;
@@ -527,8 +558,6 @@ public sealed class SessionManagerRdpLifecycleTests
             var joinPacket = PacketFactory.CreateSessionJoin(
                 senderId: displayName, displayName: displayName,
                 targetAddress: "127.0.0.1", targetPort: Port);
-            await client.SendAsync(joinPacket);
-
             var ackReceived = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
             client.PacketReceived += (packetType, _) =>
             {
@@ -536,6 +565,7 @@ public sealed class SessionManagerRdpLifecycleTests
                     ackReceived.TrySetResult(true);
                 return Task.CompletedTask;
             };
+            await client.SendAsync(joinPacket);
             await ackReceived.Task.WaitAsync(DefaultWait);
 
             _clients.Add(client);
