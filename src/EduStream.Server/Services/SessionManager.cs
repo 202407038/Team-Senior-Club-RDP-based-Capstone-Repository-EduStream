@@ -24,6 +24,7 @@ public sealed class SessionManager
     private readonly ConcurrentDictionary<string, string> _clientDisplayNames = new(); // clientId → displayName
     private readonly ConcurrentDictionary<string, DateTimeOffset> _clientLastSeen = new(); // clientId → 마지막 수신 시각
     private readonly ConcurrentDictionary<string, RdpInvitationPacket> _rdpInvitations = new(); // participantId(displayName) → 발급된 초대
+    private readonly ConcurrentDictionary<Guid, IRdpSharingService> _invitationOwners = new();
     private readonly ConcurrentDictionary<string, RdpInvitationHandoff> _pendingInvitationHandoffs = new(); // participantId → 인계 대기 중인 비밀번호
     private readonly object _sessionLock = new();
     private IRdpSharingService? _rdpSharingService;
@@ -114,8 +115,11 @@ public sealed class SessionManager
         if (sharingId == Guid.Empty)
             throw new ArgumentException("공유 ID가 필요합니다.", nameof(sharingId));
 
-        _rdpSharingService = sharingService;
-        _rdpSharingId = sharingId;
+        lock (_sessionLock)
+        {
+            _rdpSharingService = sharingService;
+            _rdpSharingId = sharingId;
+        }
         _logSink.Write($"[Rdp] 공유 서비스 연결: sharingId={sharingId}");
     }
 
@@ -124,12 +128,12 @@ public sealed class SessionManager
     /// </summary>
     public async Task DetachRdpSharingAsync()
     {
-        if (_rdpSharingService is null)
-            return;
-
+        lock (_sessionLock)
+        {
+            _rdpSharingService = null;
+            _rdpSharingId = Guid.Empty;
+        }
         await RevokeAllRdpInvitationsAsync(RdpFailureReason.SessionClosed);
-        _rdpSharingService = null;
-        _rdpSharingId = Guid.Empty;
         _logSink.Write("[Rdp] 공유 서비스 연결 해제");
     }
 
@@ -159,6 +163,12 @@ public sealed class SessionManager
 
     public async Task CloseSessionAsync()
     {
+        // 종료 정리 전에 새 초대 발급을 막는다. 기존 초대는 발급한 서비스로 회수한다.
+        lock (_sessionLock)
+        {
+            _rdpSharingService = null;
+            _rdpSharingId = Guid.Empty;
+        }
         // 연결 정리 전에 클라이언트들에게 세션 종료 알림
         if (_participants.Count > 0)
         {
@@ -462,6 +472,7 @@ public sealed class SessionManager
         // 초대 생성은 await로 시간이 걸릴 수 있어(3번 구현/COM 호출), 그 사이 세션 종료나
         // 본인 이탈이 끼어들 수 있다. 생성 완료 후 이 스냅샷과 비교해 경합을 감지한다.
         var sessionAtRequest = CurrentSession;
+        if (sessionAtRequest is null) return;
 
         if (!_clientDisplayNames.TryGetValue(clientId, out var participantId))
         {
@@ -473,7 +484,7 @@ public sealed class SessionManager
 
         try
         {
-            RdpInvitationContract.ValidateRequest(request, CurrentSession.SessionId, participantId);
+            RdpInvitationContract.ValidateRequest(request, sessionAtRequest.SessionId, participantId);
         }
         catch (ArgumentException ex)
         {
@@ -484,6 +495,7 @@ public sealed class SessionManager
         }
 
         var sharingService = _rdpSharingService;
+        var sharingId = _rdpSharingId;
         if (sharingService is null)
         {
             await _tcpServer.SendToClientAsync(clientId,
@@ -502,7 +514,7 @@ public sealed class SessionManager
         try
         {
             invitation = await sharingService.CreateInvitationAsync(
-                CurrentSession.SessionId, _rdpSharingId, participantId, request.ConnectionId,
+                sessionAtRequest.SessionId, sharingId, participantId, request.ConnectionId,
                 invitationPassword, expiresAt);
         }
         catch (Exception ex)
@@ -515,26 +527,31 @@ public sealed class SessionManager
 
         // 초대 발급 중(위 await) 세션 종료·공유 해제·본인 이탈이 끼어들었는지 재확인한다.
         // 그렇지 않으면 종료 이후에 뒤늦게 도착한 초대가 아무도 정리하지 않는 채로 남는다.
-        var isStaleAfterCreation =
-            CurrentSession is null ||
-            CurrentSession.SessionId != sessionAtRequest.SessionId ||
-            !ReferenceEquals(_rdpSharingService, sharingService) ||
-            !_clientDisplayNames.TryGetValue(clientId, out var participantIdAfterCreation) ||
-            !string.Equals(participantIdAfterCreation, participantId, StringComparison.Ordinal);
+        var handoff = new RdpInvitationHandoff(
+            participantId, request.ConnectionId, invitation.InvitationId, invitationPassword, expiresAt);
+        bool isStaleAfterCreation;
+        lock (_sessionLock)
+        {
+            isStaleAfterCreation = CurrentSession?.SessionId != sessionAtRequest.SessionId ||
+                !ReferenceEquals(_rdpSharingService, sharingService) || _rdpSharingId != sharingId ||
+                !_clientDisplayNames.TryGetValue(clientId, out var name) || name != participantId;
+            if (!isStaleAfterCreation)
+            {
+                _invitationOwners[invitation.InvitationId] = sharingService;
+                _pendingInvitationHandoffs[participantId] = handoff;
+                _rdpInvitations[participantId] = invitation;
+            }
+        }
 
         if (isStaleAfterCreation)
         {
-            _rdpInvitations[participantId] = invitation;
-            await RevokeRdpInvitationAsync(participantId, RdpFailureReason.SessionClosed, notifyClientId: null);
+            // 교체된 서비스나 같은 이름의 새 참가자를 건드리지 않는다.
+            await sharingService.RevokeInvitationAsync(invitation.InvitationId);
             _logSink.Write(
                 $"[Rdp] 초대 발급-이탈/종료 경합 감지, 즉시 폐기: participant={participantId}, invitation={invitation.InvitationId}");
             return;
         }
 
-        var handoff = new RdpInvitationHandoff(
-            participantId, request.ConnectionId, invitation.InvitationId, invitationPassword, expiresAt);
-        _pendingInvitationHandoffs[participantId] = handoff;
-        _rdpInvitations[participantId] = invitation;
         RdpInvitationPasswordReady?.Invoke(handoff);
 
         // 요청한 학생에게만 개별 전송한다 — 브로드캐스트 금지.
@@ -548,17 +565,21 @@ public sealed class SessionManager
     /// </summary>
     private async Task RevokeRdpInvitationAsync(string participantId, RdpFailureReason reason, string? notifyClientId)
     {
-        if (!_rdpInvitations.TryRemove(participantId, out var invitation))
-            return;
-
-        if (_pendingInvitationHandoffs.TryRemove(participantId, out _))
+        RdpInvitationPacket invitation;
+        bool withdrawn;
+        lock (_sessionLock)
+        {
+            if (!_rdpInvitations.TryRemove(participantId, out invitation!)) return;
+            withdrawn = _pendingInvitationHandoffs.TryRemove(participantId, out _);
+        }
+        if (withdrawn)
             RdpInvitationPasswordWithdrawn?.Invoke(participantId);
 
-        if (_rdpSharingService is not null)
+        if (_invitationOwners.TryRemove(invitation.InvitationId, out var owner))
         {
             try
             {
-                await _rdpSharingService.RevokeInvitationAsync(invitation.InvitationId);
+                await owner.RevokeInvitationAsync(invitation.InvitationId);
             }
             catch (Exception ex)
             {
@@ -612,10 +633,12 @@ public sealed class SessionManager
 
     private string? RemoveParticipant(string clientId)
     {
-        if (!_clientDisplayNames.TryRemove(clientId, out var displayName))
-            return null;
-
-        _participants.TryRemove(displayName, out _);
+        string? displayName;
+        lock (_sessionLock)
+        {
+            if (!_clientDisplayNames.TryRemove(clientId, out displayName)) return null;
+            _participants.TryRemove(displayName, out _);
+        }
         UpdateParticipantCount();
         ParticipantsChanged?.Invoke();
         return displayName;
