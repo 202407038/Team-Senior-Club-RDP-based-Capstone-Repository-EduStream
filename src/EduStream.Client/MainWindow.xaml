@@ -29,7 +29,7 @@
                 <Viewbox Stretch="Uniform">
                     <Image Source="{Binding DisplaySource}" />
                 </Viewbox>
-                <wfi:WindowsFormsHost x:Name="RdpHost" />
+                <wfi:WindowsFormsHost x:Name="RdpHost" Visibility="{Binding IsRdpActive, Converter={StaticResource BoolToVis}}" />
                 <Border Background="#CC0A0A0A"
                         Visibility="{Binding HasRemoteFrame, Converter={StaticResource BoolToVis}, ConverterParameter=Invert}">
                     <StackPanel VerticalAlignment="Center"
@@ -206,6 +206,10 @@
                                 <TextBlock Margin="0,8,0,0"
                Foreground="{StaticResource BrushTextSecondary}"
                Text="{Binding RdpStatusText}" />
+                                <TextBlock Text="교수자에게 별도로 받은 초대 비밀번호" Margin="0,8,0,4" Foreground="{StaticResource BrushTextSecondary}" />
+                                <PasswordBox x:Name="RdpPassword" Padding="8" />
+                                <Button Style="{StaticResource GhostButton}" Margin="0,8,0,0"
+                                        Content="RDP 연결" Click="ConnectRdp_Click" />
                                 <Button Style="{StaticResource GhostButton}"
             Margin="0,8,0,0"
             Content="RDP 재접속"

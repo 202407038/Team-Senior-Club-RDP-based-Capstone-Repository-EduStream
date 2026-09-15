@@ -7,6 +7,7 @@ using EduStream.Core.Common;
 using EduStream.Core.Factories;
 using EduStream.Core.Logging;
 using EduStream.Core.Models;
+using EduStream.Core.Network;
 using EduStream.Core.Protocols;
 using EduStream.Core.Serialization;
 using EduStream.Core.Utils;
@@ -33,7 +34,15 @@ public sealed class ClientViewModel : ObservableObject
     private readonly FileReceiver _fileReceiver;
     private readonly TcpClientService _tcpClient;
     private readonly IPacketSerializer _serializer = new PacketSerializer();
-    private readonly RdpViewerService _rdpViewerService = new();
+    private readonly IRdpViewerService _rdpViewerService;
+    private RdpInvitationPacket? _activeRdpInvitation;
+    private Guid _rdpSessionId;
+    private string _rdpParticipant = string.Empty;
+    private bool _isRdpActive;
+    private readonly System.Windows.Threading.DispatcherTimer _freshnessTimer;
+    private bool _disposing;
+    private int _frameGeneration;
+    public bool IsRdpActive { get => _isRdpActive; private set => SetProperty(ref _isRdpActive, value); }
     private Guid _currentRdpConnectionId;
     private string _rdpStatusText = "RDP 대기 중";
 
@@ -71,8 +80,9 @@ public sealed class ClientViewModel : ObservableObject
     private bool _isStatusError;
     private string _statusMessage = string.Empty;
 
-    public ClientViewModel()
+    public ClientViewModel(IRdpViewerService? rdpViewerService = null)
     {
+        _rdpViewerService = rdpViewerService ?? new RdpViewerService();
         _sessionClient = new SessionClient(_logSink);
         _screenRenderer = new ScreenRenderer();
         _fileReceiver = new FileReceiver();
@@ -87,12 +97,12 @@ public sealed class ClientViewModel : ObservableObject
         SimulateScreenRenderCommand = new RelayCommand(() => _ = SimulateScreenRenderAsync());
         SimulateFileReceiveCommand = new RelayCommand(() => _ = SimulateFileReceiveAsync());
         ReconnectRdpCommand = new RelayCommand(() => _ = SendRdpInvitationRequestAsync());
-        var freshnessTimer = new System.Windows.Threading.DispatcherTimer
+        _freshnessTimer = new System.Windows.Threading.DispatcherTimer
         {
             Interval = TimeSpan.FromMilliseconds(500)
         };
-        freshnessTimer.Tick += (_, _) => UpdateFrameFreshness();
-        freshnessTimer.Start();
+        _freshnessTimer.Tick += (_, _) => UpdateFrameFreshness();
+        _freshnessTimer.Start();
 
         SyncLogs();
     }
@@ -112,7 +122,7 @@ public sealed class ClientViewModel : ObservableObject
 
     public void AttachRdpHost(System.Windows.Forms.Integration.WindowsFormsHost host)
     {
-        _rdpViewerService.AttachTo(host);
+        if (_rdpViewerService is RdpViewerService viewer) viewer.AttachTo(host);
     }
     public string FrameFreshness
     {
@@ -395,6 +405,8 @@ public sealed class ClientViewModel : ObservableObject
 
     private async Task DisconnectAsync()
     {
+        Interlocked.Increment(ref _frameGeneration);
+        await ResetRdpAsync();
         try
         {
             // Leave 패킷 전송
@@ -538,55 +550,64 @@ public sealed class ClientViewModel : ObservableObject
                 var rdpRevoked = JsonSerializer.Deserialize<RdpInvitationRevokedPacket>(payload);
                 if (rdpRevoked is not null)
                 {
-                    HandleRdpInvitationRevoked(rdpRevoked);
+                    await HandleRdpInvitationRevokedAsync(rdpRevoked);
                 }
                 break;
         }
     }
     private async Task SendRdpInvitationRequestAsync()
     {
-        _currentRdpConnectionId = Guid.NewGuid();
-        var requestPacket = new RdpInvitationRequestPacket
-        {
-            SessionId = _sessionClient.CurrentSession?.SessionId,
-            SenderId = DisplayName,
-            ParticipantId = DisplayName,
-            ConnectionId = _currentRdpConnectionId
-        };
-
         try
         {
+            await ResetRdpAsync();
+            if (_disposing || !IsConnected || _sessionClient.CurrentSession is null)
+                throw new InvalidOperationException("강의 세션에 먼저 참여해 주세요.");
+            _currentRdpConnectionId = Guid.NewGuid();
+            _rdpSessionId = _sessionClient.CurrentSession.SessionId;
+            _rdpParticipant = DisplayName;
+            var requestPacket = PacketFactory.CreateRdpInvitationRequest(
+                _rdpParticipant, _rdpSessionId, _rdpParticipant, _currentRdpConnectionId);
             await _tcpClient.SendAsync(requestPacket);
             _logSink.Write("[RDP] 초대 요청 전송");
         }
         catch (Exception ex)
         {
             _logSink.Write($"[RDP] 초대 요청 실패: {ex.Message}");
+            RunOnUiThread(() => RdpStatusText = $"RDP 초대 요청 실패: {ex.Message}");
         }
     }
 
     private async Task HandleRdpInvitationAsync(RdpInvitationPacket invitation)
     {
-        // 계약: 현재 연결 시도와 일치할 때만 수락
-        if (invitation.ConnectionId != _currentRdpConnectionId)
+        try
         {
-            _logSink.Write("[RDP] 일치하지 않는 초대 무시");
-            return;
+            RdpInvitationContract.Validate(invitation, _rdpSessionId, _rdpParticipant,
+                _currentRdpConnectionId, DateTimeOffset.UtcNow);
+            if (_disposing || !IsConnected) return;
+            _activeRdpInvitation = invitation;
+            RunOnUiThread(() => RdpStatusText = "초대 수신: 설정 탭에서 별도로 전달받은 비밀번호를 입력해 주세요.");
         }
-
-        // TODO(통합 대기): 비밀번호는 별도 UI 입력 경로로 받아야 함. 현재는 빈 값으로 시도.
-        await _rdpViewerService.ConnectAsync(invitation, invitationPassword: string.Empty);
+        catch (ArgumentException) { _logSink.Write("[RDP] 유효하지 않거나 이전 연결의 초대 무시"); }
+        await Task.CompletedTask;
     }
 
-    private void HandleRdpInvitationRevoked(RdpInvitationRevokedPacket revoked)
+    public async Task ConnectRdpWithPasswordAsync(string password)
     {
-        if (revoked.ConnectionId != _currentRdpConnectionId)
+        try
         {
-            _logSink.Write("[RDP] 일치하지 않는 폐기 알림 무시");
-            return;
+            var invitation = _activeRdpInvitation ?? throw new InvalidOperationException("유효한 초대를 먼저 받아 주세요.");
+            RdpInvitationContract.Validate(invitation, _rdpSessionId, _rdpParticipant,
+                _currentRdpConnectionId, DateTimeOffset.UtcNow);
+            if (!IsConnected || _disposing) throw new InvalidOperationException("강의 연결이 종료됐습니다.");
+            await _rdpViewerService.ConnectAsync(invitation, password);
         }
+        catch (Exception ex) { RunOnUiThread(() => RdpStatusText = $"RDP 연결 실패: {ex.Message}"); }
+    }
 
-        _ = _rdpViewerService.DisconnectAsync();
+    private async Task HandleRdpInvitationRevokedAsync(RdpInvitationRevokedPacket revoked)
+    {
+        if (_activeRdpInvitation is null || !RdpInvitationContract.AppliesTo(revoked, _activeRdpInvitation)) return;
+        await ResetRdpAsync();
         RunOnUiThread(() =>
         {
             RdpStatusText = $"RDP 연결 종료됨: {revoked.Reason}";
@@ -599,6 +620,9 @@ public sealed class ClientViewModel : ObservableObject
     {
         RunOnUiThread(() =>
         {
+            if (_disposing || status.ConnectionId != _currentRdpConnectionId || status.SessionId != _rdpSessionId ||
+                status.ParticipantId != _rdpParticipant) return;
+            IsRdpActive = status.State is RdpConnectionState.Connecting or RdpConnectionState.Reconnecting or RdpConnectionState.Connected;
             RdpStatusText = $"RDP: {status.State}" + (status.Failure != RdpFailureReason.None ? $" ({status.Failure})" : "");
             _logSink.Write($"[RDP] 상태 변경: {status.State}");
             SyncLogs();
@@ -697,6 +721,7 @@ public sealed class ClientViewModel : ObservableObject
 
     private async Task HandleScreenAsync(ScreenPacket packet)
     {
+        var frameGeneration = Volatile.Read(ref _frameGeneration);
         string renderStatus;
         try
         {
@@ -740,6 +765,7 @@ public sealed class ClientViewModel : ObservableObject
 
         RunOnUiThread(() =>
         {
+            if (frameGeneration != Volatile.Read(ref _frameGeneration) || _disposing) return;
             // 프레임 신선도/누락 감지는 디코딩 성공 여부와 무관하게 기록 (패킷 자체는 도착했으므로)
             _lastFrameReceivedAt = DateTimeOffset.UtcNow;
             if (_lastFrameIndex.HasValue && packet.FrameIndex > _lastFrameIndex.Value + 1)
@@ -865,8 +891,10 @@ public sealed class ClientViewModel : ObservableObject
         return $"{packet.FileName} / 청크 {packet.ChunkIndex + 1} of {packet.TotalChunks}";
     }
 
-    private Task OnDisconnectedAsync(string reason)
+    private async Task OnDisconnectedAsync(string reason)
     {
+        Interlocked.Increment(ref _frameGeneration);
+        await ResetRdpAsync();
         RunOnUiThread(() =>
         {
             if (IsConnected)
@@ -888,7 +916,25 @@ public sealed class ClientViewModel : ObservableObject
             }
         });
 
-        return Task.CompletedTask;
+    }
+
+    private async Task ResetRdpAsync()
+    {
+        _currentRdpConnectionId = Guid.Empty;
+        _activeRdpInvitation = null;
+        _rdpSessionId = Guid.Empty;
+        _rdpParticipant = string.Empty;
+        RunOnUiThread(() => { IsRdpActive = false; RdpStatusText = "RDP 대기 중"; });
+        await _rdpViewerService.DisconnectAsync();
+    }
+
+    public async Task ShutdownAsync()
+    {
+        if (_disposing) return;
+        _disposing = true;
+        _freshnessTimer.Stop();
+        await DisconnectAsync();
+        await _rdpViewerService.DisposeAsync();
     }
 
     private void ApplyJoinError(ErrorPacket error)
