@@ -34,10 +34,10 @@ class Program
                 sharingId,
                 "student1",
                 Guid.NewGuid(),
-                "password123",
+                Guid.NewGuid().ToString("N"),
                 DateTimeOffset.UtcNow.AddMinutes(5));
             Console.WriteLine($"   초대 생성 성공: InvitationId={invitation1.InvitationId}");
-            Console.WriteLine($"   ConnectionString: {invitation1.ConnectionString}");
+            Console.WriteLine("   ConnectionString: [REDACTED]");
             Console.WriteLine($"   DataLength: {invitation1.DataLength}");
             Console.WriteLine();
 
@@ -48,10 +48,10 @@ class Program
                 sharingId,
                 "student2",
                 Guid.NewGuid(),
-                "password456",
+                Guid.NewGuid().ToString("N"),
                 DateTimeOffset.UtcNow.AddMinutes(5));
             Console.WriteLine($"   초대 생성 성공: InvitationId={invitation2.InvitationId}");
-            Console.WriteLine($"   ConnectionString: {invitation2.ConnectionString}");
+            Console.WriteLine("   ConnectionString: [REDACTED]");
             Console.WriteLine($"   DataLength: {invitation2.DataLength}");
             Console.WriteLine();
 
@@ -64,9 +64,10 @@ class Program
                     sharingId,
                     "student3",
                     Guid.NewGuid(),
-                    "password789",
+                    Guid.NewGuid().ToString("N"),
                     DateTimeOffset.UtcNow.AddMinutes(5));
                 Console.WriteLine("   예외 발생하지 않음 (실패)");
+                Environment.ExitCode = 1;
             }
             catch (InvalidOperationException ex)
             {
@@ -81,16 +82,16 @@ class Program
             Console.WriteLine();
 
             // 6. 폐기 후 새로운 초대 생성
-            Console.WriteLine("6. 폐기 후 새로운 초대 생성...");
+            Console.WriteLine("6. 같은 학생 재접속용 초대 생성...");
             var invitation3 = await service.CreateInvitationAsync(
                 sessionId,
                 sharingId,
-                "student3",
+                "student1",
                 Guid.NewGuid(),
-                "password789",
+                Guid.NewGuid().ToString("N"),
                 DateTimeOffset.UtcNow.AddMinutes(5));
             Console.WriteLine($"   초대 생성 성공: InvitationId={invitation3.InvitationId}");
-            Console.WriteLine($"   ConnectionString: {invitation3.ConnectionString}");
+            Console.WriteLine("   ConnectionString: [REDACTED]");
             Console.WriteLine();
 
             // 7. 공유 중지
@@ -113,11 +114,13 @@ class Program
         }
         catch (PlatformNotSupportedException ex)
         {
+            Environment.ExitCode = 1;
             Console.WriteLine($"플랫폼 지원 오류: {ex.Message}");
             Console.WriteLine("Windows Desktop Sharing API가 설치되지 않았거나 지원되지 않는 플랫폼입니다.");
         }
         catch (Exception ex)
         {
+            Environment.ExitCode = 1;
             Console.WriteLine($"오류 발생: {ex.Message}");
             Console.WriteLine($"스택 추적: {ex.StackTrace}");
         }
@@ -129,7 +132,7 @@ class Program
         Console.WriteLine();
         Console.WriteLine("=== 데모 종료 ===");
         Console.WriteLine("아무 키나 누르면 종료합니다...");
-        Console.ReadKey();
+        if (!Console.IsInputRedirected && !args.Contains("--non-interactive")) Console.ReadKey();
     }
 }
 
