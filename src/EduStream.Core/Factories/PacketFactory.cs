@@ -176,6 +176,64 @@ public static class PacketFactory
         };
     }
 
+    public static RdpInvitationRequestPacket CreateRdpInvitationRequest(
+        string senderId,
+        Guid sessionId,
+        string participantId,
+        Guid connectionId)
+    {
+        return new RdpInvitationRequestPacket
+        {
+            SessionId = sessionId,
+            SenderId = senderId,
+            ParticipantId = participantId,
+            ConnectionId = connectionId
+        };
+    }
+
+    public static RdpInvitationPacket CreateRdpInvitation(
+        string senderId,
+        Guid sessionId,
+        string participantId,
+        Guid sharingId,
+        Guid invitationId,
+        Guid connectionId,
+        string connectionString,
+        DateTimeOffset expiresAt)
+    {
+        return new RdpInvitationPacket
+        {
+            SessionId = sessionId,
+            SenderId = senderId,
+            ParticipantId = participantId,
+            SharingId = sharingId,
+            InvitationId = invitationId,
+            ConnectionId = connectionId,
+            ConnectionString = connectionString,
+            ExpiresAt = expiresAt,
+            DataLength = GetTextPayloadLength(connectionString)
+        };
+    }
+
+    public static RdpInvitationRevokedPacket CreateRdpInvitationRevoked(
+        string senderId,
+        Guid sessionId,
+        string participantId,
+        Guid invitationId,
+        Guid connectionId,
+        RdpFailureReason reason)
+    {
+        return new RdpInvitationRevokedPacket
+        {
+            SessionId = sessionId,
+            SenderId = senderId,
+            ParticipantId = participantId,
+            InvitationId = invitationId,
+            ConnectionId = connectionId,
+            Reason = reason
+        };
+    }
+
     private static int GetTextPayloadLength(string message)
     {
         return Encoding.UTF8.GetByteCount(message);
