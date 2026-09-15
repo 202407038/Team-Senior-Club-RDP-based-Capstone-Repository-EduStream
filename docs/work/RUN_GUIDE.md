@@ -4,7 +4,7 @@
 
 ## 더 간단한 실행: 바탕화면 아이콘
 
-준비된 PC는 **EduStream 교수자 / EduStream 학생** 바로가기를 더블클릭하면 됩니다. 최초 준비 또는 코드 갱신 때는 저장소 루트의 `Setup-EduStream.cmd`를 한 번 실행합니다. [더블클릭 실행 안내](./DESKTOP_LAUNCH.md)에 게시 폴더·다른 PC 전달·갱신 방법을 정리했습니다. 아래 SDK/빌드 절차는 소스에서 실행본을 만드는 경우에 해당합니다.
+GitHub 메인 README의 **설치 파일 다운로드**에서 `EduStream-Setup.exe`를 받아 설치하면 바탕화면/시작 메뉴의 **EduStream 교수자 / EduStream 학생**으로 실행할 수 있습니다. [설치·실행 안내](./DESKTOP_LAUNCH.md)를 따르세요. 일반 사용자는 아래 SDK/빌드 명령을 수행하지 않습니다. 아래 1~2절과 `dotnet run` 명령은 개발자가 소스에서 실행하는 경우에만 해당합니다.
 
 ## 1. 준비와 설치
 

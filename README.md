@@ -1,5 +1,19 @@
 # EduStream
 
+## 설치해서 사용하기
+
+### [Windows 설치 파일 다운로드 · EduStream-Setup.exe](https://github.com/202407038/Team-Senior-Club-RDP-based-Capstone-Repository-EduStream/releases/download/v0.1.0-preview.1/EduStream-Setup.exe)
+
+**다운로드 → 설치 파일 더블클릭 → 학생용/교수자용 선택 → 설치 → 바탕화면 아이콘 실행**
+
+일반 사용자는 PowerShell, 빌드 명령, 별도 .NET 설치가 필요하지 않습니다. [설치·실행 안내](docs/work/DESKTOP_LAUNCH.md)를 확인하세요.
+
+현재 배포는 **Windows x64 시험판**입니다. 코드 서명은 미적용이며 다중 PC RDP 실사용 인수는 진행 중입니다. [배포 정보](https://github.com/202407038/Team-Senior-Club-RDP-based-Capstone-Repository-EduStream/releases/tag/v0.1.0-preview.1)
+
+`Code → Download ZIP`은 개발용 소스입니다. ZIP을 받은 경우 루트의 `Download-EduStream.url`에서도 설치 파일을 받을 수 있습니다.
+
+---
+
 EduStream은 교수자 화면 공유, 파일 전송, 텍스트 채팅을 하나의 흐름으로 제공하는 WPF 기반 데스크톱 강의 보조 시스템입니다.
 
 현재 저장소는 졸작 중간발표 PPT의 로드맵을 기준으로 기능 구현과 시연 준비를 진행합니다.

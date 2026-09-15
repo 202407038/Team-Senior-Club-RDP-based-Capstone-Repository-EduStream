@@ -1,58 +1,65 @@
-# 더블클릭 실행
+# EduStream 설치와 실행
 
-## 평소 실행
+## 처음 사용하는 사람
 
-바탕화면의 **EduStream 교수자**, **EduStream 학생** 바로가기를 더블클릭합니다. 터미널과 매번 빌드는 필요 없습니다.
+**[Windows x64 설치 파일 다운로드](https://github.com/202407038/Team-Senior-Club-RDP-based-Capstone-Repository-EduStream/releases/download/v0.1.0-preview.1/EduStream-Setup.exe)**
 
-- 교수자: 세션 열기 → WDS 공유 시작.
-- 학생: 설정 → 이름/호스트/포트 → 세션 참여 → 초대 비밀번호 입력 → RDP 연결.
-- 실제 사용 순서는 [실행 가이드](./RUN_GUIDE.md)를 따릅니다. 바로가기는 앱을 열 뿐 세션/화면 공유를 자동 시작하지 않습니다.
+1. GitHub 메인 README 맨 위의 설치 파일 다운로드를 누릅니다.
+2. 받은 `EduStream-Setup.exe`를 더블클릭합니다.
+3. 안내 확인 → **학생용 / 교수자용 / 교수자용 + 학생용** 중 사용할 역할 선택.
+4. **바탕화면에 실행 아이콘 만들기**를 선택한 채 설치 → 완료.
+5. 바탕화면 또는 시작 메뉴에서 **EduStream 학생 / EduStream 교수자**를 더블클릭합니다.
 
-## 최초 준비 또는 코드 변경 후 갱신
+PowerShell, Git 설치, 소스 폴더 탐색, 빌드 명령, 별도 .NET 설치는 필요하지 않습니다. Windows x64 실행 환경을 설치 파일에 포함했습니다. 관리자 권한을 요구하지 않고 현재 사용자에게 설치합니다.
 
-소스 작업본을 실행본으로 만드는 PC에는 .NET SDK가 필요합니다.
+GitHub의 **Code → Download ZIP은 개발용 소스**입니다. 이미 ZIP을 받았다면 압축 푼 폴더 최상단의 `Download-EduStream.url`을 더블클릭해 설치 파일을 받으면 됩니다. 소스 ZIP 자체를 앱으로 설치하거나 실행할 필요는 없습니다.
 
-1. 원하는 최신 코드의 저장소 폴더를 엽니다.
-2. 저장소 루트의 **Setup-EduStream.cmd**를 더블클릭합니다.
-3. 두 앱 게시가 끝나고 Ready 안내가 나오면 아무 키나 눌러 준비 창을 닫습니다.
-4. 이후에는 바탕화면 바로가기를 사용합니다.
+## 설치 후
 
-최초 준비/갱신 때만 명령 창과 빌드가 실행됩니다. 이미 실행 중인 앱은 자동 종료하지 않습니다. 준비 후 이전 앱 창을 닫고 바로가기로 다시 열면 새 버전이 실행됩니다.
+- 교수자: **세션 열기 → WDS 공유 시작**.
+- 학생: **설정 → 표시 이름/교수자 호스트/포트 → 세션 참여 → 별도로 받은 초대 비밀번호 입력 → RDP 연결**.
+- 앱을 실행하는 것만으로 세션과 화면 공유를 자동 시작하지 않습니다.
+- 같은 PC가 아니면 학생 호스트에 `127.0.0.1`이 아닌 교수자 PC의 주소를 입력합니다.
+- 초대 비밀번호는 Windows 계정 비밀번호가 아니며 공용 채팅에 보내지 않습니다.
 
-게시 폴더는 `%LOCALAPPDATA%\EduStream\<생성 시각-식별자>\`입니다. 소스 폴더와 분리되므로 저장소를 이동해도 기존 바로가기는 유지됩니다.
+상세 접속/파일/채팅/종료는 [실행 가이드](./RUN_GUIDE.md)를 참조합니다.
 
-- Server 폴더: EduStream.Server.exe.
-- Client 폴더: EduStream.Client.exe.
-- 두 폴더에는 .NET 실행 환경이 포함됩니다. 이 게시본의 실행 PC에 빌드용 SDK나 별도 .NET 런타임을 설치할 필요는 없습니다.
-- Windows WDS/COM 지원은 별도 OS 조건입니다. 실행 환경 포함이 WDS 자체 설치/지원 보장을 뜻하지 않습니다.
-- 다른 Windows x64 PC로 옮길 때는 필요한 **Server 또는 Client 폴더 전체**를 복사합니다. exe만 복사하지 않습니다. 복사한 폴더 안의 exe를 더블클릭하면 됩니다.
-- 다른 PC에 기존 .lnk만 복사하면 원래 PC 경로를 참조하므로 작동하지 않습니다. 옮긴 exe의 바로가기를 새로 만듭니다.
+## 갱신과 제거
 
-## 기존 파일 보존
+- 새 버전은 GitHub에서 새 설치 파일을 받아 기존 설치 위치에 다시 설치합니다. 자동 업데이트 기능은 아직 없습니다.
+- 실행 중인 강의는 먼저 정상 종료한 뒤 업데이트합니다.
+- 설치 역할을 줄이거나 완전히 바꾸려면 기존 EduStream을 제거한 뒤 원하는 역할로 다시 설치합니다.
+- 제거: **Windows 설정 → 앱 → 설치된 앱 → EduStream → 제거**.
+- 앱과 설치 프로그램이 만든 바로가기는 제거되지만, 수신한 강의 파일은 제거하지 않습니다.
+- 기본 설치 위치는 `%LOCALAPPDATA%\Programs\EduStream`이며, 사용자가 이 경로를 직접 찾아갈 필요는 없습니다.
+- 이전 수동 생성 바로가기/실행본은 정식 설치 관리 대상이 아닙니다.
 
-- 새 버전은 새 폴더에 생성하며 기존 실행본을 지우거나 덮어쓰지 않습니다.
-- 두 앱 게시와 필수 파일 검사가 성공한 뒤에만 이 스크립트가 만든 바로가기를 갱신합니다.
-- 같은 이름의 사용자 바로가기가 있으면 덮어쓰지 않고 중단합니다. 사용자 바로가기의 이름을 바꾼 뒤 다시 준비합니다.
-- 게시 중 실패하면 생성 중이던 폴더는 진단용으로 남습니다. 기존 바로가기를 계속 사용할 수 있습니다.
-- 실행본은 자동으로 Git 최신 코드를 반영하지 않습니다. 코드 변경 후 준비 파일을 다시 실행해야 합니다.
-- 게시 파일·바로가기는 로컬 산출물이며 Git 커밋에 포함하지 않습니다.
+## 현재 배포 범위와 주의
 
-## 개발자 명령과 검사
+- `0.1.0-preview.1`은 시험 배포판입니다. 실제 다중 PC RDP 품질/지연·15분 실사용·전체 시연 인수는 진행 중입니다.
+- Windows WDS/COM 지원은 별도 OS 조건입니다. .NET 포함 설치가 WDS 지원까지 보장하지 않습니다.
+- 현재 설치 파일에 EduStream 코드 서명 인증서는 적용하지 않았습니다. Windows가 게시자를 확인할 수 없다고 알리거나 보안 정책으로 차단할 수 있습니다.
+- 공식 저장소 Releases의 파일/해시를 확인하고 조직 정책으로 차단되면 관리자에게 문의합니다. 백신/방화벽 전체 해제나 조직 정책 우회를 안내하지 않습니다.
 
-```powershell
-./scripts/Publish-EduStreamDesktop.ps1 -CreateDesktopShortcuts
-```
+## 개발자 전용: 설치 파일 만들기
 
-바로가기 없이 다른 위치에 게시하려면 **아직 없는 새 폴더**를 지정합니다.
-
-```powershell
-./scripts/Publish-EduStreamDesktop.ps1 -OutputDirectory 'C:\EduStreamPackage-New'
-```
-
-출력 경로를 사용해 패키지/바로가기와 GUI 시작을 검사합니다.
+배포받는 사용자가 수행하는 절차가 아닙니다. 빌드 PC에 .NET SDK와 [Inno Setup 6](https://jrsoftware.org/isdl.php)을 준비합니다.
 
 ```powershell
-./scripts/Test-EduStreamDesktop.ps1 -PackageDirectory '실제 게시 폴더' -ShortcutDirectory ([Environment]::GetFolderPath('Desktop')) -LaunchSmokeTest
+./scripts/Build-EduStreamInstaller.ps1 -Version '0.1.0-preview.1'
 ```
 
-GUI 시작 검사는 테스트가 만든 앱을 숨김으로 실행해 메시지 루프 시작을 확인하고 해당 프로세스만 종료합니다. 실제 화면 공유나 네트워크 연결 검증을 대체하지 않습니다.
+- Server/Client를 Windows x64 self-contained로 게시합니다. 현재 포함 런타임은 .NET 8.0.31로 고정합니다.
+- 기존 출력 폴더가 있으면 덮어쓰지 않고 중단합니다. 재생성은 새 OutputDirectory를 지정합니다.
+- 결과: `artifacts/installer/<버전>/EduStream-Setup.exe`. 이 **한 파일**을 Releases에 올립니다.
+- `payload/`는 빌드 중간 산출물입니다. 사용자에게 소스 또는 payload 탐색을 요구하지 않습니다.
+- `Publish-EduStreamDesktop.ps1`은 개발자 게시 보조 도구이고 사용자 설치 파일이 아닙니다.
+- 배포 전 새 .NET 보안 패치와 Inno Setup 버전/서명을 확인합니다. Inno Setup의 상용 사용 조건은 공식 라이선스를 확인합니다.
+
+격리된 Windows 계정에서 설치/재설치/제거를 검증합니다. 이미 EduStream이 설치돼 있으면 테스트가 중단되며 기존 설치를 덮어쓰지 않습니다.
+
+```powershell
+./scripts/Test-EduStreamInstaller.ps1 -InstallerPath '실제 EduStream-Setup.exe 경로'
+```
+
+테스트는 학생용/교수자용/둘 다 설치, 역할별 파일, .NET 포함, 시작 메뉴 바로가기, GUI 시작, 재설치 및 제거를 검증합니다. 기존 바탕화면 아이콘은 변경하지 않습니다. 실제 RDP 시연을 대신하지 않습니다.
