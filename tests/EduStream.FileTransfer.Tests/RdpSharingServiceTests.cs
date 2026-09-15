@@ -4,10 +4,12 @@ using EduStream.Server.Services;
 
 namespace EduStream.FileTransfer.Tests;
 
-public class RdpSharingServiceTests
+public class RdpSharingServiceTests : IAsyncLifetime
 {
     private readonly InMemoryLogSink _logSink;
     private readonly RdpSharingService _service;
+    public Task InitializeAsync() => Task.CompletedTask;
+    public Task DisposeAsync() => _service.DisposeAsync().AsTask();
 
     public RdpSharingServiceTests()
     {
