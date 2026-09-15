@@ -1,6 +1,14 @@
 # EduStream
 
-## 설치해서 사용하기
+## ZIP을 풀고 바로 실행하기
+
+### [실행용 ZIP 다운로드 · EduStream-Portable-win-x64.zip](https://github.com/202407038/Team-Senior-Club-RDP-based-Capstone-Repository-EduStream/releases/download/v0.1.0-preview.1/EduStream-Portable-win-x64.zip)
+
+**다운로드 → 모두 압축 풀기 → EduStream 폴더 → `EduStream 교수자.exe` 또는 `EduStream 학생.exe` 더블클릭**
+
+설치나 명령어 입력 없이 실행할 수 있으며 .NET 실행 환경이 포함되어 있습니다. ZIP 안에서 바로 실행하지 말고 전체 압축을 풀어주세요. EXE 옆의 DLL과 하위 폴더도 필요하므로, 이동할 때는 폴더 전체를 옮깁니다. [실행 안내](docs/work/DESKTOP_LAUNCH.md)
+
+## 설치형을 원하는 경우
 
 ### [Windows 설치 파일 다운로드 · EduStream-Setup.exe](https://github.com/202407038/Team-Senior-Club-RDP-based-Capstone-Repository-EduStream/releases/download/v0.1.0-preview.1/EduStream-Setup.exe)
 
@@ -10,7 +18,7 @@
 
 현재 배포는 **Windows x64 시험판**입니다. 코드 서명은 미적용이며 다중 PC RDP 실사용 인수는 진행 중입니다. [배포 정보](https://github.com/202407038/Team-Senior-Club-RDP-based-Capstone-Repository-EduStream/releases/tag/v0.1.0-preview.1)
 
-`Code → Download ZIP`은 개발용 소스입니다. ZIP을 받은 경우 루트의 `Download-EduStream.url`에서도 설치 파일을 받을 수 있습니다.
+**위 실행용 ZIP과 `Code → Download ZIP`은 다릅니다.** `Code → Download ZIP`은 개발용 소스입니다. 소스 ZIP을 받은 경우 루트의 `Download-EduStream.url`에서도 실행용 ZIP을 받을 수 있습니다.
 
 ---
 
