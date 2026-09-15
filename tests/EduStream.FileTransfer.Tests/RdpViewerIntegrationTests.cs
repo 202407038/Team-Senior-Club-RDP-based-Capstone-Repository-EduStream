@@ -101,7 +101,7 @@ public sealed class RdpViewerIntegrationTests
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
 
-    private sealed class ViewerRig : IAsyncDisposable
+    internal sealed class ViewerRig : IAsyncDisposable
     {
         public RdpViewerService Viewer { get; } = new();
         public TaskCompletionSource<bool> Connected = new(TaskCreationOptions.RunContinuationsAsynchronously);
