@@ -19,6 +19,7 @@ public sealed class TcpClientService : IDisposable
     private readonly ILogSink _logSink;
     private readonly IPacketSerializer _serializer;
     private readonly SemaphoreSlim _sendLock = new(1, 1);
+    private int _disposed;
 
     private TcpClient? _tcpClient;
     private NetworkStream? _stream;
@@ -48,6 +49,7 @@ public sealed class TcpClientService : IDisposable
     /// </summary>
     public async Task ConnectAsync(string host, int port)
     {
+        ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
         _cts = new CancellationTokenSource();
         _tcpClient = new TcpClient();
 
@@ -64,6 +66,7 @@ public sealed class TcpClientService : IDisposable
     /// </summary>
     public async Task DisconnectAsync()
     {
+        if (Volatile.Read(ref _disposed) != 0) return;
         _cts?.Cancel();
 
         _stream?.Dispose();
@@ -81,7 +84,9 @@ public sealed class TcpClientService : IDisposable
     /// </summary>
     public async Task SendAsync(BasePacket packet)
     {
-        if (_stream is null)
+        ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
+        var stream = _stream;
+        if (stream is null)
         {
             throw new InvalidOperationException("서버에 연결되어 있지 않습니다.");
         }
@@ -92,8 +97,11 @@ public sealed class TcpClientService : IDisposable
         await _sendLock.WaitAsync();
         try
         {
-            await _stream.WriteAsync(frame);
-            await _stream.FlushAsync();
+            ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
+            if (!ReferenceEquals(stream, _stream))
+                throw new InvalidOperationException("송신 대기 중 연결이 변경되었습니다.");
+            await stream.WriteAsync(frame);
+            await stream.FlushAsync();
         }
         finally
         {
@@ -191,9 +199,11 @@ public sealed class TcpClientService : IDisposable
 
     public void Dispose()
     {
+        if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
         _cts?.Cancel();
         _cts?.Dispose();
-        _sendLock.Dispose();
+        // 소켓 종료 후에도 대기 송신자의 finally/Release가 실행되어야 한다.
+        // WaitHandle을 생성하지 않는 관리 잠금은 활성 작업과 함께 GC에 맡긴다.
         _stream?.Dispose();
         _tcpClient?.Dispose();
     }

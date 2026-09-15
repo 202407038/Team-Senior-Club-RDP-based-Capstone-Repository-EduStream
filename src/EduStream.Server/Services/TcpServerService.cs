@@ -244,6 +244,7 @@ public sealed class TcpServerService
     {
         private readonly TcpClient _tcpClient;
         private readonly SemaphoreSlim _sendLock = new(1, 1);
+        private int _disposed;
 
         public ClientConnection(TcpClient tcpClient)
         {
@@ -257,6 +258,7 @@ public sealed class TcpServerService
             await _sendLock.WaitAsync();
             try
             {
+                ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
                 var stream = _tcpClient.GetStream();
                 await stream.WriteAsync(frame);
                 await stream.FlushAsync();
@@ -269,7 +271,10 @@ public sealed class TcpServerService
 
         public void Dispose()
         {
-            _sendLock.Dispose();
+            if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
+            // 소켓 종료로 진행 중 송신을 해제한다. 대기자/송신자의 finally가 남은 동안
+            // SemaphoreSlim을 Dispose하면 Release 실패와 영구 대기가 발생한다.
+            // WaitHandle을 만들지 않는 관리 객체이므로 연결과 함께 GC에 맡긴다.
             _tcpClient.Dispose();
         }
     }
