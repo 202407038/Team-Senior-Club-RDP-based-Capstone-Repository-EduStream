@@ -825,7 +825,7 @@ public sealed class ClientViewModel : ObservableObject
                         LastServerMessage = "파일을 수신 중입니다.";
 
                         // 진행 중 status 반영
-                        UpdateStatus($"파일 수신 중: {result.ProgressPercent}% ({packet.FileName})", StatusPriority.Progress);
+                        UpdateStatus($"파일 수신 중: {result.ProgressPercent}% ({packet.FileName})", StatusPriority.Progress, source: "file");
 
                         _logSink.Write($"파일 청크 수신 중: transfer={packet.TransferId}, progress={result.ReceivedChunkCount}/{result.TotalChunks}");
                         SyncLogs();
@@ -857,7 +857,7 @@ public sealed class ClientViewModel : ObservableObject
                 FileTransferDetail = $"{BuildFileTransferDetail(packet, result)} / 저장 위치 {path}";
 
                 // 수신 완료 메시지 확정
-                UpdateStatus($"파일 수신 완료: {Path.GetFileName(path)} (100%)", StatusPriority.Success);
+                UpdateStatus($"파일 수신 완료: {Path.GetFileName(path)} (100%)", StatusPriority.Success, source: "file");
 
                 _logSink.Write($"파일 저장 완료: {path}");
                 SyncLogs();
@@ -873,7 +873,7 @@ public sealed class ClientViewModel : ObservableObject
                 FileTransferDetail = $"{packet.FileName} 저장 실패";
                 LastErrorMessage = $"FILE_RECEIVE_FAILED: {ex.Message}";
 
-                UpdateStatus($"파일 저장 실패: {ex.Message}", StatusPriority.Error, isError: true);
+                UpdateStatus($"파일 저장 실패: {ex.Message}", StatusPriority.Error, isError: true, source: "file");
 
                 _logSink.Write($"파일 저장 실패: {ex.Message}");
                 SyncLogs();
@@ -976,22 +976,26 @@ public sealed class ClientViewModel : ObservableObject
     }
 
     private StatusPriority _currentStatusPriority = StatusPriority.Idle;
+    private string? _statusSource;
 
     /// <summary>
     /// 우선순위에 따라 시스템 상태 메시지를 안전하게 갱신합니다.
     /// </summary>
-    private void UpdateStatus(string message, StatusPriority priority, bool isError = false)
+    private void UpdateStatus(string message, StatusPriority priority, bool isError = false, string? source = null)
     {
         RunOnUiThread(() =>
         {
             // 현재 표기 중인 상태보다 낮거나 같은 우선순위의 단순 정보는 덮어쓰지 않음
             // (단, 같은 우선순위의 Error나 Progress, Success는 최신 내용으로 갱신)
-            if (priority < _currentStatusPriority)
+            // 같은 파일 흐름의 진행→완료, 실패→재시도 전이는 우선순위 하락이어도 반영한다.
+            // 연결 끊김 등 다른 기능의 높은 우선순위 오류는 파일 완료로 덮지 않는다.
+            if (priority < _currentStatusPriority && !(source is not null && source == _statusSource))
             {
                 return;
             }
 
             _currentStatusPriority = priority;
+            _statusSource = source;
             IsStatusError = isError;
             StatusMessage = message;
         });
