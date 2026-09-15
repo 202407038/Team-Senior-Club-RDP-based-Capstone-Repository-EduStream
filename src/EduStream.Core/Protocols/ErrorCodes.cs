@@ -37,4 +37,6 @@ public static class ErrorCodes
     public const string NotParticipant = "NOT_PARTICIPANT";
     public const string EmptyMessage = "EMPTY_MESSAGE";
     public const string MessageTooLong = "MESSAGE_TOO_LONG";
+    public const string RdpSharingNotStarted = "RDP_SHARING_NOT_STARTED";
+    public const string RdpInvitationFailed = "RDP_INVITATION_FAILED";
 }
