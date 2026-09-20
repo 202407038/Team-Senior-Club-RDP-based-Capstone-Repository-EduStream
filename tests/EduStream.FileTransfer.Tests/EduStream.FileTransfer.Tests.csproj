@@ -24,6 +24,7 @@
     <ProjectReference Include="..\..\src\EduStream.Core\EduStream.Core.csproj" />
     <ProjectReference Include="..\..\src\EduStream.Client\EduStream.Client.csproj" />
     <ProjectReference Include="..\..\src\EduStream.Server\EduStream.Server.csproj" />
+    <ProjectReference Include="..\..\tools\EduStream.ContractTestDoubles\EduStream.ContractTestDoubles.csproj" />
   </ItemGroup>
 
 </Project>
