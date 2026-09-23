@@ -48,6 +48,41 @@ public interface IRemoteControlManager
     /// <param name="participantId">참가자 ID</param>
     /// <returns>제어 권한 상태</returns>
     Task<ControlPermission> GetParticipantPermissionAsync(string participantId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// 마우스 이동 입력 처리
+    /// </summary>
+    /// <param name="participantId">참가자 ID</param>
+    /// <param name="x">X 좌표</param>
+    /// <param name="y">Y 좌표</param>
+    /// <returns>입력 처리 여부 (true=처리됨, false=차단됨)</returns>
+    bool ProcessMouseMove(string participantId, int x, int y);
+
+    /// <summary>
+    /// 마우스 클릭 입력 처리
+    /// </summary>
+    /// <param name="participantId">참가자 ID</param>
+    /// <param name="button">마우스 버튼</param>
+    /// <param name="isPressed">눌림 여부</param>
+    /// <returns>입력 처리 여부 (true=처리됨, false=차단됨)</returns>
+    bool ProcessMouseClick(string participantId, MouseButton button, bool isPressed);
+
+    /// <summary>
+    /// 마우스 휠 입력 처리
+    /// </summary>
+    /// <param name="participantId">참가자 ID</param>
+    /// <param name="delta">휠 델타</param>
+    /// <returns>입력 처리 여부 (true=처리됨, false=차단됨)</returns>
+    bool ProcessMouseWheel(string participantId, int delta);
+
+    /// <summary>
+    /// 키보드 입력 처리
+    /// </summary>
+    /// <param name="participantId">참가자 ID</param>
+    /// <param name="keyCode">키 코드</param>
+    /// <param name="isPressed">눌림 여부</param>
+    /// <returns>입력 처리 여부 (true=처리됨, false=차단됨)</returns>
+    bool ProcessKeyboardInput(string participantId, int keyCode, bool isPressed);
 }
 
 /// <summary>
@@ -85,4 +120,35 @@ public sealed class ControlPermission
     public ControlLevel Level { get; set; }
     public bool HasControl { get; set; }
     public DateTimeOffset GrantedAt { get; init; }
+}
+
+/// <summary>
+/// 마우스 버튼
+/// </summary>
+public enum MouseButton
+{
+    /// <summary>
+    /// 왼쪽 버튼
+    /// </summary>
+    Left,
+
+    /// <summary>
+    /// 오른쪽 버튼
+    /// </summary>
+    Right,
+
+    /// <summary>
+    /// 가운데 버튼
+    /// </summary>
+    Middle,
+
+    /// <summary>
+    /// X1 버튼
+    /// </summary>
+    XButton1,
+
+    /// <summary>
+    /// X2 버튼
+    /// </summary>
+    XButton2
 }

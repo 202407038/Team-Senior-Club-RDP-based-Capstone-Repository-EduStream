@@ -65,6 +65,35 @@ public interface IAnnotationManager
     /// 판서 레이어 표시 상태
     /// </summary>
     bool IsLayerVisible { get; }
+
+    /// <summary>
+    /// 스트로크 렌더링 이벤트 (공유 화면에 표시될 때)
+    /// </summary>
+    event EventHandler<StrokeRenderedEventArgs>? OnStrokeRendered;
+
+    /// <summary>
+    /// 스트로크 디스패치 이벤트 (학생에게 전달될 때)
+    /// </summary>
+    event EventHandler<StrokeDispatchedEventArgs>? OnStrokeDispatched;
+}
+
+/// <summary>
+/// 스트로크 렌더링 이벤트 인자
+/// </summary>
+public sealed class StrokeRenderedEventArgs : EventArgs
+{
+    public AnnotationStroke Stroke { get; init; } = null!;
+    public DateTimeOffset RenderedAt { get; init; } = DateTimeOffset.UtcNow;
+}
+
+/// <summary>
+/// 스트로크 디스패치 이벤트 인자
+/// </summary>
+public sealed class StrokeDispatchedEventArgs : EventArgs
+{
+    public AnnotationStroke Stroke { get; init; } = null!;
+    public string TargetParticipantId { get; init; } = string.Empty;
+    public DateTimeOffset DispatchedAt { get; init; } = DateTimeOffset.UtcNow;
 }
 
 /// <summary>

@@ -40,6 +40,32 @@ public interface IReverseSessionManager
         CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// 교수자 연결 요청 처리 (Connecting 상태로 전이)
+    /// </summary>
+    Task ConnectAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// 연결 성공 처리 (Connected 상태로 전이)
+    /// </summary>
+    Task OnConnectedAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// 연결 실패 처리 (Failed 상태로 전이)
+    /// </summary>
+    Task OnConnectionFailedAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// 연결 종료 처리 (Disconnected 상태로 전이)
+    /// </summary>
+    Task OnDisconnectedAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// 프레임 수신 처리
+    /// </summary>
+    /// <param name="frameData">프레임 데이터</param>
+    void ReceiveFrame(byte[] frameData);
+
+    /// <summary>
     /// 역방향 공유 세션 중지
     /// </summary>
     /// <param name="cancellationToken">취소 토큰</param>
@@ -49,6 +75,25 @@ public interface IReverseSessionManager
     /// 역방향 공유 활성 상태 확인
     /// </summary>
     bool IsReverseSharingActive { get; }
+
+    /// <summary>
+    /// 현재 세션 상태
+    /// </summary>
+    ReverseSessionState CurrentState { get; }
+
+    /// <summary>
+    /// 프레임 수신 이벤트
+    /// </summary>
+    event EventHandler<FrameReceivedEventArgs>? FrameReceived;
+}
+
+/// <summary>
+/// 프레임 수신 이벤트 인자
+/// </summary>
+public sealed class FrameReceivedEventArgs : EventArgs
+{
+    public byte[] FrameData { get; init; } = Array.Empty<byte>();
+    public DateTimeOffset Timestamp { get; init; } = DateTimeOffset.UtcNow;
 }
 
 /// <summary>
@@ -81,9 +126,24 @@ public enum ReverseSessionState
     Hosting,
 
     /// <summary>
+    /// 연결 중
+    /// </summary>
+    Connecting,
+
+    /// <summary>
     /// 연결됨 (교수자가 수신 중)
     /// </summary>
     Connected,
+
+    /// <summary>
+    /// 연결 종료됨
+    /// </summary>
+    Disconnected,
+
+    /// <summary>
+    /// 연결 실패
+    /// </summary>
+    Failed,
 
     /// <summary>
     /// 제어 권한 부여됨

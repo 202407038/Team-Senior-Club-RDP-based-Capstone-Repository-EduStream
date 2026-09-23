@@ -83,4 +83,47 @@ public sealed class RemoteControlManager : IRemoteControlManager
             GrantedAt = DateTimeOffset.MinValue
         });
     }
+
+    public bool ProcessMouseMove(string participantId, int x, int y)
+    {
+        return CanProcessInput(participantId, allowMouse: true);
+    }
+
+    public bool ProcessMouseClick(string participantId, MouseButton button, bool isPressed)
+    {
+        return CanProcessInput(participantId, allowMouse: true);
+    }
+
+    public bool ProcessMouseWheel(string participantId, int delta)
+    {
+        return CanProcessInput(participantId, allowMouse: true);
+    }
+
+    public bool ProcessKeyboardInput(string participantId, int keyCode, bool isPressed)
+    {
+        return CanProcessInput(participantId, allowKeyboard: true);
+    }
+
+    private bool CanProcessInput(string participantId, bool allowMouse = false, bool allowKeyboard = false)
+    {
+        // 제어 레벨이 ViewOnly이면 모든 입력 차단
+        if (_currentLevel == ControlLevel.ViewOnly)
+            return false;
+
+        // 참가자 권한 확인
+        if (!_permissions.TryGetValue(participantId, out var permission))
+            return false;
+
+        if (!permission.HasControl)
+            return false;
+
+        // 제어 레벨에 따른 입력 필터링
+        if (allowMouse && _currentLevel == ControlLevel.KeyboardOnly)
+            return false;
+
+        if (allowKeyboard && _currentLevel == ControlLevel.ViewOnly)
+            return false;
+
+        return true;
+    }
 }

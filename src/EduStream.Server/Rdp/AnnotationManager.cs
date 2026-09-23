@@ -20,6 +20,8 @@ public sealed class AnnotationManager : IAnnotationManager
     private bool _isLayerVisible = true;
 
     public bool IsLayerVisible => _isLayerVisible;
+    public event EventHandler<StrokeRenderedEventArgs>? OnStrokeRendered;
+    public event EventHandler<StrokeDispatchedEventArgs>? OnStrokeDispatched;
 
     public Task AddStrokeAsync(AnnotationStroke stroke, CancellationToken cancellationToken = default)
     {
@@ -30,6 +32,21 @@ public sealed class AnnotationManager : IAnnotationManager
             _participantStrokeMap[stroke.ParticipantId] = new List<Guid>();
         }
         _participantStrokeMap[stroke.ParticipantId].Add(stroke.StrokeId);
+
+        // 렌더링 이벤트 디스패치
+        OnStrokeRendered?.Invoke(this, new StrokeRenderedEventArgs
+        {
+            Stroke = stroke,
+            RenderedAt = DateTimeOffset.UtcNow
+        });
+
+        // 디스패치 이벤트 (모든 참가자에게 전달)
+        OnStrokeDispatched?.Invoke(this, new StrokeDispatchedEventArgs
+        {
+            Stroke = stroke,
+            TargetParticipantId = string.Empty, // 빈 문자열 = 브로드캐스트
+            DispatchedAt = DateTimeOffset.UtcNow
+        });
 
         return Task.CompletedTask;
     }

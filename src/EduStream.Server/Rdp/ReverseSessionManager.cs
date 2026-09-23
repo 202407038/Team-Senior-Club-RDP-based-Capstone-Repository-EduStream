@@ -17,6 +17,8 @@ public sealed class ReverseSessionManager : IReverseSessionManager
     private ReverseSessionState _state = ReverseSessionState.Inactive;
 
     public bool IsReverseSharingActive => _state != ReverseSessionState.Inactive;
+    public ReverseSessionState CurrentState => _state;
+    public event EventHandler<FrameReceivedEventArgs>? FrameReceived;
 
     public Task<Guid> StartReverseSharingAsync(Guid sessionId, string studentId, CancellationToken cancellationToken = default)
     {
@@ -60,9 +62,51 @@ public sealed class ReverseSessionManager : IReverseSessionManager
         };
 
         _invitations[invitationId] = invitation;
-        _state = ReverseSessionState.Connected;
+        _state = ReverseSessionState.Hosting;
 
         return Task.FromResult(invitation);
+    }
+
+    public Task ConnectAsync(CancellationToken cancellationToken = default)
+    {
+        if (_state != ReverseSessionState.Hosting)
+            throw new InvalidOperationException("호스팅 상태에서만 연결할 수 있습니다.");
+
+        _state = ReverseSessionState.Connecting;
+        return Task.CompletedTask;
+    }
+
+    public Task OnConnectedAsync(CancellationToken cancellationToken = default)
+    {
+        if (_state != ReverseSessionState.Connecting)
+            throw new InvalidOperationException("연결 중 상태에서만 연결 성공 처리할 수 있습니다.");
+
+        _state = ReverseSessionState.Connected;
+        return Task.CompletedTask;
+    }
+
+    public Task OnConnectionFailedAsync(CancellationToken cancellationToken = default)
+    {
+        _state = ReverseSessionState.Failed;
+        return Task.CompletedTask;
+    }
+
+    public Task OnDisconnectedAsync(CancellationToken cancellationToken = default)
+    {
+        _state = ReverseSessionState.Disconnected;
+        return Task.CompletedTask;
+    }
+
+    public void ReceiveFrame(byte[] frameData)
+    {
+        if (_state != ReverseSessionState.Connected && _state != ReverseSessionState.ControlGranted)
+            return;
+
+        FrameReceived?.Invoke(this, new FrameReceivedEventArgs
+        {
+            FrameData = frameData,
+            Timestamp = DateTimeOffset.UtcNow
+        });
     }
 
     public Task StopReverseSharingAsync(CancellationToken cancellationToken = default)

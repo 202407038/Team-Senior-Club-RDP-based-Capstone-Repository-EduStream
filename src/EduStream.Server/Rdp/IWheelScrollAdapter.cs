@@ -3,27 +3,18 @@ using System.Drawing;
 namespace EduStream.Server.Rdp;
 
 /// <summary>
-/// 마우스 휠 스크롤 배율 어댑터 인터페이스
+/// 마우스 휠 줌 어댑터 인터페이스
 /// EduStream.Core에 의존하지 않고 Server 내부에서 독립 동작
 /// </summary>
 public interface IWheelScrollAdapter
 {
     /// <summary>
-    /// 휠 델타 값을 실제 스크롤 픽셀로 변환
+    /// 휠 델타 값을 줌 배율로 변환
     /// </summary>
     /// <param name="wheelDelta">휠 델타 값 (WM_MOUSEWHEEL의 wParam 상위 16비트)</param>
     /// <param name="currentZoom">현재 줌 배율 (1.0 = 100%)</param>
-    /// <returns>스크롤할 픽셀 양 (양수=아래로, 음수=위로)</returns>
-    int GetScrollPixels(int wheelDelta, double currentZoom);
-
-    /// <summary>
-    /// 휠 델타 값을 실제 스크롤 픽셀로 변환 (줌 배율 적용)
-    /// </summary>
-    /// <param name="wheelDelta">휠 델타 값</param>
-    /// <param name="currentZoom">현재 줌 배율</param>
-    /// <param name="viewportHeight">뷰포트 높이</param>
-    /// <returns>스크롤할 픽셀 양</returns>
-    int GetScrollPixels(int wheelDelta, double currentZoom, int viewportHeight);
+    /// <returns>계산된 줌 배율 (0.5x ~ 3.0x 범위 클램핑)</returns>
+    double CalculateZoomScale(int wheelDelta, double currentZoom);
 }
 
 /// <summary>
