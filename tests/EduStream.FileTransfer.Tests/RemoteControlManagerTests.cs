@@ -108,4 +108,145 @@ public class RemoteControlManagerTests
         Assert.False(permission.HasControl);
         Assert.Equal(ControlLevel.ViewOnly, permission.Level);
     }
+
+    [Fact]
+    public void ProcessMouseMove_권한_없으면_차단()
+    {
+        // Act
+        var result = _manager.ProcessMouseMove("student1", 100, 200);
+
+        // Assert
+        Assert.False(result);
+    }
+
+    [Fact]
+    public async Task ProcessMouseMove_권한_있으면_처리()
+    {
+        // Arrange
+        await _manager.SetControlLevelAsync(ControlLevel.KeyboardAndMouse);
+        await _manager.GrantControlAsync("student1");
+
+        // Act
+        var result = _manager.ProcessMouseMove("student1", 100, 200);
+
+        // Assert
+        Assert.True(result);
+    }
+
+    [Fact]
+    public void ProcessMouseClick_권한_없으면_차단()
+    {
+        // Act
+        var result = _manager.ProcessMouseClick("student1", MouseButton.Left, true);
+
+        // Assert
+        Assert.False(result);
+    }
+
+    [Fact]
+    public async Task ProcessMouseClick_권한_있으면_처리()
+    {
+        // Arrange
+        await _manager.SetControlLevelAsync(ControlLevel.KeyboardAndMouse);
+        await _manager.GrantControlAsync("student1");
+
+        // Act
+        var result = _manager.ProcessMouseClick("student1", MouseButton.Left, true);
+
+        // Assert
+        Assert.True(result);
+    }
+
+    [Fact]
+    public void ProcessMouseWheel_권한_없으면_차단()
+    {
+        // Act
+        var result = _manager.ProcessMouseWheel("student1", 120);
+
+        // Assert
+        Assert.False(result);
+    }
+
+    [Fact]
+    public async Task ProcessMouseWheel_권한_있으면_처리()
+    {
+        // Arrange
+        await _manager.SetControlLevelAsync(ControlLevel.KeyboardAndMouse);
+        await _manager.GrantControlAsync("student1");
+
+        // Act
+        var result = _manager.ProcessMouseWheel("student1", 120);
+
+        // Assert
+        Assert.True(result);
+    }
+
+    [Fact]
+    public void ProcessKeyboardInput_권한_없으면_차단()
+    {
+        // Act
+        var result = _manager.ProcessKeyboardInput("student1", 65, true);
+
+        // Assert
+        Assert.False(result);
+    }
+
+    [Fact]
+    public async Task ProcessKeyboardInput_권한_있으면_처리()
+    {
+        // Arrange
+        await _manager.SetControlLevelAsync(ControlLevel.KeyboardAndMouse);
+        await _manager.GrantControlAsync("student1");
+
+        // Act
+        var result = _manager.ProcessKeyboardInput("student1", 65, true);
+
+        // Assert
+        Assert.True(result);
+    }
+
+    [Fact]
+    public async Task ProcessMouseMove_KeyboardOnly_레벨에서_마우스_차단()
+    {
+        // Arrange
+        await _manager.SetControlLevelAsync(ControlLevel.KeyboardOnly);
+        await _manager.GrantControlAsync("student1");
+
+        // Act
+        var result = _manager.ProcessMouseMove("student1", 100, 200);
+
+        // Assert
+        Assert.False(result);
+    }
+
+    [Fact]
+    public async Task ProcessKeyboardInput_KeyboardOnly_레벨에서_키보드_허용()
+    {
+        // Arrange
+        await _manager.SetControlLevelAsync(ControlLevel.KeyboardOnly);
+        await _manager.GrantControlAsync("student1");
+
+        // Act
+        var result = _manager.ProcessKeyboardInput("student1", 65, true);
+
+        // Assert
+        Assert.True(result);
+    }
+
+    [Fact]
+    public async Task ProcessInput_권한_철회후_모든_입력_차단()
+    {
+        // Arrange
+        await _manager.SetControlLevelAsync(ControlLevel.KeyboardAndMouse);
+        await _manager.GrantControlAsync("student1");
+        await _manager.RevokeControlAsync("student1");
+
+        // Act
+        var mouseResult = _manager.ProcessMouseMove("student1", 100, 200);
+        var keyResult = _manager.ProcessKeyboardInput("student1", 65, true);
+
+        // Assert
+        Assert.False(mouseResult);
+        Assert.False(keyResult);
+    }
 }

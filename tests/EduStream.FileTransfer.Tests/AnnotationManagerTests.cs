@@ -204,4 +204,53 @@ public class AnnotationManagerTests
         // Assert
         Assert.Equal(2, allStrokes.Count);
     }
+
+    [Fact]
+    public async Task AddStrokeAsync_OnStrokeRendered_이벤트_발생()
+    {
+        // Arrange
+        var stroke = new AnnotationStroke
+        {
+            ParticipantId = "student1",
+            Tool = AnnotationTool.Pen,
+            Color = AnnotationColor.Red,
+            StrokeWidth = 2,
+            Points = new[] { new Point(10, 10), new Point(20, 20) }
+        };
+
+        StrokeRenderedEventArgs? renderedArgs = null;
+        _manager.OnStrokeRendered += (sender, args) => renderedArgs = args;
+
+        // Act
+        await _manager.AddStrokeAsync(stroke);
+
+        // Assert
+        Assert.NotNull(renderedArgs);
+        Assert.Equal(stroke.StrokeId, renderedArgs.Stroke.StrokeId);
+    }
+
+    [Fact]
+    public async Task AddStrokeAsync_OnStrokeDispatched_이벤트_발생()
+    {
+        // Arrange
+        var stroke = new AnnotationStroke
+        {
+            ParticipantId = "student1",
+            Tool = AnnotationTool.Pen,
+            Color = AnnotationColor.Red,
+            StrokeWidth = 2,
+            Points = new[] { new Point(10, 10), new Point(20, 20) }
+        };
+
+        StrokeDispatchedEventArgs? dispatchedArgs = null;
+        _manager.OnStrokeDispatched += (sender, args) => dispatchedArgs = args;
+
+        // Act
+        await _manager.AddStrokeAsync(stroke);
+
+        // Assert
+        Assert.NotNull(dispatchedArgs);
+        Assert.Equal(stroke.StrokeId, dispatchedArgs.Stroke.StrokeId);
+        Assert.Equal(string.Empty, dispatchedArgs.TargetParticipantId); // 브로드캐스트
+    }
 }

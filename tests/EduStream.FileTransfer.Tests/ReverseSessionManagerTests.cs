@@ -59,6 +59,108 @@ public class ReverseSessionManagerTests
         Assert.Equal(sharingId, invitation.SharingId);
         Assert.Equal("professor1", invitation.ProfessorId);
         Assert.Equal(studentId, invitation.HostStudentId);
+        Assert.Equal(ReverseSessionState.Hosting, _manager.CurrentState);
+    }
+
+    [Fact]
+    public async Task ConnectAsync_호스팅_상태에서_연결_중으로_전이()
+    {
+        // Arrange
+        var sessionId = Guid.NewGuid();
+        await _manager.StartReverseSharingAsync(sessionId, "student1");
+
+        // Act
+        await _manager.ConnectAsync();
+
+        // Assert
+        Assert.Equal(ReverseSessionState.Connecting, _manager.CurrentState);
+    }
+
+    [Fact]
+    public async Task OnConnectedAsync_연결_성공_상태_전이()
+    {
+        // Arrange
+        var sessionId = Guid.NewGuid();
+        await _manager.StartReverseSharingAsync(sessionId, "student1");
+        await _manager.ConnectAsync();
+
+        // Act
+        await _manager.OnConnectedAsync();
+
+        // Assert
+        Assert.Equal(ReverseSessionState.Connected, _manager.CurrentState);
+    }
+
+    [Fact]
+    public async Task OnConnectionFailedAsync_실패_상태_전이()
+    {
+        // Arrange
+        var sessionId = Guid.NewGuid();
+        await _manager.StartReverseSharingAsync(sessionId, "student1");
+        await _manager.ConnectAsync();
+
+        // Act
+        await _manager.OnConnectionFailedAsync();
+
+        // Assert
+        Assert.Equal(ReverseSessionState.Failed, _manager.CurrentState);
+    }
+
+    [Fact]
+    public async Task OnDisconnectedAsync_종료_상태_전이()
+    {
+        // Arrange
+        var sessionId = Guid.NewGuid();
+        await _manager.StartReverseSharingAsync(sessionId, "student1");
+        await _manager.ConnectAsync();
+        await _manager.OnConnectedAsync();
+
+        // Act
+        await _manager.OnDisconnectedAsync();
+
+        // Assert
+        Assert.Equal(ReverseSessionState.Disconnected, _manager.CurrentState);
+    }
+
+    [Fact]
+    public async Task ReceiveFrame_Connected_상태에서_이벤트_발생()
+    {
+        // Arrange
+        var sessionId = Guid.NewGuid();
+        await _manager.StartReverseSharingAsync(sessionId, "student1");
+        await _manager.ConnectAsync();
+        await _manager.OnConnectedAsync();
+
+        FrameReceivedEventArgs? receivedArgs = null;
+        _manager.FrameReceived += (sender, args) => receivedArgs = args;
+
+        var frameData = new byte[] { 0x01, 0x02, 0x03 };
+
+        // Act
+        _manager.ReceiveFrame(frameData);
+
+        // Assert
+        Assert.NotNull(receivedArgs);
+        Assert.Equal(frameData, receivedArgs.FrameData);
+    }
+
+    [Fact]
+    public async Task ReceiveFrame_비연결_상태에서_이벤트_무시()
+    {
+        // Arrange
+        var sessionId = Guid.NewGuid();
+        await _manager.StartReverseSharingAsync(sessionId, "student1");
+
+        FrameReceivedEventArgs? receivedArgs = null;
+        _manager.FrameReceived += (sender, args) => receivedArgs = args;
+
+        var frameData = new byte[] { 0x01, 0x02, 0x03 };
+
+        // Act
+        _manager.ReceiveFrame(frameData);
+
+        // Assert
+        Assert.Null(receivedArgs);
     }
 
     [Fact]
