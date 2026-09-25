@@ -34,6 +34,7 @@ public sealed class SessionManager
     private ParticipantConnection? _professorConnection;
     private ServerRemoteControlCoordinator? _controlCoordinator;
     private IRemoteInputGate _remoteInputGate = UnavailableRemoteInputGate.Instance;
+    private RoomPasswordVerifier? _roomPassword;
 
     /// <summary>
     /// 참여자 목록이 변경되었을 때 발생합니다.
@@ -223,8 +224,20 @@ public sealed class SessionManager
         _logSink.Write("[Rdp] 공유 서비스 연결 해제");
     }
 
-    public Task<SessionInfo> OpenSessionAsync(string sessionName, int port)
+    /// <summary>
+    /// 방 비밀번호가 설정된 세션인지 여부입니다. 비밀번호 값 자체는 어디에도 노출하지 않습니다.
+    /// </summary>
+    public bool IsRoomPasswordProtected => _roomPassword is not null;
+
+    /// <summary>
+    /// roomPassword가 비어 있으면 비밀번호 없는 방입니다. 비밀번호는 해시로만 보관하며
+    /// SessionInfo에 넣지 않습니다(브로드캐스트/직렬화 노출 방지).
+    /// </summary>
+    public Task<SessionInfo> OpenSessionAsync(string sessionName, int port, ReadOnlyMemory<char> roomPassword = default)
     {
+        // 해시 계산은 잠금 밖에서 끝내고, 입력 오류면 세션을 열지 않는다.
+        var passwordVerifier = RoomPasswordVerifier.Create(roomPassword.Span);
+
         lock (_sessionLock)
         {
             if (CurrentSession is not null)
@@ -245,10 +258,11 @@ public sealed class SessionManager
                 CurrentSession.SessionId, Guid.NewGuid(), Guid.NewGuid(), ParticipantRole.Professor);
             _controlCoordinator = new ServerRemoteControlCoordinator(
                 _professorConnection, _participantRegistry, _remoteInputGate, _logSink);
+            _roomPassword = passwordVerifier;
         }
 
         _tcpServer.Start(port);
-        _logSink.Write($"[Session] 개설: 이름={sessionName}, 포트={port}");
+        _logSink.Write($"[Session] 개설: 이름={sessionName}, 포트={port}, 방 비밀번호={(passwordVerifier is null ? "없음" : "설정")}");
         return Task.FromResult(CurrentSession);
     }
 
@@ -290,6 +304,7 @@ public sealed class SessionManager
             _controlCoordinator?.Dispose();
             _controlCoordinator = null;
             _professorConnection = null;
+            _roomPassword = null;
         }
 
         ClearParticipants();
@@ -498,6 +513,14 @@ public sealed class SessionManager
         if (string.IsNullOrWhiteSpace(packet.DisplayName))
         {
             return CreateError(ErrorCodes.DisplayNameRequired, "참여자 이름은 비워둘 수 없습니다.", true, packet);
+        }
+
+        if (_roomPassword is not null)
+        {
+            // 현재 단계에서는 보호 채널 인증 계약이 없어 비밀번호를 받을 경로가 없다.
+            // 평문 v1 참가 요청으로 우회되지 않도록 비밀번호 방은 참가를 거부한다(fail-closed).
+            _logSink.Write($"[Session] 비밀번호 방 참가 거부(보호 채널 미지원): clientId={clientId}");
+            return CreateError(ErrorCodes.JoinRejected, "비밀번호가 설정된 방은 보호된 인증 연결이 준비된 뒤 참가할 수 있습니다.", false, packet);
         }
 
         if (_clientDisplayNames.TryGetValue(clientId, out var existingDisplayName))
