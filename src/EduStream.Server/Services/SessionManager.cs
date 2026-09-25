@@ -34,6 +34,7 @@ public sealed class SessionManager
     private ParticipantConnection? _professorConnection;
     private ServerRemoteControlCoordinator? _controlCoordinator;
     private IRemoteInputGate _remoteInputGate = UnavailableRemoteInputGate.Instance;
+    private RoomPasswordVerifier? _roomPassword;
 
     /// <summary>
     /// 참여자 목록이 변경되었을 때 발생합니다.
@@ -223,8 +224,20 @@ public sealed class SessionManager
         _logSink.Write("[Rdp] 공유 서비스 연결 해제");
     }
 
-    public Task<SessionInfo> OpenSessionAsync(string sessionName, int port)
+    /// <summary>
+    /// 방 비밀번호가 설정된 세션인지 여부입니다. 비밀번호 값 자체는 어디에도 노출하지 않습니다.
+    /// </summary>
+    public bool IsRoomPasswordProtected => _roomPassword is not null;
+
+    /// <summary>
+    /// roomPassword가 비어 있으면 비밀번호 없는 방입니다. 비밀번호는 해시로만 보관하며
+    /// SessionInfo에 넣지 않습니다(브로드캐스트/직렬화 노출 방지).
+    /// </summary>
+    public Task<SessionInfo> OpenSessionAsync(string sessionName, int port, ReadOnlyMemory<char> roomPassword = default)
     {
+        // 해시 계산은 잠금 밖에서 끝내고, 입력 오류면 세션을 열지 않는다.
+        var passwordVerifier = RoomPasswordVerifier.Create(roomPassword.Span);
+
         lock (_sessionLock)
         {
             if (CurrentSession is not null)
@@ -245,10 +258,11 @@ public sealed class SessionManager
                 CurrentSession.SessionId, Guid.NewGuid(), Guid.NewGuid(), ParticipantRole.Professor);
             _controlCoordinator = new ServerRemoteControlCoordinator(
                 _professorConnection, _participantRegistry, _remoteInputGate, _logSink);
+            _roomPassword = passwordVerifier;
         }
 
         _tcpServer.Start(port);
-        _logSink.Write($"[Session] 개설: 이름={sessionName}, 포트={port}");
+        _logSink.Write($"[Session] 개설: 이름={sessionName}, 포트={port}, 방 비밀번호={(passwordVerifier is null ? "없음" : "설정")}");
         return Task.FromResult(CurrentSession);
     }
 
@@ -290,6 +304,7 @@ public sealed class SessionManager
             _controlCoordinator?.Dispose();
             _controlCoordinator = null;
             _professorConnection = null;
+            _roomPassword = null;
         }
 
         ClearParticipants();
@@ -298,13 +313,34 @@ public sealed class SessionManager
     }
 
     /// <summary>
-    /// 모든 연결된 클라이언트에게 패킷을 브로드캐스트합니다.
+    /// 참가 승인된 연결에게만 패킷을 브로드캐스트합니다. TCP 연결만 하고 참가하지 않은 연결은 받지 않습니다.
     /// </summary>
     public async Task BroadcastPacketAsync(BasePacket packet)
     {
         ValidateOutboundPacket(packet);
         _logSink.Write($"[Packet] 브로드캐스트: 타입={packet.MessageType}, 길이={packet.DataLength}");
-        await _tcpServer.BroadcastAsync(packet);
+        await BroadcastToParticipantsAsync(packet);
+    }
+
+    /// <summary>
+    /// 강의 데이터(채팅·화면·파일·시스템 메시지)는 참가 승인된 연결에만 보낸다.
+    /// 연결 유지용 heartbeat만 TcpServerService.BroadcastAsync로 전체 연결에 나간다.
+    /// </summary>
+    private Task BroadcastToParticipantsAsync(BasePacket packet) =>
+        _tcpServer.SendToClientsAsync(_clientDisplayNames.Keys.ToArray(), packet);
+
+    /// <summary>
+    /// 참가하지 않은 연결의 기능 요청이면 NotParticipant 오류를 보내고 true를 반환합니다.
+    /// </summary>
+    private async Task<bool> RejectIfNotParticipantAsync(string clientId, BasePacket packet, string feature)
+    {
+        if (_clientDisplayNames.ContainsKey(clientId))
+            return false;
+
+        _logSink.Write($"[{feature}] 비참가자 차단: clientId={clientId}");
+        await _tcpServer.SendToClientAsync(clientId, CreateError(ErrorCodes.NotParticipant,
+            "세션에 참여하지 않은 상태에서는 요청할 수 없습니다.", true, packet));
+        return true;
     }
 
     public HeartbeatPacket CreateHeartbeat()
@@ -390,22 +426,26 @@ public sealed class SessionManager
                     break;
 
                 case PacketType.Screen:
-                    // 화면 패킷은 모든 클라이언트에게 브로드캐스트
+                    // 화면 패킷은 참가자에게만 브로드캐스트
                     var screenPacket = JsonSerializer.Deserialize<ScreenPacket>(payload);
                     if (screenPacket is not null)
                     {
+                        if (await RejectIfNotParticipantAsync(clientId, screenPacket, "Screen"))
+                            break;
                         ScreenTransferUtility.ValidatePacketMetadata(screenPacket);
-                        await _tcpServer.BroadcastAsync(screenPacket);
+                        await BroadcastToParticipantsAsync(screenPacket);
                         _logSink.Write($"[Screen] 브로드캐스트: 프레임#{screenPacket.FrameIndex}");
                     }
                     break;
 
                 case PacketType.File:
-                    // 파일 패킷은 모든 클라이언트에게 브로드캐스트
+                    // 파일 패킷은 참가자에게만 브로드캐스트
                     var filePacket = JsonSerializer.Deserialize<FilePacket>(payload);
                     if (filePacket is not null)
                     {
-                        await _tcpServer.BroadcastAsync(filePacket);
+                        if (await RejectIfNotParticipantAsync(clientId, filePacket, "File"))
+                            break;
+                        await BroadcastToParticipantsAsync(filePacket);
                         _logSink.Write($"[File] 브로드캐스트: {filePacket.FileName}");
                     }
                     break;
@@ -482,7 +522,7 @@ public sealed class SessionManager
 
         // 5) 브로드캐스트
         var targetCount = _participants.Count;
-        await _tcpServer.BroadcastAsync(chatPacket);
+        await BroadcastToParticipantsAsync(chatPacket);
 
         ChatReceived?.Invoke(verifiedName, chatPacket.Message);
         _logSink.Write($"[Chat] 브로드캐스트: {verifiedName} → {targetCount}명");
@@ -498,6 +538,14 @@ public sealed class SessionManager
         if (string.IsNullOrWhiteSpace(packet.DisplayName))
         {
             return CreateError(ErrorCodes.DisplayNameRequired, "참여자 이름은 비워둘 수 없습니다.", true, packet);
+        }
+
+        if (_roomPassword is not null)
+        {
+            // 현재 단계에서는 보호 채널 인증 계약이 없어 비밀번호를 받을 경로가 없다.
+            // 평문 v1 참가 요청으로 우회되지 않도록 비밀번호 방은 참가를 거부한다(fail-closed).
+            _logSink.Write($"[Session] 비밀번호 방 참가 거부(보호 채널 미지원): clientId={clientId}");
+            return CreateError(ErrorCodes.JoinRejected, "비밀번호가 설정된 방은 보호된 인증 연결이 준비된 뒤 참가할 수 있습니다.", false, packet);
         }
 
         if (_clientDisplayNames.TryGetValue(clientId, out var existingDisplayName))
@@ -803,7 +851,7 @@ public sealed class SessionManager
 
         systemChat.SenderId = "Server";
 
-        await _tcpServer.BroadcastAsync(systemChat);
+        await BroadcastToParticipantsAsync(systemChat);
         ChatReceived?.Invoke("System", message);
         _logSink.Write($"[Chat] 시스템 브로드캐스트: {message}");
     }
