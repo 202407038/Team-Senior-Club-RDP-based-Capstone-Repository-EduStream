@@ -11,7 +11,7 @@ namespace EduStream.Server.Services;
 /// <remarks>
 /// 순서 규칙:
 /// 1) 회수(중지·대상 전환·권한 변경·연결 제거)는 승인 상태를 즉시 Revoked로 바꾸고 입력 회수 대기열에 넣습니다.
-/// 2) 새 요청은 대기열의 입력 회수가 모두 확인된 뒤에만 Requested가 됩니다.
+/// 2) 새 요청은 이전 허용 작업의 종료와 입력 회수가 모두 확인된 뒤에만 Requested가 됩니다.
 /// 3) 회수를 기다리는 동안 중지/다른 요청이 들어오면 그 요청은 폐기되어 Requested로 남지 않습니다.
 /// 4) Active는 IRemoteInputGate.GrantAsync 완료 후, 요청이 여전히 최신이고 권한 revision이 같을 때만 적용합니다.
 /// 공유 재시작 후 제어 자동 재승인은 하지 않습니다(협의 필요 항목).
@@ -23,8 +23,11 @@ public sealed class ServerRemoteControlCoordinator : IRemoteControlCoordinator, 
     private readonly ILogSink _logSink;
     private readonly object _gate = new();
     private readonly SemaphoreSlim _revokeLock = new(1, 1);
-    private readonly List<RemoteControlState> _pendingInputRevokes = new();
+    private sealed record InputRevoke(RemoteControlState State, IRemoteInputGate Owner);
+    private readonly List<InputRevoke> _pendingInputRevokes = new();
+    private readonly Dictionary<Guid, TaskCompletionSource> _inFlightGrants = new();
     private IRemoteInputGate _inputGate;
+    private IRemoteInputGate? _currentInputGate;
     private RemoteControlState? _current;
     private CancellationTokenSource? _grantCancellation;
     // 회수·새 요청마다 증가합니다. 비동기 대기 전후로 값을 비교해 대체된 요청을 버립니다.
@@ -57,7 +60,11 @@ public sealed class ServerRemoteControlCoordinator : IRemoteControlCoordinator, 
     /// </summary>
     public bool IsInputRevokePending
     {
-        get { lock (_gate) return _pendingInputRevokes.Count > 0; }
+        get
+        {
+            lock (_gate) return _pendingInputRevokes.Count > 0 ||
+                (_inFlightGrants.Count > 0 && _current?.Phase == ControlPhase.Revoked);
+        }
     }
 
     /// <summary>
@@ -74,7 +81,9 @@ public sealed class ServerRemoteControlCoordinator : IRemoteControlCoordinator, 
         ArgumentNullException.ThrowIfNull(inputGate);
         lock (_gate)
         {
-            if (_current?.Phase is ControlPhase.Requested or ControlPhase.Active || _pendingInputRevokes.Count > 0)
+            ThrowIfDisposed();
+            if (_current?.Phase is ControlPhase.Requested or ControlPhase.Active ||
+                _pendingInputRevokes.Count > 0 || _inFlightGrants.Count > 0)
                 throw new InvalidOperationException("원격 제어가 진행 중이거나 입력 회수 확인 대기 중에는 입력 엔진을 바꿀 수 없습니다.");
             _inputGate = inputGate;
         }
@@ -92,23 +101,29 @@ public sealed class ServerRemoteControlCoordinator : IRemoteControlCoordinator, 
 
         long expectedVersion;
         CancellationTokenSource? replacedGrant;
+        Task[] previousGrants;
         lock (_gate)
         {
             ThrowIfDisposed();
             WithdrawLocked(out replacedGrant);
             expectedVersion = _version;
+            previousGrants = _inFlightGrants.Values.Select(completion => completion.Task).ToArray();
         }
-        replacedGrant?.Cancel();
+        CancelGrant(replacedGrant);
 
-        // 이전 대상의 실제 입력 차단이 확인되기 전에는 새 대상을 요청하지 않는다.
+        // 우선 차단을 요청하되, 취소를 무시하는 native 허용도 종료/후속 회수까지 끝나야 전환한다.
+        await ConfirmInputRevokedAsync(cancellationToken);
+        await Task.WhenAll(previousGrants).WaitAsync(cancellationToken);
         await ConfirmInputRevokedAsync(cancellationToken);
 
         RemoteControlState requested;
         IRemoteInputGate inputGate;
         CancellationTokenSource grantCancellation;
+        TaskCompletionSource grantCompleted;
         lock (_gate)
         {
             ThrowIfDisposed();
+            cancellationToken.ThrowIfCancellationRequested();
             if (_version != expectedVersion) return;
 
             var snapshot = _registry.TryResolve(target.ConnectionId);
@@ -116,76 +131,104 @@ public sealed class ServerRemoteControlCoordinator : IRemoteControlCoordinator, 
                 throw new CollaborationException(CollaborationError.StaleConnection);
 
             requested = RemoteControlState.Request(_professor, snapshot, Guid.NewGuid());
-            grantCancellation = new CancellationTokenSource();
+            grantCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             _grantCancellation = grantCancellation;
             _version++;
             expectedVersion = _version;
             _current = requested;
             inputGate = _inputGate;
+            _currentInputGate = inputGate;
+            grantCompleted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            _inFlightGrants.Add(requested.RequestId, grantCompleted);
             StateChanged?.Invoke(requested);
         }
 
+        using var cancellationRegistration = cancellationToken.Register(() =>
+            WithdrawForRegistryChange(current => current.RequestId == requested.RequestId, "요청 취소"));
         try
         {
-            await inputGate.GrantAsync(requested, grantCancellation.Token);
-        }
-        catch (Exception exception)
-        {
-            var stillCurrent = false;
+            try
+            {
+                await inputGate.GrantAsync(requested, grantCancellation.Token);
+            }
+            catch (Exception exception)
+            {
+                var stillCurrent = false;
+                lock (_gate)
+                {
+                    // 중지 이후 늦게 실패해도 부분 허용 가능성이 있으므로 원래 엔진에 다시 회수한다.
+                    _pendingInputRevokes.Add(new InputRevoke(requested.Revoke(), inputGate));
+                    if (_version == expectedVersion && _current == requested)
+                    {
+                        stillCurrent = true;
+                        _grantCancellation = null;
+                        _version++;
+                        _current = requested.Fail();
+                        StateChanged?.Invoke(_current);
+                    }
+                }
+                await TryConfirmInputRevokedAsync("허용 실패");
+                cancellationToken.ThrowIfCancellationRequested();
+                if (!stillCurrent) return;
+                _logSink.Write($"[Control] 입력 허용 실패: requestId={requested.RequestId}, 사유={exception.GetType().Name}");
+                throw;
+            }
+
+            CollaborationException? activationFailure = null;
             lock (_gate)
             {
-                if (_version == expectedVersion && _current == requested)
+                if (_version != expectedVersion || _current != requested || grantCancellation.IsCancellationRequested)
                 {
-                    stillCurrent = true;
+                    _pendingInputRevokes.Add(new InputRevoke(requested.Revoke(), inputGate));
+                    if (_current == requested)
+                    {
+                        _grantCancellation = null;
+                        _version++;
+                        _current = requested.Revoke();
+                        StateChanged?.Invoke(_current);
+                    }
+                }
+                else
+                {
                     _grantCancellation = null;
-                    _version++;
-                    _current = requested.Fail();
-                    // 부분 허용 가능성을 배제할 수 없으므로 실패한 요청도 입력 회수 대상에 넣는다.
-                    _pendingInputRevokes.Add(requested.Revoke());
+                    var snapshot = _registry.TryResolve(requested.Student.ConnectionId);
+                    try
+                    {
+                        if (snapshot is null) throw new CollaborationException(CollaborationError.StaleConnection);
+                        _current = requested.Activate(requested.RequestId, snapshot);
+                    }
+                    catch (CollaborationException exception)
+                    {
+                        activationFailure = exception;
+                        _version++;
+                        _current = requested.Revoke();
+                        _pendingInputRevokes.Add(new InputRevoke(_current, inputGate));
+                    }
                     StateChanged?.Invoke(_current);
                 }
             }
-            await TryConfirmInputRevokedAsync("허용 실패");
-            if (!stillCurrent) return;
-            _logSink.Write($"[Control] 입력 허용 실패: requestId={requested.RequestId}, 사유={exception.GetType().Name}");
-            throw;
-        }
 
-        CollaborationException? activationFailure = null;
-        lock (_gate)
+            await TryConfirmInputRevokedAsync("허용 후 대체");
+            cancellationToken.ThrowIfCancellationRequested();
+            if (activationFailure is not null) throw activationFailure;
+        }
+        finally
         {
-            if (_version != expectedVersion || _current != requested)
+            lock (_gate)
             {
-                // 허용 완료 전에 회수됐다. 회수 확인이 허용보다 먼저 끝났을 수 있으므로 한 번 더 차단한다.
-                _pendingInputRevokes.Add(requested.Revoke());
+                if (ReferenceEquals(_grantCancellation, grantCancellation)) _grantCancellation = null;
+                _inFlightGrants.Remove(requested.RequestId);
             }
-            else
-            {
-                _grantCancellation = null;
-                var snapshot = _registry.TryResolve(requested.Student.ConnectionId);
-                try
-                {
-                    if (snapshot is null) throw new CollaborationException(CollaborationError.StaleConnection);
-                    _current = requested.Activate(requested.RequestId, snapshot);
-                }
-                catch (CollaborationException exception)
-                {
-                    activationFailure = exception;
-                    _version++;
-                    _current = requested.Revoke();
-                    _pendingInputRevokes.Add(_current);
-                }
-                StateChanged?.Invoke(_current);
-            }
+            grantCancellation.Dispose();
+            grantCompleted.TrySetResult();
         }
-
-        await TryConfirmInputRevokedAsync("허용 후 대체");
-        if (activationFailure is not null) throw activationFailure;
     }
 
     /// <summary>
     /// 현재 제어 대상을 회수하고 실제 입력 차단 확인까지 기다립니다.
     /// 진행 중인 요청이 회수 확인을 기다리는 중이었다면 그 요청도 폐기됩니다.
+    /// 취소를 무시한 허용 작업이 남으면 IsInputRevokePending으로 표시하고, 종료 후 다시 회수합니다.
+    /// 그동안 입력 엔진 교체와 새 대상의 허용은 차단됩니다.
     /// </summary>
     public async Task StopAsync(CancellationToken cancellationToken = default)
     {
@@ -196,7 +239,7 @@ public sealed class ServerRemoteControlCoordinator : IRemoteControlCoordinator, 
         {
             WithdrawLocked(out replacedGrant);
         }
-        replacedGrant?.Cancel();
+        CancelGrant(replacedGrant);
 
         await ConfirmInputRevokedAsync(cancellationToken);
     }
@@ -212,16 +255,14 @@ public sealed class ServerRemoteControlCoordinator : IRemoteControlCoordinator, 
         {
             while (true)
             {
-                RemoteControlState revoked;
-                IRemoteInputGate inputGate;
+                InputRevoke revoked;
                 lock (_gate)
                 {
                     if (_pendingInputRevokes.Count == 0) return;
                     revoked = _pendingInputRevokes[0];
-                    inputGate = _inputGate;
                 }
 
-                await inputGate.RevokeAsync(revoked, cancellationToken);
+                await revoked.Owner.RevokeAsync(revoked.State, cancellationToken);
 
                 lock (_gate) _pendingInputRevokes.Remove(revoked);
             }
@@ -269,7 +310,7 @@ public sealed class ServerRemoteControlCoordinator : IRemoteControlCoordinator, 
                 return;
             WithdrawLocked(out replacedGrant);
         }
-        replacedGrant?.Cancel();
+        CancelGrant(replacedGrant);
         _logSink.Write($"[Control] 회수: 사유={reason}");
 
         // 레지스트리 이벤트는 동기이므로 실제 입력 차단 확인은 기다리지 않고 바로 시작한다.
@@ -290,7 +331,7 @@ public sealed class ServerRemoteControlCoordinator : IRemoteControlCoordinator, 
         if (_current?.Phase is ControlPhase.Requested or ControlPhase.Active)
         {
             _current = _current.Revoke();
-            _pendingInputRevokes.Add(_current);
+            _pendingInputRevokes.Add(new InputRevoke(_current, _currentInputGate!));
             StateChanged?.Invoke(_current);
         }
     }
@@ -310,5 +351,12 @@ public sealed class ServerRemoteControlCoordinator : IRemoteControlCoordinator, 
     private void ThrowIfDisposed()
     {
         if (_disposed) throw new CollaborationException(CollaborationError.SessionClosed);
+    }
+
+    private static void CancelGrant(CancellationTokenSource? cancellation)
+    {
+        // 잠금 밖 취소와 허용 작업의 finally가 교차할 수 있다. 이미 끝난 작업은 취소할 필요가 없다.
+        try { cancellation?.Cancel(); }
+        catch (ObjectDisposedException) { }
     }
 }
