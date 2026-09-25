@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Security.Cryptography;
 using System.Text.Json;
+using EduStream.Core.Collaboration;
 using EduStream.Core.Factories;
 using EduStream.Core.Logging;
 using EduStream.Core.Models;
@@ -26,9 +27,13 @@ public sealed class SessionManager
     private readonly ConcurrentDictionary<string, RdpInvitationPacket> _rdpInvitations = new(); // participantId(displayName) → 발급된 초대
     private readonly ConcurrentDictionary<Guid, IRdpSharingService> _invitationOwners = new();
     private readonly ConcurrentDictionary<string, RdpInvitationHandoff> _pendingInvitationHandoffs = new(); // participantId → 인계 대기 중인 비밀번호
+    private readonly ParticipantRegistry _participantRegistry = new();
     private readonly object _sessionLock = new();
     private IRdpSharingService? _rdpSharingService;
     private Guid _rdpSharingId;
+    private ParticipantConnection? _professorConnection;
+    private ServerRemoteControlCoordinator? _controlCoordinator;
+    private IRemoteInputGate _remoteInputGate = UnavailableRemoteInputGate.Instance;
 
     /// <summary>
     /// 참여자 목록이 변경되었을 때 발생합니다.
@@ -66,6 +71,17 @@ public sealed class SessionManager
     public SessionInfo? CurrentSession { get; private set; }
 
     public bool IsSessionOpen => CurrentSession is not null;
+
+    /// <summary>
+    /// 실제 승인된 연결 기준 참가자 목록/권한 레지스트리입니다.
+    /// 파일 요청 인가(IFileRequestAuthorizer)는 이 레지스트리를 대조해서 판단해야 합니다.
+    /// </summary>
+    public ParticipantRegistry Participants => _participantRegistry;
+
+    /// <summary>
+    /// 현재 진행 중인 원격 제어 승인 상태입니다. 세션이 열려 있지 않으면 null입니다.
+    /// </summary>
+    public RemoteControlState? CurrentControlState => _controlCoordinator?.Current;
 
     /// <summary>
     /// 현재 참여자 이름 목록을 반환합니다.
@@ -124,6 +140,76 @@ public sealed class SessionManager
     }
 
     /// <summary>
+    /// 3번이 구현한 실제 원격 입력 엔진을 연결합니다. 연결 전에는 제어 요청이 Active가 되지 않고 Failed로 끝납니다.
+    /// 진행 중인 제어가 있으면 교체할 수 없습니다.
+    /// </summary>
+    public void AttachRemoteInputGate(IRemoteInputGate inputGate)
+    {
+        ArgumentNullException.ThrowIfNull(inputGate);
+        lock (_sessionLock)
+        {
+            _controlCoordinator?.SetInputGate(inputGate);
+            _remoteInputGate = inputGate;
+        }
+        _logSink.Write("[Control] 입력 엔진 연결");
+    }
+
+    /// <summary>
+    /// 교수자가 선택한 학생 한 명에게 원격 제어를 요청합니다. 기존 대상은 먼저 회수하고
+    /// 3번의 실제 입력 회수 확인 후에 새 대상으로 전환합니다. Active는 입력 허용 완료 후에만 표시됩니다.
+    /// </summary>
+    public async Task RequestControlAsync(string targetDisplayName)
+    {
+        if (CurrentSession is null)
+            throw new InvalidOperationException("현재 열려 있는 세션이 없습니다.");
+        if (_controlCoordinator is null)
+            throw new InvalidOperationException("제어 조정자가 초기화되지 않았습니다.");
+        if (!_participants.TryGetValue(targetDisplayName, out var clientId))
+            throw new InvalidOperationException($"{targetDisplayName}은(는) 현재 참가자가 아닙니다.");
+
+        var target = _participantRegistry.TryGetConnection(clientId)
+            ?? throw new InvalidOperationException($"{targetDisplayName}의 연결 정보를 찾을 수 없습니다.");
+
+        await _controlCoordinator.RequestAsync(target);
+
+        var state = _controlCoordinator.Current;
+        if (state is not null && state.Student == target && state.Phase == ControlPhase.Active)
+            _logSink.Write($"[Control] 활성: 대상={targetDisplayName}, requestId={state.RequestId}");
+        else
+            _logSink.Write($"[Control] 요청 대체됨: 대상={targetDisplayName}");
+    }
+
+    /// <summary>
+    /// 현재 원격 제어 대상을 회수하고 3번의 실제 입력 차단 확인까지 기다립니다.
+    /// </summary>
+    public async Task StopControlAsync()
+    {
+        if (_controlCoordinator is null) return;
+        await _controlCoordinator.StopAsync();
+        _logSink.Write("[Control] 회수");
+    }
+
+    /// <summary>
+    /// 학생의 보기/제어 허용 변경을 서버 기준 레지스트리에 반영합니다. 해당 학생이 제어 대상이면
+    /// 승인을 즉시 회수하고 실제 입력 차단 확인까지 기다립니다.
+    /// </summary>
+    /// <remarks>
+    /// 현재 단계에서는 학생 앱→서버 권한 변경 메시지 계약이 확정되지 않아 서버 내부 진입점만 제공합니다.
+    /// </remarks>
+    public async Task<bool> UpdateParticipantPermissionsAsync(string displayName, bool allowViewing, bool allowControl)
+    {
+        if (!_participants.TryGetValue(displayName, out var clientId))
+            return false;
+        var connection = _participantRegistry.TryGetConnection(clientId);
+        if (connection is null || !_participantRegistry.SetPermissions(connection.ConnectionId, allowViewing, allowControl))
+            return false;
+
+        _logSink.Write($"[Control] 허용 변경: 대상={displayName}, 보기={allowViewing}, 제어={allowViewing && allowControl}");
+        await ConfirmControlInputRevokedAsync();
+        return true;
+    }
+
+    /// <summary>
     /// 화면 공유가 종료될 때 팀장이 호출합니다. 남아 있는 초대를 모두 정리합니다.
     /// </summary>
     public async Task DetachRdpSharingAsync()
@@ -154,6 +240,11 @@ public sealed class SessionManager
                 Port = port,
                 HostAddress = "127.0.0.1"
             };
+
+            _professorConnection = new ParticipantConnection(
+                CurrentSession.SessionId, Guid.NewGuid(), Guid.NewGuid(), ParticipantRole.Professor);
+            _controlCoordinator = new ServerRemoteControlCoordinator(
+                _professorConnection, _participantRegistry, _remoteInputGate, _logSink);
         }
 
         _tcpServer.Start(port);
@@ -168,6 +259,18 @@ public sealed class SessionManager
         {
             _rdpSharingService = null;
             _rdpSharingId = Guid.Empty;
+        }
+        if (_controlCoordinator is not null)
+        {
+            try
+            {
+                await _controlCoordinator.StopAsync();
+            }
+            catch (Exception ex)
+            {
+                // 입력 회수 확인 실패가 세션 종료 자체를 막지 않게 한다. 승인 상태는 이미 Revoked다.
+                _logSink.Write($"[Control] 종료 중 입력 회수 확인 실패: {ex.GetType().Name}");
+            }
         }
         // 연결 정리 전에 클라이언트들에게 세션 종료 알림
         if (_participants.Count > 0)
@@ -184,9 +287,13 @@ public sealed class SessionManager
                 _logSink.Write($"[Session] 종료: 이름={CurrentSession.SessionName}");
             }
             CurrentSession = null;
+            _controlCoordinator?.Dispose();
+            _controlCoordinator = null;
+            _professorConnection = null;
         }
 
         ClearParticipants();
+        _participantRegistry.Clear();
         await _tcpServer.StopAsync();
     }
 
@@ -259,6 +366,7 @@ public sealed class SessionManager
 
                         if (response is AckPacket && !string.IsNullOrWhiteSpace(leaveName))
                         {
+                            await RevokeControlIfDisconnectedAsync(clientId);
                             await RevokeRdpInvitationAsync(leaveName, RdpFailureReason.SessionClosed, notifyClientId: null);
                             await BroadcastSystemMessageAsync($"{leaveName}님이 세션에서 나갔습니다.");
                         }
@@ -328,6 +436,7 @@ public sealed class SessionManager
         if (displayName is null)
             return;
 
+        await RevokeControlIfDisconnectedAsync(clientId);
         await RevokeRdpInvitationAsync(displayName, RdpFailureReason.NetworkInterrupted, notifyClientId: null);
 
         // 세션 계층 로그에는 TCP 계층이 모르는 sessionId까지 남겨 추적성을 확보한다.
@@ -406,6 +515,8 @@ public sealed class SessionManager
         {
             return CreateError(ErrorCodes.AlreadyJoined, $"{packet.DisplayName}은(는) 이미 참여 중입니다.", true, packet);
         }
+
+        _participantRegistry.Join(clientId, CurrentSession.SessionId, packet.DisplayName, ParticipantRole.Student);
 
         _logSink.Write($"[Session] 참여: {packet.DisplayName}, 현재 인원={CurrentSession.ParticipantCount}");
 
@@ -629,6 +740,31 @@ public sealed class SessionManager
         UpdateParticipantCount();
         ParticipantsChanged?.Invoke();
         return true;
+    }
+
+    /// <summary>
+    /// 레지스트리에서 연결을 지웁니다. 그 연결이 제어 대상이었다면 조정자가 ConnectionRemoved로
+    /// 승인을 회수하고, 여기서는 실제 입력 차단 확인까지 기다립니다.
+    /// </summary>
+    private async Task RevokeControlIfDisconnectedAsync(string clientId)
+    {
+        if (_participantRegistry.Disconnect(clientId) is null) return;
+        await ConfirmControlInputRevokedAsync();
+    }
+
+    private async Task ConfirmControlInputRevokedAsync()
+    {
+        var coordinator = _controlCoordinator;
+        if (coordinator is null) return;
+        try
+        {
+            await coordinator.ConfirmInputRevokedAsync();
+        }
+        catch (Exception ex)
+        {
+            // 확인 실패는 대기열에 남아 다음 요청/중지 때 재시도된다. 수신 루프는 계속 돈다.
+            _logSink.Write($"[Control] 입력 회수 확인 실패: {ex.GetType().Name}");
+        }
     }
 
     private string? RemoveParticipant(string clientId)
