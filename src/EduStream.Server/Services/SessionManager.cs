@@ -313,13 +313,34 @@ public sealed class SessionManager
     }
 
     /// <summary>
-    /// 모든 연결된 클라이언트에게 패킷을 브로드캐스트합니다.
+    /// 참가 승인된 연결에게만 패킷을 브로드캐스트합니다. TCP 연결만 하고 참가하지 않은 연결은 받지 않습니다.
     /// </summary>
     public async Task BroadcastPacketAsync(BasePacket packet)
     {
         ValidateOutboundPacket(packet);
         _logSink.Write($"[Packet] 브로드캐스트: 타입={packet.MessageType}, 길이={packet.DataLength}");
-        await _tcpServer.BroadcastAsync(packet);
+        await BroadcastToParticipantsAsync(packet);
+    }
+
+    /// <summary>
+    /// 강의 데이터(채팅·화면·파일·시스템 메시지)는 참가 승인된 연결에만 보낸다.
+    /// 연결 유지용 heartbeat만 TcpServerService.BroadcastAsync로 전체 연결에 나간다.
+    /// </summary>
+    private Task BroadcastToParticipantsAsync(BasePacket packet) =>
+        _tcpServer.SendToClientsAsync(_clientDisplayNames.Keys.ToArray(), packet);
+
+    /// <summary>
+    /// 참가하지 않은 연결의 기능 요청이면 NotParticipant 오류를 보내고 true를 반환합니다.
+    /// </summary>
+    private async Task<bool> RejectIfNotParticipantAsync(string clientId, BasePacket packet, string feature)
+    {
+        if (_clientDisplayNames.ContainsKey(clientId))
+            return false;
+
+        _logSink.Write($"[{feature}] 비참가자 차단: clientId={clientId}");
+        await _tcpServer.SendToClientAsync(clientId, CreateError(ErrorCodes.NotParticipant,
+            "세션에 참여하지 않은 상태에서는 요청할 수 없습니다.", true, packet));
+        return true;
     }
 
     public HeartbeatPacket CreateHeartbeat()
@@ -405,22 +426,26 @@ public sealed class SessionManager
                     break;
 
                 case PacketType.Screen:
-                    // 화면 패킷은 모든 클라이언트에게 브로드캐스트
+                    // 화면 패킷은 참가자에게만 브로드캐스트
                     var screenPacket = JsonSerializer.Deserialize<ScreenPacket>(payload);
                     if (screenPacket is not null)
                     {
+                        if (await RejectIfNotParticipantAsync(clientId, screenPacket, "Screen"))
+                            break;
                         ScreenTransferUtility.ValidatePacketMetadata(screenPacket);
-                        await _tcpServer.BroadcastAsync(screenPacket);
+                        await BroadcastToParticipantsAsync(screenPacket);
                         _logSink.Write($"[Screen] 브로드캐스트: 프레임#{screenPacket.FrameIndex}");
                     }
                     break;
 
                 case PacketType.File:
-                    // 파일 패킷은 모든 클라이언트에게 브로드캐스트
+                    // 파일 패킷은 참가자에게만 브로드캐스트
                     var filePacket = JsonSerializer.Deserialize<FilePacket>(payload);
                     if (filePacket is not null)
                     {
-                        await _tcpServer.BroadcastAsync(filePacket);
+                        if (await RejectIfNotParticipantAsync(clientId, filePacket, "File"))
+                            break;
+                        await BroadcastToParticipantsAsync(filePacket);
                         _logSink.Write($"[File] 브로드캐스트: {filePacket.FileName}");
                     }
                     break;
@@ -497,7 +522,7 @@ public sealed class SessionManager
 
         // 5) 브로드캐스트
         var targetCount = _participants.Count;
-        await _tcpServer.BroadcastAsync(chatPacket);
+        await BroadcastToParticipantsAsync(chatPacket);
 
         ChatReceived?.Invoke(verifiedName, chatPacket.Message);
         _logSink.Write($"[Chat] 브로드캐스트: {verifiedName} → {targetCount}명");
@@ -826,7 +851,7 @@ public sealed class SessionManager
 
         systemChat.SenderId = "Server";
 
-        await _tcpServer.BroadcastAsync(systemChat);
+        await BroadcastToParticipantsAsync(systemChat);
         ChatReceived?.Invoke("System", message);
         _logSink.Write($"[Chat] 시스템 브로드캐스트: {message}");
     }
