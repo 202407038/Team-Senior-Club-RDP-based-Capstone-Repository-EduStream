@@ -2,17 +2,22 @@ using System;
 using System.Collections.Concurrent;
 using System.Threading;
 using System.Threading.Tasks;
+using EduStream.Core.Collaboration;
+using EduStream.Server.Services;
 
 namespace EduStream.Server.Rdp;
 
 /// <summary>
 /// 원격 제어 입력 레벨 관리자 프로토타입 구현
 /// EduStream.Core에 의존하지 않고 Server 내부에서 독립 동작
+/// IRemoteInputGate/ServerRemoteControlCoordinator와 연동하여 실제 입력 허용/차단을 처리
 /// </summary>
-public sealed class RemoteControlManager : IRemoteControlManager
+public sealed class RemoteControlManager : IRemoteControlManager, IRemoteInputGate
 {
     private readonly ConcurrentDictionary<string, ControlPermission> _permissions = new();
     private ControlLevel _currentLevel = ControlLevel.ViewOnly;
+    private readonly object _gateLock = new();
+    private RemoteControlState? _activeControlState;
 
     public ControlLevel CurrentControlLevel => _currentLevel;
 
@@ -125,5 +130,44 @@ public sealed class RemoteControlManager : IRemoteControlManager
             return false;
 
         return true;
+    }
+
+    // IRemoteInputGate 구현 - ServerRemoteControlCoordinator와 연동
+    public async Task GrantAsync(RemoteControlState requested, CancellationToken cancellationToken)
+    {
+        lock (_gateLock)
+        {
+            _activeControlState = requested;
+            // 요청된 참가자에게 제어 권한 부여
+            if (requested.Student != null)
+            {
+                var connectionIdStr = requested.Student.ConnectionId.ToString();
+                _permissions[connectionIdStr] = new ControlPermission
+                {
+                    ParticipantId = connectionIdStr,
+                    Level = _currentLevel,
+                    HasControl = true,
+                    GrantedAt = DateTimeOffset.UtcNow
+                };
+            }
+        }
+        await Task.CompletedTask;
+    }
+
+    public async Task RevokeAsync(RemoteControlState revoked, CancellationToken cancellationToken)
+    {
+        lock (_gateLock)
+        {
+            if (revoked.Student != null)
+            {
+                var connectionIdStr = revoked.Student.ConnectionId.ToString();
+                if (_permissions.ContainsKey(connectionIdStr))
+                {
+                    _permissions[connectionIdStr].HasControl = false;
+                }
+            }
+            _activeControlState = null;
+        }
+        await Task.CompletedTask;
     }
 }
