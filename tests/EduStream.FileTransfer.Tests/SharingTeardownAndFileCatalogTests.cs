@@ -52,6 +52,50 @@ public sealed class SharingTeardownAndFileCatalogTests
     }
 
     [Fact]
+    public async Task DetachRdpSharing_WhileGrantPending_DoesNotReviveRequest()
+    {
+        await using var rig = await Rig.OpenAsync();
+        rig.SessionManager.AttachRdpSharing(new NoopRdpSharingService(), Guid.NewGuid());
+        await rig.ConnectAndJoinAsync("Alice");
+        var grant = rig.InputGate.HoldNextGrant();
+
+        var request = rig.SessionManager.RequestControlAsync("Alice");
+        await rig.InputGate.GrantEntered.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        await rig.SessionManager.DetachRdpSharingAsync().WaitAsync(TimeSpan.FromSeconds(2));
+        grant.TrySetResult();
+        await request.WaitAsync(TimeSpan.FromSeconds(2));
+
+        // 공유 중지가 먼저 끝났으므로 늦게 끝난 허용이 Active로 되살아나면 안 된다.
+        Assert.Equal(ControlPhase.Revoked, rig.SessionManager.CurrentControlState!.Phase);
+        Assert.NotEmpty(rig.InputGate.Revoked);
+    }
+
+    [Fact]
+    public async Task DetachRdpSharing_DuringTargetSwitch_DoesNotLeaveNewRequest()
+    {
+        await using var rig = await Rig.OpenAsync();
+        rig.SessionManager.AttachRdpSharing(new NoopRdpSharingService(), Guid.NewGuid());
+        await rig.ConnectAndJoinAsync("Alice");
+        await rig.ConnectAndJoinAsync("Bob");
+        await rig.SessionManager.RequestControlAsync("Alice");
+        var alice = rig.GetConnection("Alice");
+        var bob = rig.GetConnection("Bob");
+        var revoke = rig.InputGate.HoldNextRevoke();
+
+        // Bob으로 전환이 Alice 입력 회수 확인을 기다리는 동안 공유를 중지한다.
+        var switchTask = rig.SessionManager.RequestControlAsync("Bob");
+        await rig.InputGate.RevokeEntered.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        var detachTask = rig.SessionManager.DetachRdpSharingAsync();
+        revoke.TrySetResult();
+        await Task.WhenAll(switchTask, detachTask).WaitAsync(TimeSpan.FromSeconds(2));
+
+        var state = rig.SessionManager.CurrentControlState!;
+        Assert.Equal(ControlPhase.Revoked, state.Phase);
+        Assert.Equal(alice, state.Student);
+        Assert.DoesNotContain(rig.InputGate.Granted, g => g.Student == bob);
+    }
+
+    [Fact]
     public async Task DetachRdpSharing_WithNoActiveControl_DoesNotThrow()
     {
         await using var rig = await Rig.OpenAsync();
@@ -134,21 +178,37 @@ public sealed class SharingTeardownAndFileCatalogTests
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
 
+    /// <summary>3번 실제 입력 엔진 대신 호출을 기록하고, 필요하면 다음 허용/회수 완료를 붙잡아 두는 대역입니다.</summary>
     private sealed class RecordingInputGate : IRemoteInputGate
     {
+        private TaskCompletionSource? _nextGrant;
+        private TaskCompletionSource? _nextRevoke;
+
         public System.Collections.Concurrent.ConcurrentQueue<RemoteControlState> Granted { get; } = new();
         public System.Collections.Concurrent.ConcurrentQueue<RemoteControlState> Revoked { get; } = new();
+        public TaskCompletionSource GrantEntered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource RevokeEntered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public TaskCompletionSource HoldNextGrant() =>
+            _nextGrant = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public TaskCompletionSource HoldNextRevoke() =>
+            _nextRevoke = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
 
         public Task GrantAsync(RemoteControlState requested, CancellationToken cancellationToken)
         {
             Granted.Enqueue(requested);
-            return Task.CompletedTask;
+            GrantEntered.TrySetResult();
+            var hold = Interlocked.Exchange(ref _nextGrant, null);
+            return hold?.Task.WaitAsync(cancellationToken) ?? Task.CompletedTask;
         }
 
         public Task RevokeAsync(RemoteControlState revoked, CancellationToken cancellationToken)
         {
             Revoked.Enqueue(revoked);
-            return Task.CompletedTask;
+            RevokeEntered.TrySetResult();
+            var hold = Interlocked.Exchange(ref _nextRevoke, null);
+            return hold?.Task ?? Task.CompletedTask;
         }
     }
 
