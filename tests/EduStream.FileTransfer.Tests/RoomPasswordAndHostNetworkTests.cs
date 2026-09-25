@@ -1,6 +1,8 @@
+using System.Collections.Concurrent;
 using System.Net;
 using System.Net.NetworkInformation;
 using System.Net.Sockets;
+using System.Text.Json;
 using EduStream.Client.Services;
 using EduStream.Core.Factories;
 using EduStream.Core.Logging;
@@ -13,7 +15,8 @@ namespace EduStream.FileTransfer.Tests;
 
 /// <summary>
 /// 9월 4주차 2번: 방 비밀번호 지정/미설정, 해시 검증·시도 제한, 접속용 호스트 IP 정보를 검증합니다.
-/// 보호 채널이 없는 동안 비밀번호 방이 평문 참가 요청으로 열리지 않는지(fail-closed)도 확인합니다.
+/// 보호 채널이 없는 동안 비밀번호 방이 평문 참가 요청으로 열리지 않는지(fail-closed)와
+/// TCP 연결만 한 미참가 연결이 강의 데이터를 받거나 기능을 요청하지 못하는지도 확인합니다.
 /// </summary>
 public sealed class RoomPasswordAndHostNetworkTests
 {
@@ -104,6 +107,73 @@ public sealed class RoomPasswordAndHostNetworkTests
         Assert.False(rig.SessionManager.IsRoomPasswordProtected);
     }
 
+    [Fact]
+    public async Task UnjoinedConnection_DoesNotReceiveProfessorChat()
+    {
+        await using var rig = await Rig.OpenAsync();
+        var alice = await rig.ConnectRecorderAsync(join: "Alice");
+        var unjoined = await rig.ConnectRecorderAsync(join: null);
+
+        await rig.SessionManager.BroadcastPacketAsync(
+            PacketFactory.CreateChat(senderId: "Server", sender: "교수자", message: "강의 공지"));
+
+        await WaitUntilAsync(() => alice.Count(PacketType.Chat) >= 2, DefaultWait); // 참가 시스템 메시지 + 공지
+        await Task.Delay(200);
+        Assert.Equal(0, unjoined.Count(PacketType.Chat));
+    }
+
+    [Fact]
+    public async Task PasswordRoom_UnjoinedConnection_ReceivesNoLectureData()
+    {
+        // 리뷰 재현: 비밀번호 방에 TCP 연결만 하고 참가/비밀번호를 보내지 않은 연결.
+        await using var rig = await Rig.OpenAsync("secret1234");
+        var unjoined = await rig.ConnectRecorderAsync(join: null);
+
+        await rig.SessionManager.BroadcastPacketAsync(
+            PacketFactory.CreateChat(senderId: "Server", sender: "교수자", message: "강의 공지"));
+        await rig.SessionManager.BroadcastPacketAsync(PacketFactory.CreateScreenFrame(
+            senderId: "Server", frameIndex: 1, frameDescription: "test", width: 2, height: 2,
+            encoding: ScreenEncodings.Png, content: new byte[] { 1, 2, 3 }));
+
+        await Task.Delay(300);
+        Assert.Equal(0, unjoined.Count(PacketType.Chat));
+        Assert.Equal(0, unjoined.Count(PacketType.Screen));
+    }
+
+    [Fact]
+    public async Task UnjoinedConnection_FilePacket_IsRejectedAndNotRelayed()
+    {
+        await using var rig = await Rig.OpenAsync();
+        var alice = await rig.ConnectRecorderAsync(join: "Alice");
+        var unjoined = await rig.ConnectRecorderAsync(join: null);
+
+        await unjoined.Client.SendAsync(PacketFactory.CreateFileChunk(
+            senderId: "ghost", fileName: "a.bin", fileSize: 3, checksum: new string('0', 64),
+            transferId: Guid.NewGuid(), chunkIndex: 0, totalChunks: 1, content: new byte[] { 1, 2, 3 }));
+
+        await WaitUntilAsync(() => unjoined.Count(PacketType.Error) >= 1, DefaultWait);
+        Assert.Equal(ErrorCodes.NotParticipant, unjoined.LastErrorCode());
+        await Task.Delay(200);
+        Assert.Equal(0, alice.Count(PacketType.File));
+    }
+
+    [Fact]
+    public async Task UnjoinedConnection_ScreenPacket_IsRejectedAndNotRelayed()
+    {
+        await using var rig = await Rig.OpenAsync();
+        var alice = await rig.ConnectRecorderAsync(join: "Alice");
+        var unjoined = await rig.ConnectRecorderAsync(join: null);
+
+        await unjoined.Client.SendAsync(PacketFactory.CreateScreenFrame(
+            senderId: "ghost", frameIndex: 1, frameDescription: "fake", width: 2, height: 2,
+            encoding: ScreenEncodings.Png, content: new byte[] { 1, 2, 3 }));
+
+        await WaitUntilAsync(() => unjoined.Count(PacketType.Error) >= 1, DefaultWait);
+        Assert.Equal(ErrorCodes.NotParticipant, unjoined.LastErrorCode());
+        await Task.Delay(200);
+        Assert.Equal(0, alice.Count(PacketType.Screen));
+    }
+
     [Theory]
     [InlineData(NetworkInterfaceType.Loopback, "Loopback", "", "127.0.0.1", HostAddressKind.Loopback)]
     [InlineData(NetworkInterfaceType.Ethernet, "이더넷", "Realtek PCIe GbE", "169.254.10.2", HostAddressKind.LinkLocal)]
@@ -142,6 +212,34 @@ public sealed class RoomPasswordAndHostNetworkTests
 
         Assert.All(addresses, info => Assert.Equal(AddressFamily.InterNetwork, IPAddress.Parse(info.Address).AddressFamily));
         Assert.Equal(addresses.OrderBy(info => info.Kind).Select(info => info.Kind), addresses.Select(info => info.Kind));
+    }
+
+    private static async Task WaitUntilAsync(Func<bool> condition, TimeSpan timeout)
+    {
+        var deadline = DateTime.UtcNow + timeout;
+        while (DateTime.UtcNow < deadline)
+        {
+            if (condition())
+                return;
+            await Task.Delay(20);
+        }
+        throw new TimeoutException("조건이 제한 시간 안에 충족되지 않았습니다.");
+    }
+
+    private sealed class PacketRecorder(TcpClientService client)
+    {
+        private readonly ConcurrentQueue<(PacketType Type, byte[] Payload)> _received = new();
+
+        public TcpClientService Client { get; } = client;
+
+        public void Record(PacketType type, byte[] payload) => _received.Enqueue((type, payload));
+
+        public int Count(PacketType type) => _received.Count(p => p.Type == type);
+
+        public string? LastErrorCode() =>
+            _received.Where(p => p.Type == PacketType.Error)
+                .Select(p => JsonSerializer.Deserialize<ErrorPacket>(p.Payload)?.ErrorCode)
+                .LastOrDefault();
     }
 
     private sealed class ManualTimeProvider : TimeProvider
@@ -192,6 +290,30 @@ public sealed class RoomPasswordAndHostNetworkTests
             await client.SendAsync(PacketFactory.CreateSessionJoin(
                 senderId: displayName, displayName: displayName, targetAddress: "127.0.0.1", targetPort: Port));
             return await response.Task.WaitAsync(DefaultWait);
+        }
+
+        /// <summary>
+        /// 수신 패킷을 기록하는 연결을 만듭니다. join이 null이면 TCP 연결만 하고 참가하지 않습니다.
+        /// </summary>
+        public async Task<PacketRecorder> ConnectRecorderAsync(string? join)
+        {
+            var client = new TcpClientService(new InMemoryLogSink(), new PacketSerializer());
+            var recorder = new PacketRecorder(client);
+            client.PacketReceived += (packetType, payload) =>
+            {
+                recorder.Record(packetType, payload);
+                return Task.CompletedTask;
+            };
+            await client.ConnectAsync("127.0.0.1", Port);
+            _clients.Add(client);
+
+            if (join is not null)
+            {
+                await client.SendAsync(PacketFactory.CreateSessionJoin(
+                    senderId: join, displayName: join, targetAddress: "127.0.0.1", targetPort: Port));
+                await WaitUntilAsync(() => recorder.Count(PacketType.Ack) >= 1, DefaultWait);
+            }
+            return recorder;
         }
 
         public async ValueTask DisposeAsync()
