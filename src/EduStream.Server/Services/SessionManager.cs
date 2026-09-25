@@ -3,6 +3,7 @@ using System.Security.Cryptography;
 using System.Text.Json;
 using EduStream.Core.Collaboration;
 using EduStream.Core.Factories;
+using EduStream.Core.FileSharing;
 using EduStream.Core.Logging;
 using EduStream.Core.Models;
 using EduStream.Core.Network;
@@ -34,6 +35,7 @@ public sealed class SessionManager
     private ParticipantConnection? _professorConnection;
     private ServerRemoteControlCoordinator? _controlCoordinator;
     private IRemoteInputGate _remoteInputGate = UnavailableRemoteInputGate.Instance;
+    private ISessionFileCatalog? _fileCatalog;
 
     /// <summary>
     /// 참여자 목록이 변경되었을 때 발생합니다.
@@ -210,7 +212,37 @@ public sealed class SessionManager
     }
 
     /// <summary>
-    /// 화면 공유가 종료될 때 팀장이 호출합니다. 남아 있는 초대를 모두 정리합니다.
+    /// 교수자 로컬 파일을 강의 카탈로그에 등록합니다. 본문은 아직 전송하지 않으며
+    /// 이름·길이·SHA256·청크 크기만 목록에 올라갑니다.
+    /// </summary>
+    public Task<SessionFileDescriptor> RegisterFileAsync(string localPath, CancellationToken cancellationToken = default)
+    {
+        if (_fileCatalog is null)
+            throw new InvalidOperationException("현재 열려 있는 세션이 없습니다.");
+        return _fileCatalog.RegisterAsync(localPath, cancellationToken);
+    }
+
+    /// <summary>
+    /// 등록된 파일을 목록에서 내립니다. 이후 요청/미완료 청크는 차단되지만
+    /// 이미 저장 완료된 파일은 학생 쪽에 그대로 남습니다.
+    /// </summary>
+    public bool UnregisterFile(Guid fileId)
+    {
+        if (_fileCatalog is null)
+            throw new InvalidOperationException("현재 열려 있는 세션이 없습니다.");
+        return _fileCatalog.Unregister(fileId);
+    }
+
+    /// <summary>
+    /// 현재 강의의 파일 목록 스냅샷입니다. 세션이 열려 있지 않으면 null입니다.
+    /// revision은 등록/해제마다 증가하므로 학생 쪽 동기화 여부 판단에 사용할 수 있습니다.
+    /// </summary>
+    public SessionFileCatalogSnapshot? GetFileCatalogSnapshot() => _fileCatalog?.GetSnapshot();
+
+    /// <summary>
+    /// 화면 공유가 종료될 때 팀장이 호출합니다. 남아 있는 초대와 진행 중인 원격 제어를 모두 정리합니다.
+    /// 공유가 없는 상태에서 제어만 남아 있는 것은 의미가 없으므로, 세션 종료가 아니라
+    /// "화면 공유만 중지"하는 경우에도 항상 함께 회수합니다.
     /// </summary>
     public async Task DetachRdpSharingAsync()
     {
@@ -218,6 +250,19 @@ public sealed class SessionManager
         {
             _rdpSharingService = null;
             _rdpSharingId = Guid.Empty;
+        }
+        // 공유 재시작 뒤 제어를 자동 재승인하지 않는다(화면 수신 자동 복귀와 별개, 협의 필요 항목).
+        if (_controlCoordinator is not null)
+        {
+            try
+            {
+                await _controlCoordinator.StopAsync();
+            }
+            catch (Exception ex)
+            {
+                // 입력 회수 확인 실패가 초대 정리를 막지 않게 한다. 승인 상태는 이미 Revoked다.
+                _logSink.Write($"[Control] 공유 중지 중 입력 회수 확인 실패: {ex.GetType().Name}");
+            }
         }
         await RevokeAllRdpInvitationsAsync(RdpFailureReason.SessionClosed);
         _logSink.Write("[Rdp] 공유 서비스 연결 해제");
@@ -245,6 +290,8 @@ public sealed class SessionManager
                 CurrentSession.SessionId, Guid.NewGuid(), Guid.NewGuid(), ParticipantRole.Professor);
             _controlCoordinator = new ServerRemoteControlCoordinator(
                 _professorConnection, _participantRegistry, _remoteInputGate, _logSink);
+            _fileCatalog = new SessionFileCatalog(
+                CurrentSession.SessionId, new SessionFileRequestAuthorizer(_participantRegistry));
         }
 
         _tcpServer.Start(port);
@@ -290,6 +337,8 @@ public sealed class SessionManager
             _controlCoordinator?.Dispose();
             _controlCoordinator = null;
             _professorConnection = null;
+            _fileCatalog?.Dispose();
+            _fileCatalog = null;
         }
 
         ClearParticipants();
