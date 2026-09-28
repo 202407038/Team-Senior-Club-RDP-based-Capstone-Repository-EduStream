@@ -265,28 +265,28 @@ public sealed class SessionManager
     public SessionFileCatalogSnapshot? GetFileCatalogSnapshot() => _fileCatalog?.GetSnapshot();
 
     /// <summary>
+    /// 승인은 회수했지만 실제 입력 차단 확인이 아직 끝나지 않은 원격 제어가 있으면 true입니다.
+    /// <see cref="DetachRdpSharingAsync"/>가 Pending/Failed를 반환한 뒤 차단 완료 여부를 다시 확인할 때 사용합니다.
+    /// </summary>
+    public bool IsControlInputRevokePending => _controlCoordinator?.IsInputRevokePending ?? false;
+
+    /// <summary>
     /// 화면 공유가 종료될 때 팀장이 호출합니다. 남아 있는 초대와 진행 중인 원격 제어를 모두 정리합니다.
     /// 공유가 없는 상태에서 제어만 남아 있는 것은 의미가 없으므로, 세션 종료가 아니라
     /// "화면 공유만 중지"하는 경우에도 항상 함께 회수합니다.
     /// </summary>
-    public async Task DetachRdpSharingAsync()
+    /// <returns>
+    /// 실제 입력 차단 확인 결과. 승인 상태는 항상 즉시 회수되지만, Confirmed가 아니면
+    /// 학생 PC 입력이 막혔다고 표시하면 안 됩니다.
+    /// </returns>
+    public async Task<RemoteInputRevokeStatus> DetachRdpSharingAsync()
     {
         EndSharingLifetime();
         // 공유 재시작 뒤 제어를 자동 재승인하지 않는다(화면 수신 자동 복귀와 별개, 협의 필요 항목).
-        if (_controlCoordinator is not null)
-        {
-            try
-            {
-                await _controlCoordinator.StopAsync();
-            }
-            catch (Exception ex)
-            {
-                // 입력 회수 확인 실패가 초대 정리를 막지 않게 한다. 승인 상태는 이미 Revoked다.
-                _logSink.Write($"[Control] 공유 중지 중 입력 회수 확인 실패: {ex.GetType().Name}");
-            }
-        }
+        var inputRevoke = await StopControlForTeardownAsync("공유 중지");
         await RevokeAllRdpInvitationsAsync(RdpFailureReason.SessionClosed);
-        _logSink.Write("[Rdp] 공유 서비스 연결 해제");
+        _logSink.Write($"[Rdp] 공유 서비스 연결 해제: 입력 차단={inputRevoke}");
+        return inputRevoke;
     }
 
     /// <summary>
@@ -337,18 +337,8 @@ public sealed class SessionManager
     {
         // 종료 정리 전에 새 초대 발급과 제어 요청을 막는다. 기존 초대는 발급한 서비스로 회수한다.
         EndSharingLifetime();
-        if (_controlCoordinator is not null)
-        {
-            try
-            {
-                await _controlCoordinator.StopAsync();
-            }
-            catch (Exception ex)
-            {
-                // 입력 회수 확인 실패가 세션 종료 자체를 막지 않게 한다. 승인 상태는 이미 Revoked다.
-                _logSink.Write($"[Control] 종료 중 입력 회수 확인 실패: {ex.GetType().Name}");
-            }
-        }
+        // 입력 회수 확인 실패가 세션 종료 자체를 막지 않게 한다. 결과는 로그로만 남긴다.
+        await StopControlForTeardownAsync("세션 종료");
         // 연결 정리 전에 클라이언트들에게 세션 종료 알림
         if (_participants.Count > 0)
         {
@@ -850,6 +840,34 @@ public sealed class SessionManager
         }
         // 진행 중인 요청이 토큰을 계속 참조할 수 있어 Dispose하지 않는다(타이머 없는 CTS라 누수 없음).
         lifetime?.Cancel();
+    }
+
+    /// <summary>
+    /// 공유 중지/세션 종료 정리 중 원격 제어를 회수합니다. 회수 실패가 뒤따르는 초대·세션 정리를
+    /// 막지 않도록 예외 대신 결과로 돌려줍니다. 승인 상태는 어느 경우든 이미 Revoked입니다.
+    /// </summary>
+    private async Task<RemoteInputRevokeStatus> StopControlForTeardownAsync(string reason)
+    {
+        var coordinator = _controlCoordinator;
+        if (coordinator is null) return RemoteInputRevokeStatus.Confirmed;
+
+        try
+        {
+            await coordinator.StopAsync();
+        }
+        catch (Exception ex)
+        {
+            _logSink.Write($"[Control] {reason} 중 입력 회수 확인 실패: {ex.GetType().Name}");
+            return RemoteInputRevokeStatus.Failed;
+        }
+
+        // StopAsync는 취소를 무시한 허용 작업이 남아도 최초 회수 후 반환하므로, 반환만으로 차단 완료로 보지 않는다.
+        if (coordinator.IsInputRevokePending)
+        {
+            _logSink.Write($"[Control] {reason}: 허용 작업 종료 대기, 입력 차단 확인 미완료");
+            return RemoteInputRevokeStatus.Pending;
+        }
+        return RemoteInputRevokeStatus.Confirmed;
     }
 
     private string? GetDisplayName(string clientId, string? packetDisplayName)
