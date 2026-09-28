@@ -734,8 +734,10 @@ public sealed class SessionManager
         {
             sharingService = _rdpSharingService;
             sharingId = _rdpSharingId;
-            // 공유 연결과 같은 잠금 안에서 대기 등록해야 그 사이 시작된 공유의 복귀 알림을 놓치지 않는다.
-            if (sharingService is null) TryAddScreenWaiter(clientId);
+            // 발급 중인 요청도 공유 중지·재시작 때 복귀 대상으로 남긴다.
+            // 성공 시 아래에서 제거하며 퇴장/철회/종료는 기존 정리 경로가 제거한다.
+            // 공유 연결과 같은 잠금으로 등록해 재시작 알림과의 경합을 막는다.
+            TryAddScreenWaiter(clientId);
         }
         if (sharingService is null)
         {
