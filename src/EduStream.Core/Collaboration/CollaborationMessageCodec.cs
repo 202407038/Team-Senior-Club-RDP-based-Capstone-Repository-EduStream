@@ -6,7 +6,8 @@ namespace EduStream.Core.Collaboration;
 public enum CollaborationMessageKind
 {
     Participants = 1, FileCatalog = 2, FileRequest = 3, FileChunk = 4,
-    FileCancel = 5, FileStored = 6, Failure = 7
+    FileCancel = 5, FileStored = 6, Failure = 7,
+    RoomAuthRequest = 8, RoomAuthResult = 9
 }
 public sealed record FileCancelRequest(Guid RequestId, Guid SessionId);
 public sealed record FileStoredNotice(Guid RequestId, Guid FileId, long Length, string Sha256);
@@ -71,6 +72,8 @@ public static class CollaborationMessageCodec
         if (type == typeof(FileCancelRequest)) return CollaborationMessageKind.FileCancel;
         if (type == typeof(FileStoredNotice)) return CollaborationMessageKind.FileStored;
         if (type == typeof(CollaborationFailureNotice)) return CollaborationMessageKind.Failure;
+        if (type == typeof(RoomAuthRequest)) return CollaborationMessageKind.RoomAuthRequest;
+        if (type == typeof(RoomAuthResult)) return CollaborationMessageKind.RoomAuthResult;
         throw new CollaborationException(CollaborationError.UnsupportedCapability);
     }
 
@@ -120,6 +123,8 @@ public static class CollaborationMessageCodec
                 if (!Enum.IsDefined(failure.Error))
                     throw new CollaborationException(CollaborationError.InvalidRequest);
                 break;
+            case RoomAuthRequest auth: RoomAuthRules.Validate(auth); break;
+            case RoomAuthResult result: RoomAuthRules.Validate(result); break;
             default: throw new CollaborationException(CollaborationError.UnsupportedCapability);
         }
     }

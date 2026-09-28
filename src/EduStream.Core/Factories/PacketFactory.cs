@@ -13,14 +13,16 @@ public static class PacketFactory
         string senderId,
         string displayName,
         string targetAddress,
-        int targetPort)
+        int targetPort,
+        string? joinTicket = null)
     {
         return new SessionJoinPacket
         {
             SenderId = senderId,
             DisplayName = displayName,
             TargetAddress = targetAddress,
-            TargetPort = targetPort
+            TargetPort = targetPort,
+            JoinTicket = joinTicket
         };
     }
 

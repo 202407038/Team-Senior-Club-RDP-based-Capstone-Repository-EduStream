@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Security.Cryptography;
+using System.Security.Cryptography.X509Certificates;
 using System.Text.Json;
 using EduStream.Core.Collaboration;
 using EduStream.Core.Factories;
@@ -41,6 +42,9 @@ public sealed class SessionManager
     private IRemoteInputGate _remoteInputGate = UnavailableRemoteInputGate.Instance;
     private RoomPasswordVerifier? _roomPassword;
     private ISessionFileCatalog? _fileCatalog;
+    private SecureCollaborationListener? _secureListener;
+    private SecureRoomGate? _secureGate;
+    private readonly ConcurrentDictionary<string, SecureCollaborationConnection> _secureConnections = new(); // clientId → 묶인 보호 채널
     private SessionFileTransferRouter? _fileTransfers;
 
     /// <summary>
@@ -336,11 +340,31 @@ public sealed class SessionManager
     public bool IsRoomPasswordProtected => _roomPassword is not null;
 
     /// <summary>
+    /// 교수자 화면에 표시할 접속 코드입니다. 보호 채널 없이 연 세션이면 null입니다.
+    /// </summary>
+    public string? ConnectionCode => _secureListener?.ConnectionCode;
+
+    /// <summary>
+    /// 보호 채널 참가 인증(티켓)을 거쳐야만 참가할 수 있는 세션이면 true입니다.
+    /// </summary>
+    public bool IsSecureJoinRequired => _secureGate is not null;
+
+    /// <summary>현재 참가자와 묶인 보호 채널 수입니다. 테스트/모니터링용입니다.</summary>
+    public int SecureConnectionCount => _secureConnections.Count;
+
+    /// <summary>
     /// roomPassword가 비어 있으면 비밀번호 없는 방입니다. 비밀번호는 해시로만 보관하며
     /// SessionInfo에 넣지 않습니다(브로드캐스트/직렬화 노출 방지).
     /// </summary>
-    public Task<SessionInfo> OpenSessionAsync(string sessionName, int port, ReadOnlyMemory<char> roomPassword = default)
+    /// <param name="secureChannelCertificate">
+    /// 지정하면 세션 포트 + 1에서 보호 채널을 열고, 비밀번호 유무와 관계없이 모든 참가에 보호 채널 인증 티켓을 요구합니다.
+    /// 교수자 앱은 항상 지정합니다. 지정하지 않으면 비밀번호 방은 참가를 모두 거부하고(fail-closed),
+    /// 비밀번호 없는 방은 기존 v1 참가 경로만 씁니다(기존 테스트·개발 경로 호환).
+    /// </param>
+    public async Task<SessionInfo> OpenSessionAsync(string sessionName, int port, ReadOnlyMemory<char> roomPassword = default,
+        X509Certificate2? secureChannelCertificate = null)
     {
+        var securePort = secureChannelCertificate is null ? 0 : CollaborationPorts.ForSession(port);
         // 해시 계산은 잠금 밖에서 끝내고, 입력 오류면 세션을 열지 않는다.
         var passwordVerifier = RoomPasswordVerifier.Create(roomPassword.Span);
 
@@ -368,11 +392,28 @@ public sealed class SessionManager
             _fileCatalog = new SessionFileCatalog(
                 CurrentSession.SessionId, new SessionFileRequestAuthorizer(_participantRegistry));
             _fileTransfers = new SessionFileTransferRouter(_fileCatalog, _participantRegistry, _logSink);
+            if (secureChannelCertificate is not null)
+            {
+                _secureListener = new SecureCollaborationListener(secureChannelCertificate, _logSink);
+                _secureGate = new SecureRoomGate(_secureListener, CurrentSession.SessionId, passwordVerifier, _logSink);
+                _secureGate.ConnectionClosed += OnSecureConnectionClosed;
+            }
         }
 
-        _tcpServer.Start(port);
-        _logSink.Write($"[Session] 개설: 이름={sessionName}, 포트={port}, 방 비밀번호={(passwordVerifier is null ? "없음" : "설정")}");
-        return Task.FromResult(CurrentSession);
+        var session = CurrentSession;
+        try
+        {
+            _tcpServer.Start(port);
+            _secureListener?.Start(securePort);
+        }
+        catch
+        {
+            await CloseSessionAsync();
+            throw;
+        }
+        _logSink.Write($"[Session] 개설: 이름={sessionName}, 포트={port}, 방 비밀번호={(passwordVerifier is null ? "없음" : "설정")}, " +
+                       $"보호 채널={(_secureListener is null ? "없음" : $"포트 {securePort}")}");
+        return session;
     }
 
     public async Task CloseSessionAsync()
@@ -389,6 +430,8 @@ public sealed class SessionManager
 
         await RevokeAllRdpInvitationsAsync(RdpFailureReason.SessionClosed);
 
+        SecureRoomGate? secureGate;
+        SecureCollaborationListener? secureListener;
         lock (_sessionLock)
         {
             if (CurrentSession is not null)
@@ -404,11 +447,36 @@ public sealed class SessionManager
             _fileTransfers = null;
             _fileCatalog?.Dispose();
             _fileCatalog = null;
+            secureGate = _secureGate;
+            secureListener = _secureListener;
+            _secureGate = null;
+            _secureListener = null;
         }
+
+        if (secureGate is not null)
+        {
+            secureGate.ConnectionClosed -= OnSecureConnectionClosed;
+            await secureGate.DisposeAsync();
+        }
+        if (secureListener is not null) await secureListener.DisposeAsync();
+        _secureConnections.Clear();
 
         ClearParticipants();
         _participantRegistry.Clear();
         await _tcpServer.StopAsync();
+    }
+
+    /// <summary>
+    /// 보호 채널이 닫히면 그 참가자의 기존 TCP 연결도 끊습니다. 두 연결은 한 참가자의 수명을 공유합니다.
+    /// </summary>
+    private void OnSecureConnectionClosed(SecureCollaborationConnection connection)
+    {
+        foreach (var (clientId, bound) in _secureConnections)
+        {
+            if (!ReferenceEquals(bound, connection)) continue;
+            _logSink.Write($"[SecureJoin] 보호 채널 종료로 참가 연결 정리: clientId={clientId}");
+            _ = _tcpServer.DisconnectClientAsync(clientId, "보호 채널 종료");
+        }
     }
 
     /// <summary>
@@ -639,9 +707,10 @@ public sealed class SessionManager
             return CreateError(ErrorCodes.DisplayNameRequired, "참여자 이름은 비워둘 수 없습니다.", true, packet);
         }
 
-        if (_roomPassword is not null)
+        var secureGate = _secureGate;
+        if (secureGate is null && _roomPassword is not null)
         {
-            // 현재 단계에서는 보호 채널 인증 계약이 없어 비밀번호를 받을 경로가 없다.
+            // 보호 채널 없이 연 세션에는 비밀번호를 받을 경로가 없다.
             // 평문 v1 참가 요청으로 우회되지 않도록 비밀번호 방은 참가를 거부한다(fail-closed).
             _logSink.Write($"[Session] 비밀번호 방 참가 거부(보호 채널 미지원): clientId={clientId}");
             return CreateError(ErrorCodes.JoinRejected, "비밀번호가 설정된 방은 보호된 인증 연결이 준비된 뒤 참가할 수 있습니다.", false, packet);
@@ -657,13 +726,33 @@ public sealed class SessionManager
                 packet);
         }
 
+        SecureCollaborationConnection? secure = null;
+        if (secureGate is not null)
+        {
+            // 티켓은 이름에 묶인 일회용이다. 실패해도 다시 쓸 수 없으므로 학생은 인증부터 다시 한다.
+            secure = secureGate.Redeem(packet.JoinTicket, packet.DisplayName);
+            if (secure is null)
+            {
+                _logSink.Write($"[SecureJoin] 티켓 없음/만료/불일치로 참가 거부: clientId={clientId}");
+                return CreateError(ErrorCodes.JoinRejected,
+                    "보호 연결 인증이 확인되지 않았습니다. 접속 코드를 확인하고 다시 참가해 주세요.", true, packet);
+            }
+        }
+
         // 중복 참여 체크
         if (!TryAddParticipant(clientId, packet.DisplayName))
         {
+            if (secure is not null) _ = secure.DisposeAsync();
             return CreateError(ErrorCodes.AlreadyJoined, $"{packet.DisplayName}은(는) 이미 참여 중입니다.", true, packet);
         }
 
         _participantRegistry.Join(clientId, CurrentSession.SessionId, packet.DisplayName, ParticipantRole.Student);
+        if (secure is not null)
+        {
+            _secureConnections[clientId] = secure;
+            // 등록 직전에 닫혔다면 닫힘 알림이 이 참가자를 찾지 못했으므로 여기서 정리한다.
+            if (secure.IsClosed) _ = _tcpServer.DisconnectClientAsync(clientId, "보호 채널 종료");
+        }
 
         _logSink.Write($"[Session] 참여: {packet.DisplayName}, 현재 인원={CurrentSession.ParticipantCount}");
 
@@ -1024,6 +1113,7 @@ public sealed class SessionManager
             _participants.TryRemove(displayName, out _);
             // 실제 퇴장·연결 끊김 후에는 자동 복귀하지 않는다. 다시 오면 새 참가로 처리한다(U03).
             _screenWaiters.TryRemove(clientId, out _);
+            if (_secureConnections.TryRemove(clientId, out var secure)) _ = secure.DisposeAsync();
         }
         UpdateParticipantCount();
         ParticipantsChanged?.Invoke();

@@ -21,13 +21,14 @@ public sealed class SessionClient
 
     public bool IsConnected => CurrentSession is not null;
 
-    public SessionJoinPacket CreateJoinRequest(string hostAddress, int port, string displayName)
+    public SessionJoinPacket CreateJoinRequest(string hostAddress, int port, string displayName, string? joinTicket = null)
     {
         return PacketFactory.CreateSessionJoin(
             senderId: displayName,
             displayName: displayName,
             targetAddress: hostAddress,
-            targetPort: port);
+            targetPort: port,
+            joinTicket: joinTicket);
     }
 
     public Task<SessionInfo> ApplyJoinAckAsync(AckPacket packet, string hostAddress, int port)

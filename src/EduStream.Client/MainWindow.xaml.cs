@@ -13,6 +13,13 @@ public partial class MainWindow : Window
         if (DataContext is ClientViewModel vm)
         {
             vm.AttachRdpHost(RdpHost);
+            // 방 비밀번호는 참가를 시도할 때 한 번 읽고 바로 비운다.
+            vm.RoomPasswordProvider = () =>
+            {
+                var password = RoomPasswordBox.Password;
+                RoomPasswordBox.Clear();
+                return password;
+            };
         }
         Closing += async (_, e) =>
         {

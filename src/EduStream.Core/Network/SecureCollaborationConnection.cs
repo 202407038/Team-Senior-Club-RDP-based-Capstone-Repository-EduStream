@@ -20,12 +20,16 @@ public sealed class SecureCollaborationConnection : ICollaborationChannel, IAsyn
 
     /// <param name="stream">인증이 끝난 SslStream.</param>
     /// <param name="transport">스트림과 함께 닫을 하위 소켓(TcpClient 등).</param>
-    public SecureCollaborationConnection(Stream stream, IDisposable? transport, ILogSink logSink)
+    /// <param name="remoteAddress">상대 IP. 비밀번호 시도 제한 키로 씁니다.</param>
+    public SecureCollaborationConnection(Stream stream, IDisposable? transport, ILogSink logSink, string? remoteAddress = null)
     {
         _stream = stream ?? throw new ArgumentNullException(nameof(stream));
         _transport = transport;
         _logSink = logSink ?? throw new ArgumentNullException(nameof(logSink));
+        RemoteAddress = remoteAddress ?? "unknown";
     }
+
+    public string RemoteAddress { get; }
 
     /// <summary>이 프로세스 안에서만 쓰는 연결 식별자입니다. 참가자 ConnectionId와는 별개입니다.</summary>
     public Guid Id { get; } = Guid.NewGuid();

@@ -35,6 +35,8 @@ public sealed class ClientViewModel : ObservableObject
     private readonly TcpClientService _tcpClient;
     private readonly IPacketSerializer _serializer = new PacketSerializer();
     private readonly IRdpViewerService _rdpViewerService;
+    private SecureSessionChannel? _secureChannel;
+    private string _connectionCode = string.Empty;
     private RdpInvitationPacket? _activeRdpInvitation;
     private Guid _rdpSessionId;
     private string _rdpParticipant = string.Empty;
@@ -140,6 +142,18 @@ public sealed class ClientViewModel : ObservableObject
         get => _port;
         set => SetProperty(ref _port, value);
     }
+
+    /// <summary>교수자 화면의 접속 코드(XXXX-XXXX-XXXX)입니다. 연결한 PC가 그 교수자인지 확인하는 데 씁니다.</summary>
+    public string ConnectionCode
+    {
+        get => _connectionCode;
+        set => SetProperty(ref _connectionCode, value);
+    }
+
+    /// <summary>
+    /// 방 비밀번호 입력칸을 읽고 비우는 함수입니다. 비밀번호를 ViewModel 속성에 보관하지 않기 위해 View가 제공합니다.
+    /// </summary>
+    public Func<string>? RoomPasswordProvider { get; set; }
 
     public string DisplayName
     {
@@ -312,6 +326,12 @@ public sealed class ClientViewModel : ObservableObject
             return;
         }
 
+        if (!EduStream.Core.Network.ConnectionCode.TryNormalize(ConnectionCode, out _))
+        {
+            ApplyJoinError(_sessionClient.CreateJoinError(HostAddress, Port, "교수자 화면의 접속 코드(XXXX-XXXX-XXXX)를 입력해 주세요."));
+            return;
+        }
+
         try
         {
             // 💡 연결 시도 시 에러 상태 초기화 및 로딩 가동
@@ -323,11 +343,27 @@ public sealed class ClientViewModel : ObservableObject
             _logSink.Write($"서버 연결 시도: {HostAddress}:{Port}");
             SyncLogs();
 
+            // 접속 코드로 교수자 PC를 확인한 보호 채널에서만 방 비밀번호를 보내고 참가 티켓을 받는다.
+            StatusMessage = "교수자 PC를 확인하는 중입니다...";
+            var roomPassword = RoomPasswordProvider?.Invoke() ?? string.Empty;
+            SecureSessionChannel secure;
+            try
+            {
+                secure = await SecureRoomJoinClient.AuthenticateAsync(
+                    HostAddress, Port, ConnectionCode, DisplayName, roomPassword.AsMemory(), _logSink);
+            }
+            catch (SecureJoinException ex)
+            {
+                ApplyJoinError(_sessionClient.CreateJoinError(HostAddress, Port, DescribeSecureJoinFailure(ex.Failure)));
+                return;
+            }
+            await ReplaceSecureChannelAsync(secure);
+
             // TCP 연결 (만약 서버가 꺼져있으면 여기서 catch 블록으로 튕깁니다)
             await _tcpClient.ConnectAsync(HostAddress, Port);
 
             // Join 패킷 전송
-            var joinRequest = _sessionClient.CreateJoinRequest(HostAddress, Port, DisplayName);
+            var joinRequest = _sessionClient.CreateJoinRequest(HostAddress, Port, DisplayName, secure.JoinTicket);
             await _tcpClient.SendAsync(joinRequest);
 
             _logSink.Write($"세션 참가 요청 전송: {DisplayName} -> {HostAddress}:{Port}");
@@ -337,6 +373,7 @@ public sealed class ClientViewModel : ObservableObject
         }
         catch (Exception)
         {
+            await ReplaceSecureChannelAsync(null);
             // 💡 서버가 닫혀있을 때 명확하게 에러 메시지 주입
             ApplyJoinError(_sessionClient.CreateJoinError(HostAddress, Port, "서버를 찾을 수 없습니다. 호스트 주소와 포트 혹은 서버 구동 상태를 확인해 주세요."));
         }
@@ -416,6 +453,7 @@ public sealed class ClientViewModel : ObservableObject
         catch { }
 
         await _tcpClient.DisconnectAsync();
+        await ReplaceSecureChannelAsync(null);
         await _sessionClient.DisconnectAsync("사용자 요청으로 연결 종료");
 
         RunOnUiThread(() =>
@@ -902,6 +940,7 @@ public sealed class ClientViewModel : ObservableObject
     {
         Interlocked.Increment(ref _frameGeneration);
         await ResetRdpAsync();
+        await ReplaceSecureChannelAsync(null);
         RunOnUiThread(() =>
         {
             if (IsConnected)
@@ -943,6 +982,23 @@ public sealed class ClientViewModel : ObservableObject
         await DisconnectAsync();
         await _rdpViewerService.DisposeAsync();
     }
+
+    /// <summary>보호 채널은 참가 연결과 수명을 같이한다. 새 참가·퇴장·끊김 때 이전 채널을 닫는다.</summary>
+    private async Task ReplaceSecureChannelAsync(SecureSessionChannel? next)
+    {
+        var previous = Interlocked.Exchange(ref _secureChannel, next);
+        if (previous is not null && !ReferenceEquals(previous, next)) await previous.DisposeAsync();
+    }
+
+    private static string DescribeSecureJoinFailure(SecureJoinFailure failure) => failure switch
+    {
+        SecureJoinFailure.InvalidCode => "접속 코드 형식이 올바르지 않습니다. 교수자 화면의 코드를 다시 확인해 주세요.",
+        SecureJoinFailure.CodeMismatch => "접속 코드가 이 PC와 맞지 않습니다. 호스트 주소와 접속 코드를 다시 확인해 주세요.",
+        SecureJoinFailure.PasswordRejected => "방 비밀번호가 올바르지 않습니다.",
+        SecureJoinFailure.LockedOut => "비밀번호를 여러 번 틀려 잠시 참가할 수 없습니다. 1분 뒤 다시 시도해 주세요.",
+        SecureJoinFailure.VersionMismatch => "교수자 앱과 버전이 맞지 않습니다. 같은 버전의 앱을 사용해 주세요.",
+        _ => "교수자 PC에 연결하지 못했습니다. 호스트 주소와 포트, 교수자 세션 상태를 확인해 주세요."
+    };
 
     private void ApplyJoinError(ErrorPacket error)
     {

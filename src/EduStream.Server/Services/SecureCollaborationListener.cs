@@ -56,10 +56,12 @@ public sealed class SecureCollaborationListener : IAsyncDisposable
         lock (_gate)
         {
             if (_listener is not null) throw new InvalidOperationException("이미 시작되었습니다.");
+            // 포트 사용 중 등으로 실패하면 상태를 남기지 않아 다른 포트로 다시 시작할 수 있게 한다.
+            var listener = new TcpListener(IPAddress.Any, port);
+            listener.Start();
+            _listener = listener;
             _lifetime = new CancellationTokenSource();
-            _listener = new TcpListener(IPAddress.Any, port);
-            _listener.Start();
-            Port = ((IPEndPoint)_listener.LocalEndpoint).Port;
+            Port = ((IPEndPoint)listener.LocalEndpoint).Port;
         }
         _logSink.Write($"[Secure] 보호 채널 시작: 포트={Port}");
         _ = AcceptLoopAsync(_listener, _lifetime.Token);
@@ -95,7 +97,8 @@ public sealed class SecureCollaborationListener : IAsyncDisposable
 
     private async Task HandshakeAsync(TcpClient client, CancellationToken cancellationToken)
     {
-        var remote = client.Client.RemoteEndPoint?.ToString() ?? "unknown";
+        var remoteEndPoint = client.Client.RemoteEndPoint as IPEndPoint;
+        var remote = remoteEndPoint?.ToString() ?? "unknown";
         SslStream? ssl = null;
         SecureCollaborationConnection? connection = null;
         try
@@ -115,7 +118,7 @@ public sealed class SecureCollaborationListener : IAsyncDisposable
             await CollaborationHandshake.ReceiveAsync(ssl, ParticipantRole.Student, timeout.Token);
             await CollaborationHandshake.SendAsync(ssl, ParticipantRole.Professor, timeout.Token);
 
-            connection = new SecureCollaborationConnection(ssl, client, _logSink);
+            connection = new SecureCollaborationConnection(ssl, client, _logSink, remoteEndPoint?.Address.ToString());
             lock (_gate)
             {
                 if (_lifetime is null || _lifetime.IsCancellationRequested)
