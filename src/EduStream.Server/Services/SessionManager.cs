@@ -45,6 +45,7 @@ public sealed class SessionManager
     private SecureCollaborationListener? _secureListener;
     private SecureRoomGate? _secureGate;
     private readonly ConcurrentDictionary<string, SecureCollaborationConnection> _secureConnections = new(); // clientId → 묶인 보호 채널
+    private long _controlNoticeSequence;
     private SessionFileTransferRouter? _fileTransfers;
 
     /// <summary>
@@ -78,6 +79,7 @@ public sealed class SessionManager
 
         _tcpServer.PacketReceived += OnPacketReceivedAsync;
         _tcpServer.ClientDisconnected += OnClientDisconnectedAsync;
+        _participantRegistry.PermissionsChanged += OnRegistryPermissionsChanged;
     }
 
     public SessionInfo? CurrentSession { get; private set; }
@@ -244,6 +246,11 @@ public sealed class SessionManager
     {
         if (!_participants.TryGetValue(displayName, out var clientId))
             return false;
+        return await UpdatePermissionsForClientAsync(clientId, displayName, allowViewing, allowControl);
+    }
+
+    private async Task<bool> UpdatePermissionsForClientAsync(string clientId, string displayName, bool allowViewing, bool allowControl)
+    {
         var connection = _participantRegistry.TryGetConnection(clientId);
         if (connection is null || !_participantRegistry.SetPermissions(connection.ConnectionId, allowViewing, allowControl))
             return false;
@@ -388,6 +395,7 @@ public sealed class SessionManager
                 CurrentSession.SessionId, Guid.NewGuid(), Guid.NewGuid(), ParticipantRole.Professor);
             _controlCoordinator = new ServerRemoteControlCoordinator(
                 _professorConnection, _participantRegistry, _remoteInputGate, _logSink);
+            _controlCoordinator.StateChanged += OnControlStateChanged;
             _roomPassword = passwordVerifier;
             _fileCatalog = new SessionFileCatalog(
                 CurrentSession.SessionId, new SessionFileRequestAuthorizer(_participantRegistry));
@@ -397,6 +405,7 @@ public sealed class SessionManager
                 _secureListener = new SecureCollaborationListener(secureChannelCertificate, _logSink);
                 _secureGate = new SecureRoomGate(_secureListener, CurrentSession.SessionId, passwordVerifier, _logSink);
                 _secureGate.ConnectionClosed += OnSecureConnectionClosed;
+                _secureGate.BoundFrameReceived += OnSecureFrameAsync;
             }
         }
 
@@ -456,6 +465,7 @@ public sealed class SessionManager
         if (secureGate is not null)
         {
             secureGate.ConnectionClosed -= OnSecureConnectionClosed;
+            secureGate.BoundFrameReceived -= OnSecureFrameAsync;
             await secureGate.DisposeAsync();
         }
         if (secureListener is not null) await secureListener.DisposeAsync();
@@ -464,6 +474,101 @@ public sealed class SessionManager
         ClearParticipants();
         _participantRegistry.Clear();
         await _tcpServer.StopAsync();
+    }
+
+    /// <summary>
+    /// 참가를 마친 학생의 보호 채널 메시지를 처리합니다. 대상 학생은 메시지 내용이 아니라 묶인 연결로만 정합니다.
+    /// </summary>
+    private async Task OnSecureFrameAsync(SecureCollaborationConnection secure, byte[] frame)
+    {
+        var clientId = FindClientId(secure);
+        if (clientId is null) return;
+
+        try
+        {
+            var kind = CollaborationFrameInspector.PeekKind(frame);
+            switch (kind)
+            {
+                case CollaborationMessageKind.PermissionChange:
+                    var request = CollaborationMessageCodec.Decode<PermissionChangeRequest>(frame, out _);
+                    if (_clientDisplayNames.TryGetValue(clientId, out var displayName))
+                        await UpdatePermissionsForClientAsync(clientId, displayName, request.AllowViewing, request.AllowControl);
+                    break;
+                default:
+                    _logSink.Write($"[Secure] 처리하지 않는 메시지 무시: kind={kind}, clientId={clientId}");
+                    break;
+            }
+        }
+        catch (CollaborationException ex)
+        {
+            _logSink.Write($"[Secure] 잘못된 메시지 무시: clientId={clientId}, 사유={ex.Code}");
+        }
+    }
+
+    /// <summary>
+    /// 학생 본인의 허용 상태만 보냅니다. 다른 학생의 이름·연결 정보는 학생에게 보내지 않습니다.
+    /// 레지스트리 스냅샷 한 번으로 revision과 상태를 함께 읽어, 늦게 도착한 옛 상태를 학생이 revision으로 걸러낼 수 있게 합니다.
+    /// </summary>
+    private async Task PushStudentStatusAsync(string clientId)
+    {
+        if (!_secureConnections.TryGetValue(clientId, out var secure)) return;
+        var connection = _participantRegistry.TryGetConnection(clientId);
+        if (connection is null) return;
+        var room = _participantRegistry.Snapshot(connection);
+        if (room is null) return;
+        var self = new RoomJoined(connection, room.Revision,
+            room.Participants.Where(participant => participant.Connection == connection).ToArray());
+        await SendSecureAsync(secure, CollaborationMessageCodec.Encode(Guid.NewGuid(), self), clientId);
+    }
+
+    private void OnRegistryPermissionsChanged(ParticipantSnapshot snapshot)
+    {
+        var clientId = FindClientId(snapshot.Connection);
+        if (clientId is not null) _ = PushStudentStatusAsync(clientId);
+    }
+
+    /// <summary>
+    /// 제어 대상 학생에게 현재 단계를 알립니다. 대상이 바뀌면 이전 학생은 Revoked, 새 학생은 Requested/Active를 받습니다.
+    /// 번호는 상태 변경 순서대로 매겨 학생이 늦게 도착한 알림을 버릴 수 있게 합니다.
+    /// </summary>
+    private void OnControlStateChanged(RemoteControlState state)
+    {
+        var sequence = Interlocked.Increment(ref _controlNoticeSequence);
+        var clientId = FindClientId(state.Student);
+        if (clientId is null || !_secureConnections.TryGetValue(clientId, out var secure)) return;
+        var notice = new ControlStatusNotice(state.Student.SessionId, sequence, state.Phase);
+        _ = SendSecureAsync(secure, CollaborationMessageCodec.Encode(Guid.NewGuid(), notice), clientId);
+    }
+
+    private async Task SendSecureAsync(SecureCollaborationConnection secure, byte[] frame, string clientId)
+    {
+        try
+        {
+            await secure.SendAsync(frame);
+        }
+        catch (Exception ex)
+        {
+            // 보호 채널이 끊기면 ConnectionClosed가 참가 연결을 정리한다. 여기서는 기록만 한다.
+            _logSink.Write($"[Secure] 상태 전달 실패: clientId={clientId}, {ex.GetType().Name}");
+        }
+    }
+
+    private string? FindClientId(SecureCollaborationConnection secure)
+    {
+        foreach (var (clientId, bound) in _secureConnections)
+        {
+            if (ReferenceEquals(bound, secure)) return clientId;
+        }
+        return null;
+    }
+
+    private string? FindClientId(ParticipantConnection connection)
+    {
+        foreach (var clientId in _secureConnections.Keys)
+        {
+            if (_participantRegistry.TryGetConnection(clientId) == connection) return clientId;
+        }
+        return null;
     }
 
     /// <summary>
@@ -750,6 +855,8 @@ public sealed class SessionManager
         if (secure is not null)
         {
             _secureConnections[clientId] = secure;
+            // 참가 직후 학생이 기본 허용 상태(보기·제어 ON)를 바로 표시할 수 있게 한다(U07).
+            _ = PushStudentStatusAsync(clientId);
             // 등록 직전에 닫혔다면 닫힘 알림이 이 참가자를 찾지 못했으므로 여기서 정리한다.
             if (secure.IsClosed) _ = _tcpServer.DisconnectClientAsync(clientId, "보호 채널 종료");
         }

@@ -3,6 +3,7 @@ using System.IO;
 using System.Text.Json;
 using System.Windows;
 using EduStream.Client.Services;
+using EduStream.Core.Collaboration;
 using EduStream.Core.Common;
 using EduStream.Core.Factories;
 using EduStream.Core.Logging;
@@ -36,6 +37,9 @@ public sealed class ClientViewModel : ObservableObject
     private readonly IPacketSerializer _serializer = new PacketSerializer();
     private readonly IRdpViewerService _rdpViewerService;
     private SecureSessionChannel? _secureChannel;
+    private StudentStatusClient? _statusClient;
+    private StudentStatus _studentStatus = StudentStatus.Initial;
+    private bool _permissionNoticeShown;
     private string _connectionCode = string.Empty;
     private RdpInvitationPacket? _activeRdpInvitation;
     private Guid _rdpSessionId;
@@ -99,6 +103,15 @@ public sealed class ClientViewModel : ObservableObject
         SimulateScreenRenderCommand = new RelayCommand(() => _ = SimulateScreenRenderAsync());
         SimulateFileReceiveCommand = new RelayCommand(() => _ = SimulateFileReceiveAsync());
         ReconnectRdpCommand = new RelayCommand(() => _ = SendRdpInvitationRequestAsync());
+        ToggleControlPermissionCommand = new RelayCommand(
+            () => _ = ChangePermissionsAsync(_studentStatus.AllowViewing, !_studentStatus.AllowControl),
+            () => _statusClient is not null && _studentStatus.AllowViewing);
+        ToggleViewingPermissionCommand = new RelayCommand(
+            () => _ = ChangePermissionsAsync(!_studentStatus.AllowViewing, _studentStatus.AllowControl),
+            () => _statusClient is not null);
+        StopControlNowCommand = new RelayCommand(
+            () => _ = ChangePermissionsAsync(_studentStatus.AllowViewing, false),
+            () => _statusClient is not null && _studentStatus.AllowControl);
         _freshnessTimer = new System.Windows.Threading.DispatcherTimer
         {
             Interval = TimeSpan.FromMilliseconds(500)
@@ -312,6 +325,31 @@ public sealed class ClientViewModel : ObservableObject
     public RelayCommand SimulateFileReceiveCommand { get; }
 
     public RelayCommand ReconnectRdpCommand { get; }
+
+    /// <summary>교수자 원격 제어 허용 켜기/끄기(U07). 화면 표시는 교수자가 반영한 상태로만 바뀝니다.</summary>
+    public RelayCommand ToggleControlPermissionCommand { get; }
+
+    /// <summary>교수자의 내 화면 보기 허용 켜기/끄기. 보기를 끄면 제어 허용도 함께 꺼집니다.</summary>
+    public RelayCommand ToggleViewingPermissionCommand { get; }
+
+    /// <summary>진행 중인 원격 제어를 즉시 끝내고 제어 허용을 끕니다.</summary>
+    public RelayCommand StopControlNowCommand { get; }
+
+    public string PermissionSummary =>
+        $"내 화면 보기 허용: {(_studentStatus.AllowViewing ? "ON" : "OFF")} · 원격 제어 허용: {(_studentStatus.AllowControl ? "ON" : "OFF")}";
+
+    public string ControlStatusText => _studentStatus.ControlPhase switch
+    {
+        ControlPhase.Active => "교수자가 내 PC를 제어하고 있습니다.",
+        ControlPhase.Requested => "교수자가 원격 제어를 시작하는 중입니다.",
+        _ => "원격 제어 중이 아닙니다."
+    };
+
+    public bool IsUnderControl => _studentStatus.UnderControl;
+
+    public string ControlToggleLabel => _studentStatus.AllowControl ? "원격 제어 허용 끄기" : "원격 제어 허용 켜기";
+
+    public string ViewingToggleLabel => _studentStatus.AllowViewing ? "내 화면 보기 허용 끄기" : "내 화면 보기 허용 켜기";
     private async Task JoinSessionAsync()
     {
         if (string.IsNullOrWhiteSpace(DisplayName))
@@ -358,6 +396,8 @@ public sealed class ClientViewModel : ObservableObject
                 return;
             }
             await ReplaceSecureChannelAsync(secure);
+            // 교수자는 TCP 참가 직후 보호 채널로 상태를 보내므로, 참가 요청 전에 수신 처리기를 붙인다.
+            AttachStudentStatus(secure);
 
             // TCP 연결 (만약 서버가 꺼져있으면 여기서 catch 블록으로 튕깁니다)
             await _tcpClient.ConnectAsync(HostAddress, Port);
@@ -987,7 +1027,78 @@ public sealed class ClientViewModel : ObservableObject
     private async Task ReplaceSecureChannelAsync(SecureSessionChannel? next)
     {
         var previous = Interlocked.Exchange(ref _secureChannel, next);
-        if (previous is not null && !ReferenceEquals(previous, next)) await previous.DisposeAsync();
+        if (previous is not null && !ReferenceEquals(previous, next))
+        {
+            if (next is null) DetachStudentStatus();
+            await previous.DisposeAsync();
+        }
+    }
+
+    private void AttachStudentStatus(SecureSessionChannel secure)
+    {
+        var statusClient = new StudentStatusClient(secure.SessionId, secure.Connection, _logSink);
+        statusClient.StatusChanged += status => RunOnUiThread(() => ApplyStudentStatus(status));
+        secure.FrameReceived += frame =>
+        {
+            try
+            {
+                if (StudentStatusClient.Handles(CollaborationFrameInspector.PeekKind(frame)))
+                    statusClient.HandleFrame(frame);
+            }
+            catch (CollaborationException ex)
+            {
+                _logSink.Write($"[Secure] 잘못된 메시지 무시: 사유={ex.Code}");
+            }
+            return Task.CompletedTask;
+        };
+        _statusClient = statusClient;
+        _permissionNoticeShown = false;
+        RunOnUiThread(() => ApplyStudentStatus(StudentStatus.Initial));
+    }
+
+    private void DetachStudentStatus()
+    {
+        _statusClient = null;
+        RunOnUiThread(() => ApplyStudentStatus(StudentStatus.Initial));
+    }
+
+    private void ApplyStudentStatus(StudentStatus status)
+    {
+        var wasUnderControl = _studentStatus.UnderControl;
+        _studentStatus = status;
+        OnPropertyChanged(nameof(PermissionSummary));
+        OnPropertyChanged(nameof(ControlStatusText));
+        OnPropertyChanged(nameof(IsUnderControl));
+        OnPropertyChanged(nameof(ControlToggleLabel));
+        OnPropertyChanged(nameof(ViewingToggleLabel));
+        ToggleControlPermissionCommand.RaiseCanExecuteChanged();
+        ToggleViewingPermissionCommand.RaiseCanExecuteChanged();
+        StopControlNowCommand.RaiseCanExecuteChanged();
+
+        if (_statusClient is null) return;
+        if (!_permissionNoticeShown && status.AllowControl)
+        {
+            // U07: 제어 허용이 기본 ON이라는 사실을 참가 시 알린다.
+            _permissionNoticeShown = true;
+            ChatMessages.Insert(0, ChatLine.System("교수자 원격 제어 허용이 켜져 있습니다. 접속 상태 옆에서 언제든 끌 수 있습니다."));
+        }
+        if (wasUnderControl != status.UnderControl)
+            ChatMessages.Insert(0, ChatLine.System(status.UnderControl ? "교수자가 원격 제어를 시작했습니다." : "원격 제어가 끝났습니다."));
+    }
+
+    private async Task ChangePermissionsAsync(bool allowViewing, bool allowControl)
+    {
+        var statusClient = _statusClient;
+        if (statusClient is null) return;
+        try
+        {
+            await statusClient.SetPermissionsAsync(allowViewing, allowControl);
+        }
+        catch (Exception ex)
+        {
+            _logSink.Write($"[Status] 허용 변경 전송 실패: {ex.GetType().Name}");
+            RunOnUiThread(() => UpdateStatus("허용 상태를 바꾸지 못했습니다. 연결 상태를 확인해 주세요.", StatusPriority.Error, isError: true));
+        }
     }
 
     private static string DescribeSecureJoinFailure(SecureJoinFailure failure) => failure switch
