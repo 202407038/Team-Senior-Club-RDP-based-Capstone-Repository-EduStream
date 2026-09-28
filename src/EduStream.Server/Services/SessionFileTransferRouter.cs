@@ -29,6 +29,8 @@ public sealed class SessionFileTransferRouter : IDisposable
         // 진행 중 요청이 토큰을 계속 참조할 수 있어 Dispose하지 않는다(타이머 없는 CTS라 누수 없음).
         public CancellationTokenSource Cancellation { get; } = new();
         public bool AwaitingStored { get; set; }
+        public bool FinalChunkSending { get; set; }
+        public FileStoredNotice? EarlyStored { get; set; }
     }
 
     private readonly object _gate = new();
@@ -209,15 +211,27 @@ public sealed class SessionFileTransferRouter : IDisposable
         {
             var context = new FileDownloadContext(peer.Connection);
             await foreach (var chunk in _catalog.DownloadAsync(context, request, token))
+            {
+                if (chunk.Index == transfer.File.TotalChunks - 1)
+                {
+                    lock (_gate) transfer.FinalChunkSending = true;
+                }
                 await peer.Channel.SendAsync(CollaborationMessageCodec.Encode(Guid.NewGuid(), chunk), token);
+            }
 
+            FileStoredNotice? earlyStored = null;
             lock (_gate)
             {
                 // 송신 완료는 저장 완료가 아니다. 학생의 FileStored를 받을 때까지 성공으로 보지 않는다.
                 if (peer.Transfers.TryGetValue(request.RequestId, out var current) && ReferenceEquals(current, transfer))
+                {
                     transfer.AwaitingStored = true;
+                    earlyStored = transfer.EarlyStored;
+                    transfer.EarlyStored = null;
+                }
             }
             _logSink.Write($"[FileRoute] 송신 완료, 저장 확인 대기: request={request.RequestId}");
+            if (earlyStored is not null) CompleteStored(peer, earlyStored);
             return;
         }
         catch (OperationCanceledException) when (token.IsCancellationRequested)
@@ -266,7 +280,7 @@ public sealed class SessionFileTransferRouter : IDisposable
         bool matches;
         lock (_gate)
         {
-            if (!peer.Transfers.TryGetValue(stored.RequestId, out transfer) || !transfer.AwaitingStored)
+            if (!peer.Transfers.TryGetValue(stored.RequestId, out transfer))
             {
                 _logSink.Write($"[FileRoute] 대기 중이 아닌 저장 완료 무시: request={stored.RequestId}");
                 return;
@@ -274,6 +288,14 @@ public sealed class SessionFileTransferRouter : IDisposable
             var file = transfer.File;
             matches = stored.FileId == file.FileId && stored.Length == file.Length &&
                 string.Equals(stored.Sha256, file.Sha256, StringComparison.OrdinalIgnoreCase);
+            if (!transfer.AwaitingStored)
+            {
+                // 최종 청크는 상대에게 도착했어도 SendAsync의 완료 처리가 늦을 수 있다.
+                // 일치하는 응답 하나만 보관하고, 송신/카탈로그 열거 성공 후에만 완료한다.
+                // 취소·단절·송신 실패로 요청이 제거되면 보관한 응답도 함께 폐기된다.
+                if (transfer.FinalChunkSending && matches) transfer.EarlyStored ??= stored;
+                return;
+            }
             peer.Transfers.Remove(stored.RequestId);
         }
 
