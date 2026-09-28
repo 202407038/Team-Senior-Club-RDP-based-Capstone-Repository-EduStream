@@ -3,6 +3,7 @@ using System.Security.Cryptography;
 using System.Text.Json;
 using EduStream.Core.Collaboration;
 using EduStream.Core.Factories;
+using EduStream.Core.FileSharing;
 using EduStream.Core.Logging;
 using EduStream.Core.Models;
 using EduStream.Core.Network;
@@ -31,10 +32,13 @@ public sealed class SessionManager
     private readonly object _sessionLock = new();
     private IRdpSharingService? _rdpSharingService;
     private Guid _rdpSharingId;
+    // 공유 수명 동안만 유효한 토큰. 공유 중지/세션 종료 시 취소해 그 공유에서 시작된 제어 요청을 끝낸다.
+    private CancellationTokenSource? _sharingLifetime;
     private ParticipantConnection? _professorConnection;
     private ServerRemoteControlCoordinator? _controlCoordinator;
     private IRemoteInputGate _remoteInputGate = UnavailableRemoteInputGate.Instance;
     private RoomPasswordVerifier? _roomPassword;
+    private ISessionFileCatalog? _fileCatalog;
 
     /// <summary>
     /// 참여자 목록이 변경되었을 때 발생합니다.
@@ -136,6 +140,8 @@ public sealed class SessionManager
         {
             _rdpSharingService = sharingService;
             _rdpSharingId = sharingId;
+            if (_sharingLifetime is null || _sharingLifetime.IsCancellationRequested)
+                _sharingLifetime = new CancellationTokenSource();
         }
         _logSink.Write($"[Rdp] 공유 서비스 연결: sharingId={sharingId}");
     }
@@ -158,6 +164,7 @@ public sealed class SessionManager
     /// <summary>
     /// 교수자가 선택한 학생 한 명에게 원격 제어를 요청합니다. 기존 대상은 먼저 회수하고
     /// 3번의 실제 입력 회수 확인 후에 새 대상으로 전환합니다. Active는 입력 허용 완료 후에만 표시됩니다.
+    /// 화면 공유가 연결되어 있을 때만 요청할 수 있고, 요청 중 공유가 중지되면 요청은 회수되어 Active가 되지 않습니다.
     /// </summary>
     public async Task RequestControlAsync(string targetDisplayName)
     {
@@ -171,9 +178,28 @@ public sealed class SessionManager
         var target = _participantRegistry.TryGetConnection(clientId)
             ?? throw new InvalidOperationException($"{targetDisplayName}의 연결 정보를 찾을 수 없습니다.");
 
-        await _controlCoordinator.RequestAsync(target);
+        CancellationToken sharingToken;
+        lock (_sessionLock)
+        {
+            // 공유 중지가 시작되면 서비스 참조가 먼저 비워지므로, 중지 중·중지 후 요청은 여기서 막힌다.
+            if (_rdpSharingService is null || _sharingLifetime is null || _sharingLifetime.IsCancellationRequested)
+                throw new InvalidOperationException("현재 화면 공유가 시작되지 않았습니다.");
+            sharingToken = _sharingLifetime.Token;
+        }
 
-        var state = _controlCoordinator.Current;
+        var coordinator = _controlCoordinator;
+        try
+        {
+            await coordinator.RequestAsync(target, sharingToken);
+        }
+        catch (OperationCanceledException) when (sharingToken.IsCancellationRequested)
+        {
+            // 진입 확인 뒤 공유 중지가 끼어든 경우. 조정자가 요청을 이미 회수했다.
+            _logSink.Write($"[Control] 공유 중지로 요청 취소: 대상={targetDisplayName}");
+            return;
+        }
+
+        var state = coordinator.Current;
         if (state is not null && state.Student == target && state.Phase == ControlPhase.Active)
             _logSink.Write($"[Control] 활성: 대상={targetDisplayName}, requestId={state.RequestId}");
         else
@@ -211,17 +237,56 @@ public sealed class SessionManager
     }
 
     /// <summary>
-    /// 화면 공유가 종료될 때 팀장이 호출합니다. 남아 있는 초대를 모두 정리합니다.
+    /// 교수자 로컬 파일을 강의 카탈로그에 등록합니다. 본문은 아직 전송하지 않으며
+    /// 이름·길이·SHA256·청크 크기만 목록에 올라갑니다.
     /// </summary>
-    public async Task DetachRdpSharingAsync()
+    public Task<SessionFileDescriptor> RegisterFileAsync(string localPath, CancellationToken cancellationToken = default)
     {
-        lock (_sessionLock)
-        {
-            _rdpSharingService = null;
-            _rdpSharingId = Guid.Empty;
-        }
+        if (_fileCatalog is null)
+            throw new InvalidOperationException("현재 열려 있는 세션이 없습니다.");
+        return _fileCatalog.RegisterAsync(localPath, cancellationToken);
+    }
+
+    /// <summary>
+    /// 등록된 파일을 목록에서 내립니다. 이후 요청/미완료 청크는 차단되지만
+    /// 이미 저장 완료된 파일은 학생 쪽에 그대로 남습니다.
+    /// </summary>
+    public bool UnregisterFile(Guid fileId)
+    {
+        if (_fileCatalog is null)
+            throw new InvalidOperationException("현재 열려 있는 세션이 없습니다.");
+        return _fileCatalog.Unregister(fileId);
+    }
+
+    /// <summary>
+    /// 현재 강의의 파일 목록 스냅샷입니다. 세션이 열려 있지 않으면 null입니다.
+    /// revision은 등록/해제마다 증가하므로 학생 쪽 동기화 여부 판단에 사용할 수 있습니다.
+    /// </summary>
+    public SessionFileCatalogSnapshot? GetFileCatalogSnapshot() => _fileCatalog?.GetSnapshot();
+
+    /// <summary>
+    /// 승인은 회수했지만 실제 입력 차단 확인이 아직 끝나지 않은 원격 제어가 있으면 true입니다.
+    /// <see cref="DetachRdpSharingAsync"/>가 Pending/Failed를 반환한 뒤 차단 완료 여부를 다시 확인할 때 사용합니다.
+    /// </summary>
+    public bool IsControlInputRevokePending => _controlCoordinator?.IsInputRevokePending ?? false;
+
+    /// <summary>
+    /// 화면 공유가 종료될 때 팀장이 호출합니다. 남아 있는 초대와 진행 중인 원격 제어를 모두 정리합니다.
+    /// 공유가 없는 상태에서 제어만 남아 있는 것은 의미가 없으므로, 세션 종료가 아니라
+    /// "화면 공유만 중지"하는 경우에도 항상 함께 회수합니다.
+    /// </summary>
+    /// <returns>
+    /// 실제 입력 차단 확인 결과. 승인 상태는 항상 즉시 회수되지만, Confirmed가 아니면
+    /// 학생 PC 입력이 막혔다고 표시하면 안 됩니다.
+    /// </returns>
+    public async Task<RemoteInputRevokeStatus> DetachRdpSharingAsync()
+    {
+        EndSharingLifetime();
+        // 공유 재시작 뒤 제어를 자동 재승인하지 않는다(화면 수신 자동 복귀와 별개, 협의 필요 항목).
+        var inputRevoke = await StopControlForTeardownAsync("공유 중지");
         await RevokeAllRdpInvitationsAsync(RdpFailureReason.SessionClosed);
-        _logSink.Write("[Rdp] 공유 서비스 연결 해제");
+        _logSink.Write($"[Rdp] 공유 서비스 연결 해제: 입력 차단={inputRevoke}");
+        return inputRevoke;
     }
 
     /// <summary>
@@ -259,6 +324,8 @@ public sealed class SessionManager
             _controlCoordinator = new ServerRemoteControlCoordinator(
                 _professorConnection, _participantRegistry, _remoteInputGate, _logSink);
             _roomPassword = passwordVerifier;
+            _fileCatalog = new SessionFileCatalog(
+                CurrentSession.SessionId, new SessionFileRequestAuthorizer(_participantRegistry));
         }
 
         _tcpServer.Start(port);
@@ -268,24 +335,10 @@ public sealed class SessionManager
 
     public async Task CloseSessionAsync()
     {
-        // 종료 정리 전에 새 초대 발급을 막는다. 기존 초대는 발급한 서비스로 회수한다.
-        lock (_sessionLock)
-        {
-            _rdpSharingService = null;
-            _rdpSharingId = Guid.Empty;
-        }
-        if (_controlCoordinator is not null)
-        {
-            try
-            {
-                await _controlCoordinator.StopAsync();
-            }
-            catch (Exception ex)
-            {
-                // 입력 회수 확인 실패가 세션 종료 자체를 막지 않게 한다. 승인 상태는 이미 Revoked다.
-                _logSink.Write($"[Control] 종료 중 입력 회수 확인 실패: {ex.GetType().Name}");
-            }
-        }
+        // 종료 정리 전에 새 초대 발급과 제어 요청을 막는다. 기존 초대는 발급한 서비스로 회수한다.
+        EndSharingLifetime();
+        // 입력 회수 확인 실패가 세션 종료 자체를 막지 않게 한다. 결과는 로그로만 남긴다.
+        await StopControlForTeardownAsync("세션 종료");
         // 연결 정리 전에 클라이언트들에게 세션 종료 알림
         if (_participants.Count > 0)
         {
@@ -305,6 +358,8 @@ public sealed class SessionManager
             _controlCoordinator = null;
             _professorConnection = null;
             _roomPassword = null;
+            _fileCatalog?.Dispose();
+            _fileCatalog = null;
         }
 
         ClearParticipants();
@@ -768,6 +823,51 @@ public sealed class SessionManager
             _participants.TryGetValue(participantId, out var clientId);
             await RevokeRdpInvitationAsync(participantId, reason, clientId);
         }
+    }
+
+    /// <summary>
+    /// 새 초대 발급과 새 제어 요청을 막고, 이 공유에서 진행 중인 제어 요청을 취소합니다.
+    /// </summary>
+    private void EndSharingLifetime()
+    {
+        CancellationTokenSource? lifetime;
+        lock (_sessionLock)
+        {
+            _rdpSharingService = null;
+            _rdpSharingId = Guid.Empty;
+            lifetime = _sharingLifetime;
+            _sharingLifetime = null;
+        }
+        // 진행 중인 요청이 토큰을 계속 참조할 수 있어 Dispose하지 않는다(타이머 없는 CTS라 누수 없음).
+        lifetime?.Cancel();
+    }
+
+    /// <summary>
+    /// 공유 중지/세션 종료 정리 중 원격 제어를 회수합니다. 회수 실패가 뒤따르는 초대·세션 정리를
+    /// 막지 않도록 예외 대신 결과로 돌려줍니다. 승인 상태는 어느 경우든 이미 Revoked입니다.
+    /// </summary>
+    private async Task<RemoteInputRevokeStatus> StopControlForTeardownAsync(string reason)
+    {
+        var coordinator = _controlCoordinator;
+        if (coordinator is null) return RemoteInputRevokeStatus.Confirmed;
+
+        try
+        {
+            await coordinator.StopAsync();
+        }
+        catch (Exception ex)
+        {
+            _logSink.Write($"[Control] {reason} 중 입력 회수 확인 실패: {ex.GetType().Name}");
+            return RemoteInputRevokeStatus.Failed;
+        }
+
+        // StopAsync는 취소를 무시한 허용 작업이 남아도 최초 회수 후 반환하므로, 반환만으로 차단 완료로 보지 않는다.
+        if (coordinator.IsInputRevokePending)
+        {
+            _logSink.Write($"[Control] {reason}: 허용 작업 종료 대기, 입력 차단 확인 미완료");
+            return RemoteInputRevokeStatus.Pending;
+        }
+        return RemoteInputRevokeStatus.Confirmed;
     }
 
     private string? GetDisplayName(string clientId, string? packetDisplayName)

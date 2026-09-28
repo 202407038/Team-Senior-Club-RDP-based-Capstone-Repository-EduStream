@@ -483,13 +483,20 @@ public sealed class ServerViewModel : ObservableObject
         try
         {
             // 초대 발급을 먼저 막고, 회수 알림 전송에 실패하더라도 네이티브 공유를 닫는다.
-            try { await _sessionManager.DetachRdpSharingAsync(); }
+            var inputRevoke = RemoteInputRevokeStatus.Failed;
+            try { inputRevoke = await _sessionManager.DetachRdpSharingAsync(); }
             finally
             {
                 await _rdpSharing.StopAsync();
                 IsRdpSharing = false;
                 RdpInvitationParticipants.Clear();
-                RdpStatus = "WDS 화면 공유 중지됨";
+                // 승인 회수와 실제 입력 차단 확인은 별개이므로, 확인되지 않았으면 완료로 표시하지 않는다.
+                RdpStatus = inputRevoke switch
+                {
+                    RemoteInputRevokeStatus.Confirmed => "WDS 화면 공유 중지됨",
+                    RemoteInputRevokeStatus.Pending => "WDS 화면 공유 중지됨 · 원격 입력 차단 확인 대기 중",
+                    _ => "WDS 화면 공유 중지됨 · 원격 입력 차단 확인 실패(재시도 대기)"
+                };
             }
         }
         finally { _rdpLifecycle.Release(); }

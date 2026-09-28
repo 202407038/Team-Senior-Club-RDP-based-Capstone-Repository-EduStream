@@ -6,6 +6,7 @@ using EduStream.Core.Collaboration;
 using EduStream.Core.Factories;
 using EduStream.Core.Logging;
 using EduStream.Core.Models;
+using EduStream.Core.Network;
 using EduStream.Core.Serialization;
 using EduStream.Server.Services;
 
@@ -134,6 +135,19 @@ public sealed class SessionManagerRemoteControlTests
         }
     }
 
+    private sealed class NoopRdpSharingService : IRdpSharingService
+    {
+        public Task<Guid> StartAsync(Guid sessionId, CancellationToken cancellationToken = default) =>
+            Task.FromResult(Guid.NewGuid());
+        public Task<RdpInvitationPacket> CreateInvitationAsync(Guid sessionId, Guid sharingId, string participantId,
+            Guid connectionId, string invitationPassword, DateTimeOffset expiresAt,
+            CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task RevokeInvitationAsync(Guid invitationId, CancellationToken cancellationToken = default) =>
+            Task.CompletedTask;
+        public Task StopAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    }
+
     private sealed class Rig : IAsyncDisposable
     {
         private readonly List<TcpClientService> _clients = new();
@@ -159,6 +173,8 @@ public sealed class SessionManagerRemoteControlTests
             if (attachGate)
                 sessionManager.AttachRemoteInputGate(rig.Gate);
             await sessionManager.OpenSessionAsync("RemoteControlTest", port);
+            // 제어 요청은 화면 공유가 연결된 동안에만 허용된다.
+            sessionManager.AttachRdpSharing(new NoopRdpSharingService(), Guid.NewGuid());
             return rig;
         }
 
