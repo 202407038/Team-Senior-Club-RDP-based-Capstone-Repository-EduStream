@@ -118,12 +118,15 @@ public sealed class WdsViewportAdapter : IWdsViewportAdapter
             Timestamp = DateTimeOffset.UtcNow
         });
 
-        // WDS 뷰어 적용 이벤트 발생
-        ViewerApplied?.Invoke(this, new ViewerAppliedEventArgs
+        // WDS 뷰어 적용 이벤트 발생 (등록된 뷰어 핸들러가 실제로 있을 때만 성공 알림 발생)
+        if (_viewerHandlers.Count > 0)
         {
-            ViewportInfo = viewportInfo,
-            AppliedAt = DateTimeOffset.UtcNow
-        });
+            ViewerApplied?.Invoke(this, new ViewerAppliedEventArgs
+            {
+                ViewportInfo = viewportInfo,
+                AppliedAt = DateTimeOffset.UtcNow
+            });
+        }
     }
 
     /// <summary>
@@ -131,6 +134,12 @@ public sealed class WdsViewportAdapter : IWdsViewportAdapter
     /// </summary>
     public async Task ApplyToViewerAsync(CancellationToken cancellationToken = default)
     {
+        // 등록된 뷰어가 없으면 적용할 대상이 없으므로 중단
+        if (_viewerHandlers.Count == 0)
+        {
+            return;
+        }
+        
         var viewportInfo = new ViewportInfo
         {
             ViewportSize = _currentViewportSize,

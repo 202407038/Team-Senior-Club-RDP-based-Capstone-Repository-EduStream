@@ -215,8 +215,8 @@ public sealed class RemoteControlManager : IRemoteControlManager, IRemoteInputGa
             }
             catch (InputPipelineException ex)
             {
-                // 차단 실패 시에도 로그만 남기고 예외는 전달하지 않음 (멱등성)
-                Console.WriteLine($"[RemoteControlManager] 네이티브 입력 차단 실패 (무시): {ex.Message}");
+                // 차단 실패 시 예외를 상위로 전파하여 실패 상태를 알림
+                throw new InputPipelineException($"네이티브 입력 차단 실패: {ex.Message}", ex);
             }
         }
     }
