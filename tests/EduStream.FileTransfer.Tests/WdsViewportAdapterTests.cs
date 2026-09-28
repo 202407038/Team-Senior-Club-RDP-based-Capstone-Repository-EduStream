@@ -252,6 +252,7 @@ public class WdsViewportAdapterTests
         var wdsAdapter = new WdsViewportAdapter(wheelAdapter, viewportAdapter);
         wdsAdapter.SetSourceSize(new Size(1920, 1080));
         wdsAdapter.SetViewportSize(new Size(1280, 720));
+        wdsAdapter.AddViewerHandler(_ => Task.CompletedTask);
 
         ViewerAppliedEventArgs? eventArgs = null;
         wdsAdapter.ViewerApplied += (sender, args) => eventArgs = args;
