@@ -46,6 +46,15 @@ public sealed class SessionManager
     private SecureRoomGate? _secureGate;
     private readonly ConcurrentDictionary<string, SecureCollaborationConnection> _secureConnections = new(); // clientId → 묶인 보호 채널
     private long _controlNoticeSequence;
+    // 재연결 토큰 SHA256 → 부여 정보. _sessionLock으로 보호한다.
+    private readonly Dictionary<string, ReconnectGrant> _reconnectGrants = new(StringComparer.Ordinal);
+
+    /// <summary>ExpiresAt이 null이면 아직 연결 중인 참가자의 토큰입니다. 비정상으로 끊기면 만료 시각이 정해집니다.</summary>
+    private sealed record ReconnectGrant(string ClientId, string DisplayName, DateTimeOffset? ExpiresAt,
+        bool AllowViewing, bool AllowControl);
+
+    /// <summary>재연결 티켓으로 참가할 때 복원할 허용 상태입니다.</summary>
+    private sealed record ReconnectRestore(bool AllowViewing, bool AllowControl);
     private SessionFileTransferRouter? _fileTransfers;
 
     /// <summary>
@@ -359,6 +368,15 @@ public sealed class SessionManager
     /// <summary>현재 참가자와 묶인 보호 채널 수입니다. 테스트/모니터링용입니다.</summary>
     public int SecureConnectionCount => _secureConnections.Count;
 
+    /// <summary>비정상 끊김 뒤 재연결 토큰을 쓸 수 있는 시간입니다(U03 자동 재연결).</summary>
+    public TimeSpan ReconnectWindow { get; set; } = ReconnectRules.DefaultWindow;
+
+    /// <summary>발급되어 아직 쓰이지 않은 재연결 토큰 수입니다. 테스트/모니터링용입니다.</summary>
+    public int ReconnectGrantCount
+    {
+        get { lock (_sessionLock) return _reconnectGrants.Count; }
+    }
+
     /// <summary>
     /// roomPassword가 비어 있으면 비밀번호 없는 방입니다. 비밀번호는 해시로만 보관하며
     /// SessionInfo에 넣지 않습니다(브로드캐스트/직렬화 노출 방지).
@@ -406,6 +424,7 @@ public sealed class SessionManager
                 _secureGate = new SecureRoomGate(_secureListener, CurrentSession.SessionId, passwordVerifier, _logSink);
                 _secureGate.ConnectionClosed += OnSecureConnectionClosed;
                 _secureGate.BoundFrameReceived += OnSecureFrameAsync;
+                _secureGate.ReconnectValidator = ValidateReconnectAsync;
             }
         }
 
@@ -431,6 +450,16 @@ public sealed class SessionManager
         EndSharingLifetime();
         // 입력 회수 확인 실패가 세션 종료 자체를 막지 않게 한다. 결과는 로그로만 남긴다.
         await StopControlForTeardownAsync("세션 종료");
+        // 세션 종료는 비정상 끊김이 아니므로 학생 앱이 자동 재연결하지 않게 먼저 알리고 토큰을 모두 폐기한다.
+        lock (_sessionLock) _reconnectGrants.Clear();
+        if (CurrentSession is { } closing)
+        {
+            var ended = CollaborationMessageCodec.Encode(Guid.NewGuid(), new SessionEndedNotice(closing.SessionId));
+            var targets = _secureConnections.ToArray();
+            foreach (var (clientId, secure) in targets)
+                await SendSecureAsync(secure, ended, clientId);
+            _logSink.Write($"[Reconnect] 세션 종료 알림: {targets.Length}명");
+        }
         // 연결 정리 전에 클라이언트들에게 세션 종료 알림
         if (_participants.Count > 0)
         {
@@ -539,6 +568,89 @@ public sealed class SessionManager
         var notice = new ControlStatusNotice(state.Student.SessionId, sequence, state.Phase);
         _ = SendSecureAsync(secure, CollaborationMessageCodec.Encode(Guid.NewGuid(), notice), clientId);
     }
+
+    /// <summary>참가 연결마다 새 재연결 토큰을 발급합니다. 이전 토큰은 폐기되고 연결 중에는 쓸 수 없습니다.</summary>
+    private async Task IssueReconnectGrantAsync(string clientId, string displayName, SecureCollaborationConnection secure)
+    {
+        var token = Base64Url(RandomNumberGenerator.GetBytes(32));
+        lock (_sessionLock)
+        {
+            RemoveReconnectGrantsLocked(clientId);
+            _reconnectGrants[HashToken(token)] = new ReconnectGrant(clientId, displayName, null, true, true);
+        }
+        var notice = new ReconnectGrantNotice(token, (int)Math.Ceiling(ReconnectWindow.TotalSeconds));
+        await SendSecureAsync(secure, CollaborationMessageCodec.Encode(Guid.NewGuid(), notice), clientId);
+    }
+
+    private void ArmReconnectGrant(string clientId)
+    {
+        if (!_clientDisplayNames.ContainsKey(clientId)) return;
+        var connection = _participantRegistry.TryGetConnection(clientId);
+        var snapshot = connection is null ? null : _participantRegistry.TryResolve(connection.ConnectionId);
+        var expiresAt = DateTimeOffset.UtcNow + ReconnectWindow;
+        lock (_sessionLock)
+        {
+            foreach (var (key, grant) in _reconnectGrants.ToArray())
+            {
+                if (grant.ClientId != clientId || grant.ExpiresAt is not null) continue;
+                _reconnectGrants[key] = grant with
+                {
+                    ExpiresAt = expiresAt,
+                    AllowViewing = snapshot?.AllowViewing ?? true,
+                    AllowControl = snapshot?.AllowControl ?? true
+                };
+            }
+        }
+    }
+
+    private void RevokeReconnectGrant(string clientId)
+    {
+        lock (_sessionLock) RemoveReconnectGrantsLocked(clientId);
+    }
+
+    private void RemoveReconnectGrantsLocked(string clientId)
+    {
+        foreach (var key in _reconnectGrants.Where(pair => pair.Value.ClientId == clientId).Select(pair => pair.Key).ToArray())
+            _reconnectGrants.Remove(key);
+    }
+
+    /// <summary>
+    /// 재연결 토큰을 확인하고 소비합니다. 서버가 아직 끊김을 모르는 연결(학생 쪽이 먼저 알아챈 경우)이면
+    /// 토큰 소유를 본인 증명으로 보고 옛 연결을 정리한 뒤 교체합니다.
+    /// </summary>
+    private async Task<object?> ValidateReconnectAsync(string displayName, string token)
+    {
+        if (token.Length > ReconnectRules.MaxTokenLength) return null;
+        var key = HashToken(token);
+        var now = DateTimeOffset.UtcNow;
+        ReconnectGrant? grant;
+        lock (_sessionLock)
+        {
+            foreach (var expired in _reconnectGrants.Where(pair => pair.Value.ExpiresAt <= now).Select(pair => pair.Key).ToArray())
+                _reconnectGrants.Remove(expired);
+            if (!_reconnectGrants.TryGetValue(key, out grant) || !string.Equals(grant.DisplayName, displayName, StringComparison.Ordinal))
+                return null;
+            _reconnectGrants.Remove(key);
+        }
+
+        if (grant.ExpiresAt is null)
+        {
+            var connection = _participantRegistry.TryGetConnection(grant.ClientId);
+            var snapshot = connection is null ? null : _participantRegistry.TryResolve(connection.ConnectionId);
+            grant = grant with { AllowViewing = snapshot?.AllowViewing ?? true, AllowControl = snapshot?.AllowControl ?? true };
+            _logSink.Write($"[Reconnect] 끊김 전 연결 교체: clientId={grant.ClientId}");
+            await _tcpServer.DisconnectClientAsync(grant.ClientId, "재연결로 교체");
+        }
+
+        _logSink.Write($"[Reconnect] 토큰 확인: 이름={displayName}");
+        return new ReconnectRestore(grant.AllowViewing, grant.AllowControl);
+    }
+
+    private static string HashToken(string token) =>
+        Convert.ToHexString(SHA256.HashData(System.Text.Encoding.ASCII.GetBytes(token)));
+
+    private static string Base64Url(byte[] bytes) =>
+        Convert.ToBase64String(bytes).TrimEnd('=').Replace('+', '-').Replace('/', '_');
 
     private async Task SendSecureAsync(SecureCollaborationConnection secure, byte[] frame, string clientId)
     {
@@ -674,6 +786,8 @@ public sealed class SessionManager
 
                         if (response is AckPacket && !string.IsNullOrWhiteSpace(leaveName))
                         {
+                            // 정상 퇴장한 학생은 자동 재연결하지 않는다(U03).
+                            RevokeReconnectGrant(clientId);
                             await RevokeControlIfDisconnectedAsync(clientId);
                             await RevokeRdpInvitationAsync(leaveName, RdpFailureReason.SessionClosed, notifyClientId: null);
                             await BroadcastSystemMessageAsync($"{leaveName}님이 세션에서 나갔습니다.");
@@ -744,6 +858,8 @@ public sealed class SessionManager
     {
         _clientLastSeen.TryRemove(clientId, out _);
 
+        // 참가 중이던 연결이 비정상으로 끊긴 경우에만 재연결 토큰을 쓸 수 있게 연다. 허용 상태는 끊기기 직전 값을 보관한다.
+        ArmReconnectGrant(clientId);
         var displayName = RemoveParticipant(clientId);
         if (displayName is null)
             return;
@@ -832,10 +948,13 @@ public sealed class SessionManager
         }
 
         SecureCollaborationConnection? secure = null;
+        ReconnectRestore? restore = null;
         if (secureGate is not null)
         {
             // 티켓은 이름에 묶인 일회용이다. 실패해도 다시 쓸 수 없으므로 학생은 인증부터 다시 한다.
-            secure = secureGate.Redeem(packet.JoinTicket, packet.DisplayName);
+            var redemption = secureGate.Redeem(packet.JoinTicket, packet.DisplayName);
+            secure = redemption?.Connection;
+            restore = redemption?.ReconnectContext as ReconnectRestore;
             if (secure is null)
             {
                 _logSink.Write($"[SecureJoin] 티켓 없음/만료/불일치로 참가 거부: clientId={clientId}");
@@ -851,17 +970,23 @@ public sealed class SessionManager
             return CreateError(ErrorCodes.AlreadyJoined, $"{packet.DisplayName}은(는) 이미 참여 중입니다.", true, packet);
         }
 
-        _participantRegistry.Join(clientId, CurrentSession.SessionId, packet.DisplayName, ParticipantRole.Student);
+        var participant = _participantRegistry.Join(clientId, CurrentSession.SessionId, packet.DisplayName, ParticipantRole.Student);
+        if (restore is not null && (!restore.AllowViewing || !restore.AllowControl))
+        {
+            // 학생이 끊기기 전에 꺼 둔 허용은 재연결로 다시 켜지지 않게 복원한다(U07).
+            _participantRegistry.SetPermissions(participant.ConnectionId, restore.AllowViewing, restore.AllowControl);
+        }
         if (secure is not null)
         {
             _secureConnections[clientId] = secure;
+            _ = IssueReconnectGrantAsync(clientId, packet.DisplayName, secure);
             // 참가 직후 학생이 기본 허용 상태(보기·제어 ON)를 바로 표시할 수 있게 한다(U07).
             _ = PushStudentStatusAsync(clientId);
             // 등록 직전에 닫혔다면 닫힘 알림이 이 참가자를 찾지 못했으므로 여기서 정리한다.
             if (secure.IsClosed) _ = _tcpServer.DisconnectClientAsync(clientId, "보호 채널 종료");
         }
 
-        _logSink.Write($"[Session] 참여: {packet.DisplayName}, 현재 인원={CurrentSession.ParticipantCount}");
+        _logSink.Write($"[Session] {(restore is null ? "참여" : "재연결")}: {packet.DisplayName}, 현재 인원={CurrentSession.ParticipantCount}");
 
         return PacketFactory.CreateAck(
             senderId: "Server",

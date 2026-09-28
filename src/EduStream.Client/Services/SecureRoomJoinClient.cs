@@ -21,7 +21,9 @@ public enum SecureJoinFailure
     /// <summary>교수자 앱 버전이 달라 보호 채널을 쓸 수 없습니다.</summary>
     VersionMismatch,
     /// <summary>교수자 PC에 연결하지 못했거나 응답이 없습니다.</summary>
-    Unreachable
+    Unreachable,
+    /// <summary>재연결 토큰이 만료·사용됐거나 이미 다른 이름으로 쓰였습니다. 새로 참가해야 합니다.</summary>
+    ReconnectRejected
 }
 
 public sealed class SecureJoinException(SecureJoinFailure failure) : Exception(failure.ToString())
@@ -62,9 +64,10 @@ public sealed class SecureSessionChannel : IAsyncDisposable
 /// </summary>
 public static class SecureRoomJoinClient
 {
+    /// <param name="reconnectToken">비정상 끊김 뒤 자동 재연결할 때만 넣습니다. 넣으면 비밀번호는 보내지 않습니다.</param>
     public static async Task<SecureSessionChannel> AuthenticateAsync(string host, int sessionPort, string connectionCode,
         string displayName, ReadOnlyMemory<char> password, ILogSink logSink, TimeSpan? timeout = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default, string? reconnectToken = null)
     {
         ArgumentNullException.ThrowIfNull(logSink);
         if (!ConnectionCode.TryNormalize(connectionCode, out _)) throw new SecureJoinException(SecureJoinFailure.InvalidCode);
@@ -117,16 +120,23 @@ public static class SecureRoomJoinClient
         {
             Encoding.UTF8.GetBytes(password.Span, passwordBytes);
             frame = CollaborationMessageCodec.Encode(Guid.NewGuid(),
-                new RoomAuthRequest { AttemptId = attemptId, DisplayName = displayName, Password = passwordBytes });
+                new RoomAuthRequest
+                {
+                    AttemptId = attemptId, DisplayName = displayName,
+                    Password = reconnectToken is null ? passwordBytes : [], ReconnectToken = reconnectToken
+                });
             await connection.SendAsync(frame, cancellationToken);
 
             var response = await result.Task.WaitAsync(timeout ?? CollaborationHandshake.DefaultTimeout, cancellationToken);
             if (response.AttemptId != attemptId) throw new SecureJoinException(SecureJoinFailure.Unreachable);
             if (!response.Accepted)
             {
-                throw new SecureJoinException(response.Error == CollaborationError.ResourceLimit
-                    ? SecureJoinFailure.LockedOut
-                    : SecureJoinFailure.PasswordRejected);
+                throw new SecureJoinException(response.Error switch
+                {
+                    CollaborationError.ResourceLimit => SecureJoinFailure.LockedOut,
+                    CollaborationError.StaleConnection => SecureJoinFailure.ReconnectRejected,
+                    _ => SecureJoinFailure.PasswordRejected
+                });
             }
 
             channel = new SecureSessionChannel(connection, response.JoinTicket!, response.SessionId!.Value);

@@ -38,6 +38,14 @@ public sealed class ClientViewModel : ObservableObject
     private readonly IRdpViewerService _rdpViewerService;
     private SecureSessionChannel? _secureChannel;
     private StudentStatusClient? _statusClient;
+    // 자동 재연결(U03): 마지막 참가 정보와 교수자가 준 일회용 토큰. 비밀번호는 보관하지 않는다.
+    private sealed record JoinTarget(string Host, int Port, string Code, string DisplayName);
+    private JoinTarget? _lastJoin;
+    private string? _reconnectToken;
+    private TimeSpan _reconnectWindow = ReconnectRules.DefaultWindow;
+    private CancellationTokenSource? _reconnectCts;
+    private volatile bool _userLeaving;
+    private volatile bool _sessionEnded;
     private StudentStatus _studentStatus = StudentStatus.Initial;
     private bool _permissionNoticeShown;
     private string _connectionCode = string.Empty;
@@ -381,6 +389,13 @@ public sealed class ClientViewModel : ObservableObject
             _logSink.Write($"서버 연결 시도: {HostAddress}:{Port}");
             SyncLogs();
 
+            // 새 참가는 이전 세션의 재연결 상태를 이어받지 않는다.
+            CancelReconnect();
+            _reconnectToken = null;
+            _userLeaving = false;
+            _sessionEnded = false;
+            _lastJoin = new JoinTarget(HostAddress, Port, ConnectionCode, DisplayName);
+
             // 접속 코드로 교수자 PC를 확인한 보호 채널에서만 방 비밀번호를 보내고 참가 티켓을 받는다.
             StatusMessage = "교수자 PC를 확인하는 중입니다...";
             var roomPassword = RoomPasswordProvider?.Invoke() ?? string.Empty;
@@ -482,6 +497,10 @@ public sealed class ClientViewModel : ObservableObject
 
     private async Task DisconnectAsync()
     {
+        // 사용자가 직접 나간 경우는 자동 재연결하지 않는다.
+        _userLeaving = true;
+        CancelReconnect();
+        _reconnectToken = null;
         Interlocked.Increment(ref _frameGeneration);
         await ResetRdpAsync();
         try
@@ -981,10 +1000,12 @@ public sealed class ClientViewModel : ObservableObject
         Interlocked.Increment(ref _frameGeneration);
         await ResetRdpAsync();
         await ReplaceSecureChannelAsync(null);
+        var wasJoined = false;
         RunOnUiThread(() =>
         {
             if (IsConnected)
             {
+                wasJoined = true;
                 IsConnected = false;
                 IsConnecting = false;
                 HasRemoteFrame = false;
@@ -1002,7 +1023,95 @@ public sealed class ClientViewModel : ObservableObject
             }
         });
 
+        if (wasJoined && !_userLeaving && !_disposing && !_sessionEnded &&
+            Interlocked.Exchange(ref _reconnectToken, null) is { } token && _lastJoin is { } target)
+            _ = RunReconnectAsync(target, token);
     }
+
+    /// <summary>
+    /// 비정상 끊김 뒤 교수자가 준 토큰으로 비밀번호 재입력 없이 다시 참가합니다. 토큰은 한 번만 쓸 수 있어,
+    /// 교수자 PC에 닿지 않았을 때만 같은 토큰으로 다시 시도하고 거부되면 그만둡니다.
+    /// </summary>
+    private async Task RunReconnectAsync(JoinTarget target, string token)
+    {
+        var cts = new CancellationTokenSource();
+        Interlocked.Exchange(ref _reconnectCts, cts)?.Cancel();
+        RunOnUiThread(() =>
+        {
+            IsConnecting = true;
+            ConnectionState = "재연결 중...";
+            ChatMessages.Insert(0, ChatLine.System("연결이 끊겨 자동으로 다시 연결합니다."));
+        });
+
+        bool rejoined;
+        try
+        {
+            rejoined = await ReconnectScheduler.RunAsync(
+                (attempt, cancellationToken) => TryReconnectOnceAsync(target, token, attempt, cancellationToken),
+                _reconnectWindow, cancellationToken: cts.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+        finally
+        {
+            Interlocked.CompareExchange(ref _reconnectCts, null, cts);
+        }
+
+        if (!rejoined)
+        {
+            RunOnUiThread(() =>
+            {
+                IsConnecting = false;
+                ConnectionState = "연결 끊김";
+                UpdateStatus("자동 재연결에 실패했습니다. 참가 정보를 확인하고 다시 참가해 주세요.", StatusPriority.Error, isError: true);
+                SyncLogs();
+            });
+        }
+    }
+
+    private async Task<ReconnectAttemptOutcome> TryReconnectOnceAsync(JoinTarget target, string token, int attempt,
+        CancellationToken cancellationToken)
+    {
+        if (_userLeaving || _disposing || _sessionEnded) return ReconnectAttemptOutcome.GiveUp;
+        RunOnUiThread(() => StatusMessage = $"연결이 끊겨 다시 연결하는 중입니다... ({attempt}번째 시도)");
+
+        SecureSessionChannel secure;
+        try
+        {
+            secure = await SecureRoomJoinClient.AuthenticateAsync(target.Host, target.Port, target.Code, target.DisplayName,
+                ReadOnlyMemory<char>.Empty, _logSink, cancellationToken: cancellationToken, reconnectToken: token);
+        }
+        catch (SecureJoinException ex) when (ex.Failure == SecureJoinFailure.Unreachable)
+        {
+            return ReconnectAttemptOutcome.RetryLater;
+        }
+        catch (SecureJoinException ex)
+        {
+            _logSink.Write($"[Reconnect] 재연결 거부: {ex.Failure}");
+            return ReconnectAttemptOutcome.GiveUp;
+        }
+
+        // 토큰은 이미 소비됐다. 여기서 실패하면 같은 토큰으로 다시 시도할 수 없다.
+        try
+        {
+            await ReplaceSecureChannelAsync(secure);
+            AttachStudentStatus(secure);
+            await _tcpClient.ConnectAsync(target.Host, target.Port);
+            await _tcpClient.SendAsync(_sessionClient.CreateJoinRequest(target.Host, target.Port, target.DisplayName, secure.JoinTicket));
+            _logSink.Write($"[Reconnect] 재참가 요청 전송 ({attempt}번째 시도)");
+            return ReconnectAttemptOutcome.Succeeded;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logSink.Write($"[Reconnect] 재참가 실패: {ex.GetType().Name}");
+            await ReplaceSecureChannelAsync(null);
+            return ReconnectAttemptOutcome.GiveUp;
+        }
+    }
+
+    private void CancelReconnect() => Interlocked.Exchange(ref _reconnectCts, null)?.Cancel();
 
     private async Task ResetRdpAsync()
     {
@@ -1042,8 +1151,22 @@ public sealed class ClientViewModel : ObservableObject
         {
             try
             {
-                if (StudentStatusClient.Handles(CollaborationFrameInspector.PeekKind(frame)))
+                var kind = CollaborationFrameInspector.PeekKind(frame);
+                if (StudentStatusClient.Handles(kind))
                     statusClient.HandleFrame(frame);
+                else if (kind == CollaborationMessageKind.ReconnectGrant)
+                {
+                    var grant = CollaborationMessageCodec.Decode<ReconnectGrantNotice>(frame, out _);
+                    _reconnectToken = grant.Token;
+                    _reconnectWindow = TimeSpan.FromSeconds(grant.WindowSeconds);
+                }
+                else if (kind == CollaborationMessageKind.SessionEnded)
+                {
+                    // 교수자가 세션을 끝냈으므로 이후 끊김은 자동 재연결 대상이 아니다.
+                    CollaborationMessageCodec.Decode<SessionEndedNotice>(frame, out _);
+                    _sessionEnded = true;
+                    _reconnectToken = null;
+                }
             }
             catch (CollaborationException ex)
             {

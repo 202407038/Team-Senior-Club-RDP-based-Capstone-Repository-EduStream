@@ -15,6 +15,9 @@ namespace EduStream.Server.Services;
 /// 현재 단계에서는 티켓이 평문 v1 TCP 참가 요청에 실립니다. 일회용·30초·이름 고정이라 재사용은 막지만,
 /// 채팅·화면 등 v1 트래픽 자체의 암호화는 이 PR 범위가 아닙니다.
 /// </remarks>
+/// <summary>티켓 소비 결과. 재연결로 발급된 티켓이면 ReconnectContext에 검증기가 돌려준 값이 담깁니다.</summary>
+public sealed record SecureRedemption(SecureCollaborationConnection Connection, object? ReconnectContext);
+
 public sealed class SecureRoomGate : IAsyncDisposable
 {
     public static readonly TimeSpan DefaultAuthTimeout = TimeSpan.FromSeconds(15);
@@ -27,7 +30,7 @@ public sealed class SecureRoomGate : IAsyncDisposable
         public bool Bound { get; set; }
     }
 
-    private sealed record Ticket(string DisplayName, State State, DateTimeOffset ExpiresAt);
+    private sealed record Ticket(string DisplayName, State State, DateTimeOffset ExpiresAt, object? ReconnectContext);
 
     private readonly object _gate = new();
     private readonly Dictionary<Guid, State> _states = new(); // 보호 채널 연결 ID → 인증 상태
@@ -45,6 +48,12 @@ public sealed class SecureRoomGate : IAsyncDisposable
 
     /// <summary>보호 채널이 닫혔을 때 발생합니다. 참가자와 묶여 있었다면 기존 TCP 연결도 정리해야 합니다.</summary>
     public event Action<SecureCollaborationConnection>? ConnectionClosed;
+
+    /// <summary>
+    /// 재연결 토큰 검증기(이름, 토큰 → 복원 정보 또는 null). 유효하면 비밀번호 확인을 건너뛰고 토큰을 소비해야 합니다.
+    /// 지정하지 않으면 재연결 요청은 모두 거부합니다.
+    /// </summary>
+    public Func<string, string, Task<object?>>? ReconnectValidator { get; set; }
 
     public SecureRoomGate(SecureCollaborationListener listener, Guid sessionId, RoomPasswordVerifier? password,
         ILogSink logSink, TimeSpan? authTimeout = null, TimeSpan? ticketLifetime = null, TimeProvider? timeProvider = null)
@@ -69,7 +78,7 @@ public sealed class SecureRoomGate : IAsyncDisposable
     /// 기존 TCP 참가 요청의 티켓을 확인하고 소비합니다. 이름이 다르거나 만료·재사용·연결 종료면 null이며,
     /// 어떤 경우든 한 번 제시된 티켓은 다시 쓸 수 없습니다.
     /// </summary>
-    public SecureCollaborationConnection? Redeem(string? joinTicket, string displayName)
+    public SecureRedemption? Redeem(string? joinTicket, string displayName)
     {
         if (string.IsNullOrEmpty(joinTicket) || joinTicket.Length > RoomAuthRules.MaxTicketLength) return null;
         var key = HashTicket(joinTicket);
@@ -81,7 +90,7 @@ public sealed class SecureRoomGate : IAsyncDisposable
                 ticket.State.Connection.IsClosed || ticket.State.Bound)
                 return null;
             ticket.State.Bound = true;
-            return ticket.State.Connection;
+            return new SecureRedemption(ticket.State.Connection, ticket.ReconnectContext);
         }
     }
 
@@ -137,12 +146,25 @@ public sealed class SecureRoomGate : IAsyncDisposable
     private async Task AuthenticateAsync(State state, RoomAuthRequest request)
     {
         RoomPasswordResult verdict;
+        object? reconnectContext = null;
+        var reconnectRejected = false;
         var chars = new char[Encoding.UTF8.GetCharCount(request.Password)];
         try
         {
-            Encoding.UTF8.GetChars(request.Password, chars);
-            // 비밀번호 없는 방은 입력값과 관계없이 통과한다. 교수자 확인은 이미 접속 코드로 끝났다.
-            verdict = _password?.Verify(state.Connection.RemoteAddress, chars) ?? RoomPasswordResult.Accepted;
+            if (request.ReconnectToken is { } token)
+            {
+                // 재연결은 비밀번호 대신 끊긴 참가자에게 준 일회용 토큰으로 확인한다(U03 비밀번호 재입력 없음).
+                var validator = ReconnectValidator;
+                reconnectContext = validator is null ? null : await validator(request.DisplayName, token);
+                reconnectRejected = reconnectContext is null;
+                verdict = reconnectRejected ? RoomPasswordResult.Rejected : RoomPasswordResult.Accepted;
+            }
+            else
+            {
+                Encoding.UTF8.GetChars(request.Password, chars);
+                // 비밀번호 없는 방은 입력값과 관계없이 통과한다. 교수자 확인은 이미 접속 코드로 끝났다.
+                verdict = _password?.Verify(state.Connection.RemoteAddress, chars) ?? RoomPasswordResult.Accepted;
+            }
         }
         finally
         {
@@ -159,14 +181,16 @@ public sealed class SecureRoomGate : IAsyncDisposable
                 if (_disposed || state.TicketIssued || state.Connection.IsClosed) return;
                 state.TicketIssued = true;
                 _tickets[HashTicket(ticket)] = new Ticket(request.DisplayName, state,
-                    _timeProvider.GetUtcNow() + _ticketLifetime);
+                    _timeProvider.GetUtcNow() + _ticketLifetime, reconnectContext);
             }
             result = new RoomAuthResult(request.AttemptId, true, null, ticket, _sessionId);
             _logSink.Write($"[SecureJoin] 참가 인증 성공, 티켓 발급: connection={state.Connection.Id}");
         }
         else
         {
-            var error = verdict == RoomPasswordResult.LockedOut ? CollaborationError.ResourceLimit : CollaborationError.NotAuthorized;
+            var error = reconnectRejected ? CollaborationError.StaleConnection
+                : verdict == RoomPasswordResult.LockedOut ? CollaborationError.ResourceLimit
+                : CollaborationError.NotAuthorized;
             result = new RoomAuthResult(request.AttemptId, false, error, null, null);
             _logSink.Write($"[SecureJoin] 참가 인증 거부: connection={state.Connection.Id}, 원격={state.Connection.RemoteAddress}, 사유={verdict}");
         }

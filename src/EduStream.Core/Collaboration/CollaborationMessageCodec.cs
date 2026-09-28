@@ -8,7 +8,8 @@ public enum CollaborationMessageKind
     Participants = 1, FileCatalog = 2, FileRequest = 3, FileChunk = 4,
     FileCancel = 5, FileStored = 6, Failure = 7,
     RoomAuthRequest = 8, RoomAuthResult = 9,
-    ControlStatus = 10, PermissionChange = 11
+    ControlStatus = 10, PermissionChange = 11,
+    ReconnectGrant = 12, SessionEnded = 13
 }
 public sealed record FileCancelRequest(Guid RequestId, Guid SessionId);
 public sealed record FileStoredNotice(Guid RequestId, Guid FileId, long Length, string Sha256);
@@ -77,6 +78,8 @@ public static class CollaborationMessageCodec
         if (type == typeof(RoomAuthResult)) return CollaborationMessageKind.RoomAuthResult;
         if (type == typeof(ControlStatusNotice)) return CollaborationMessageKind.ControlStatus;
         if (type == typeof(PermissionChangeRequest)) return CollaborationMessageKind.PermissionChange;
+        if (type == typeof(ReconnectGrantNotice)) return CollaborationMessageKind.ReconnectGrant;
+        if (type == typeof(SessionEndedNotice)) return CollaborationMessageKind.SessionEnded;
         throw new CollaborationException(CollaborationError.UnsupportedCapability);
     }
 
@@ -130,6 +133,8 @@ public static class CollaborationMessageCodec
             case RoomAuthResult result: RoomAuthRules.Validate(result); break;
             case ControlStatusNotice control: StudentStatusRules.Validate(control); break;
             case PermissionChangeRequest change: StudentStatusRules.Validate(change); break;
+            case ReconnectGrantNotice grant: ReconnectRules.Validate(grant); break;
+            case SessionEndedNotice ended: ReconnectRules.Validate(ended); break;
             default: throw new CollaborationException(CollaborationError.UnsupportedCapability);
         }
     }
