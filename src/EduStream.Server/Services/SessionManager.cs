@@ -32,6 +32,8 @@ public sealed class SessionManager
     private readonly object _sessionLock = new();
     private IRdpSharingService? _rdpSharingService;
     private Guid _rdpSharingId;
+    // 공유 수명 동안만 유효한 토큰. 공유 중지/세션 종료 시 취소해 그 공유에서 시작된 제어 요청을 끝낸다.
+    private CancellationTokenSource? _sharingLifetime;
     private ParticipantConnection? _professorConnection;
     private ServerRemoteControlCoordinator? _controlCoordinator;
     private IRemoteInputGate _remoteInputGate = UnavailableRemoteInputGate.Instance;
@@ -138,6 +140,8 @@ public sealed class SessionManager
         {
             _rdpSharingService = sharingService;
             _rdpSharingId = sharingId;
+            if (_sharingLifetime is null || _sharingLifetime.IsCancellationRequested)
+                _sharingLifetime = new CancellationTokenSource();
         }
         _logSink.Write($"[Rdp] 공유 서비스 연결: sharingId={sharingId}");
     }
@@ -160,6 +164,7 @@ public sealed class SessionManager
     /// <summary>
     /// 교수자가 선택한 학생 한 명에게 원격 제어를 요청합니다. 기존 대상은 먼저 회수하고
     /// 3번의 실제 입력 회수 확인 후에 새 대상으로 전환합니다. Active는 입력 허용 완료 후에만 표시됩니다.
+    /// 화면 공유가 연결되어 있을 때만 요청할 수 있고, 요청 중 공유가 중지되면 요청은 회수되어 Active가 되지 않습니다.
     /// </summary>
     public async Task RequestControlAsync(string targetDisplayName)
     {
@@ -173,9 +178,28 @@ public sealed class SessionManager
         var target = _participantRegistry.TryGetConnection(clientId)
             ?? throw new InvalidOperationException($"{targetDisplayName}의 연결 정보를 찾을 수 없습니다.");
 
-        await _controlCoordinator.RequestAsync(target);
+        CancellationToken sharingToken;
+        lock (_sessionLock)
+        {
+            // 공유 중지가 시작되면 서비스 참조가 먼저 비워지므로, 중지 중·중지 후 요청은 여기서 막힌다.
+            if (_rdpSharingService is null || _sharingLifetime is null || _sharingLifetime.IsCancellationRequested)
+                throw new InvalidOperationException("현재 화면 공유가 시작되지 않았습니다.");
+            sharingToken = _sharingLifetime.Token;
+        }
 
-        var state = _controlCoordinator.Current;
+        var coordinator = _controlCoordinator;
+        try
+        {
+            await coordinator.RequestAsync(target, sharingToken);
+        }
+        catch (OperationCanceledException) when (sharingToken.IsCancellationRequested)
+        {
+            // 진입 확인 뒤 공유 중지가 끼어든 경우. 조정자가 요청을 이미 회수했다.
+            _logSink.Write($"[Control] 공유 중지로 요청 취소: 대상={targetDisplayName}");
+            return;
+        }
+
+        var state = coordinator.Current;
         if (state is not null && state.Student == target && state.Phase == ControlPhase.Active)
             _logSink.Write($"[Control] 활성: 대상={targetDisplayName}, requestId={state.RequestId}");
         else
@@ -247,11 +271,7 @@ public sealed class SessionManager
     /// </summary>
     public async Task DetachRdpSharingAsync()
     {
-        lock (_sessionLock)
-        {
-            _rdpSharingService = null;
-            _rdpSharingId = Guid.Empty;
-        }
+        EndSharingLifetime();
         // 공유 재시작 뒤 제어를 자동 재승인하지 않는다(화면 수신 자동 복귀와 별개, 협의 필요 항목).
         if (_controlCoordinator is not null)
         {
@@ -315,12 +335,8 @@ public sealed class SessionManager
 
     public async Task CloseSessionAsync()
     {
-        // 종료 정리 전에 새 초대 발급을 막는다. 기존 초대는 발급한 서비스로 회수한다.
-        lock (_sessionLock)
-        {
-            _rdpSharingService = null;
-            _rdpSharingId = Guid.Empty;
-        }
+        // 종료 정리 전에 새 초대 발급과 제어 요청을 막는다. 기존 초대는 발급한 서비스로 회수한다.
+        EndSharingLifetime();
         if (_controlCoordinator is not null)
         {
             try
@@ -817,6 +833,23 @@ public sealed class SessionManager
             _participants.TryGetValue(participantId, out var clientId);
             await RevokeRdpInvitationAsync(participantId, reason, clientId);
         }
+    }
+
+    /// <summary>
+    /// 새 초대 발급과 새 제어 요청을 막고, 이 공유에서 진행 중인 제어 요청을 취소합니다.
+    /// </summary>
+    private void EndSharingLifetime()
+    {
+        CancellationTokenSource? lifetime;
+        lock (_sessionLock)
+        {
+            _rdpSharingService = null;
+            _rdpSharingId = Guid.Empty;
+            lifetime = _sharingLifetime;
+            _sharingLifetime = null;
+        }
+        // 진행 중인 요청이 토큰을 계속 참조할 수 있어 Dispose하지 않는다(타이머 없는 CTS라 누수 없음).
+        lifetime?.Cancel();
     }
 
     private string? GetDisplayName(string clientId, string? packetDisplayName)
