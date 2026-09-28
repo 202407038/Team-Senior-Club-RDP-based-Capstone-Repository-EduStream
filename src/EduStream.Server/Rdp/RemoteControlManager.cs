@@ -93,24 +93,52 @@ public sealed class RemoteControlManager : IRemoteControlManager, IRemoteInputGa
         });
     }
 
-    public bool ProcessMouseMove(string participantId, int x, int y)
+   public bool ProcessMouseMove(string participantId, int x, int y)
     {
-        return CanProcessInput(participantId, allowMouse: true);
+        if (!CanProcessInput(participantId, allowMouse: true))
+            return false;
+
+        if (_isNativeEngineConnected)
+        {
+            _ = _nativeInputPipeline.InjectInputAsync(participantId);
+        }
+        return true;
     }
 
     public bool ProcessMouseClick(string participantId, MouseButton button, bool isPressed)
     {
-        return CanProcessInput(participantId, allowMouse: true);
+        if (!CanProcessInput(participantId, allowMouse: true))
+            return false;
+
+        if (_isNativeEngineConnected)
+        {
+            _ = _nativeInputPipeline.InjectInputAsync(participantId);
+        }
+        return true;
     }
 
     public bool ProcessMouseWheel(string participantId, int delta)
     {
-        return CanProcessInput(participantId, allowMouse: true);
+        if (!CanProcessInput(participantId, allowMouse: true))
+            return false;
+
+        if (_isNativeEngineConnected)
+        {
+            _ = _nativeInputPipeline.InjectInputAsync(participantId);
+        }
+        return true;
     }
 
     public bool ProcessKeyboardInput(string participantId, int keyCode, bool isPressed)
     {
-        return CanProcessInput(participantId, allowKeyboard: true);
+        if (!CanProcessInput(participantId, allowKeyboard: true))
+            return false;
+
+        if (_isNativeEngineConnected)
+        {
+            _ = _nativeInputPipeline.InjectInputAsync(participantId);
+        }
+        return true;
     }
 
     private bool CanProcessInput(string participantId, bool allowMouse = false, bool allowKeyboard = false)

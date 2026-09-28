@@ -118,28 +118,17 @@ public sealed class WdsViewportAdapter : IWdsViewportAdapter
             Timestamp = DateTimeOffset.UtcNow
         });
 
-        // WDS 뷰어 적용 이벤트 발생 (등록된 뷰어 핸들러가 실제로 있을 때만 성공 알림 발생)
-        if (_viewerHandlers.Count > 0)
-        {
-            ViewerApplied?.Invoke(this, new ViewerAppliedEventArgs
-            {
-                ViewportInfo = viewportInfo,
-                AppliedAt = DateTimeOffset.UtcNow
-            });
-        }
+        
     }
 
-    /// <summary>
-    /// WDS 뷰어에 뷰포트 적용 (실제 뷰어 메서드)
-    /// </summary>
     public async Task ApplyToViewerAsync(CancellationToken cancellationToken = default)
     {
-        // 등록된 뷰어가 없으면 적용할 대상이 없으므로 중단
+        // 1. 등록된 뷰어가 없으면 예외 발생 (뷰어 없음 상태 명시)
         if (_viewerHandlers.Count == 0)
         {
-            return;
+            throw new InvalidOperationException("등록된 WDS 뷰어 핸들러가 없습니다.");
         }
-        
+
         var viewportInfo = new ViewportInfo
         {
             ViewportSize = _currentViewportSize,
@@ -147,19 +136,18 @@ public sealed class WdsViewportAdapter : IWdsViewportAdapter
             SourceRect = _currentSourceRect
         };
 
-        // 등록된 뷰어 핸들러들에게 뷰포트 정보 전달
+        // 2. 등록된 핸들러 실행 (예외를 삼키지 않고 상위로 전파하여 실패 인지)
         foreach (var viewerHandler in _viewerHandlers)
         {
-            try
-            {
-                await viewerHandler(viewportInfo);
-            }
-            catch (Exception ex)
-            {
-                // 개별 뷰어 핸들러의 실패는 다른 핸들러에 영향을 주지 않음
-                Console.WriteLine($"[WdsViewportAdapter] 뷰어 핸들러 실패: {ex.GetType().Name}");
-            }
+            await viewerHandler(viewportInfo);
         }
+
+        // 3. 실제 모든 뷰어에 성공적으로 적용 완료된 시점에만 알림 발생
+        ViewerApplied?.Invoke(this, new ViewerAppliedEventArgs
+        {
+            ViewportInfo = viewportInfo,
+            AppliedAt = DateTimeOffset.UtcNow
+        });
     }
 
     /// <summary>

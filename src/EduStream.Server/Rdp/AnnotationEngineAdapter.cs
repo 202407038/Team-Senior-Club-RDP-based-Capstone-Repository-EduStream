@@ -44,7 +44,9 @@ public sealed class AnnotationEngineAdapter : IAnnotationEngineAdapter
     public Task ActivateEngineAsync(CancellationToken cancellationToken = default)
     {
         _isEngineActive = true;
-        // 활성화 시 레이어 가시성은 변경하지 않음 (기존 스트로크 유지)
+        // 판서 활성화 시 그리기 상태(IsDrawing)를 true로 동기화
+        _currentState = _currentState with { IsDrawing = true };
+
         EngineStateChanged?.Invoke(this, new EngineStateChangedEventArgs
         {
             IsActive = true,
@@ -59,8 +61,9 @@ public sealed class AnnotationEngineAdapter : IAnnotationEngineAdapter
     public Task DeactivateEngineAsync(CancellationToken cancellationToken = default)
     {
         _isEngineActive = false;
-        // 비활성화 시 레이어 가시성은 변경하지 않음 (기존 스트로크 화면에 유지)
-        // 마우스/터치 입력 모드만 일반 화면 조작(통과)으로 복귀
+        // 비활성화 시 일반 조작 모드 복귀를 위해 그리기 상태(IsDrawing)를 false로 동기화
+        _currentState = _currentState with { IsDrawing = false };
+
         EngineStateChanged?.Invoke(this, new EngineStateChangedEventArgs
         {
             IsActive = false,
