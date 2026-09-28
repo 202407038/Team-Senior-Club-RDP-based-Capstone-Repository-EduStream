@@ -39,6 +39,7 @@ public sealed class SessionManager
     private IRemoteInputGate _remoteInputGate = UnavailableRemoteInputGate.Instance;
     private RoomPasswordVerifier? _roomPassword;
     private ISessionFileCatalog? _fileCatalog;
+    private SessionFileTransferRouter? _fileTransfers;
 
     /// <summary>
     /// 참여자 목록이 변경되었을 때 발생합니다.
@@ -240,11 +241,12 @@ public sealed class SessionManager
     /// 교수자 로컬 파일을 강의 카탈로그에 등록합니다. 본문은 아직 전송하지 않으며
     /// 이름·길이·SHA256·청크 크기만 목록에 올라갑니다.
     /// </summary>
-    public Task<SessionFileDescriptor> RegisterFileAsync(string localPath, CancellationToken cancellationToken = default)
+    public async Task<SessionFileDescriptor> RegisterFileAsync(string localPath, CancellationToken cancellationToken = default)
     {
-        if (_fileCatalog is null)
-            throw new InvalidOperationException("현재 열려 있는 세션이 없습니다.");
-        return _fileCatalog.RegisterAsync(localPath, cancellationToken);
+        var catalog = _fileCatalog ?? throw new InvalidOperationException("현재 열려 있는 세션이 없습니다.");
+        var descriptor = await catalog.RegisterAsync(localPath, cancellationToken);
+        PublishFileCatalog();
+        return descriptor;
     }
 
     /// <summary>
@@ -255,14 +257,33 @@ public sealed class SessionManager
     {
         if (_fileCatalog is null)
             throw new InvalidOperationException("현재 열려 있는 세션이 없습니다.");
-        return _fileCatalog.Unregister(fileId);
+        if (!_fileCatalog.Unregister(fileId)) return false;
+        // 진행 중인 해당 파일 전송은 카탈로그가 다음 청크 전에 FileUnavailable로 끊는다.
+        PublishFileCatalog();
+        return true;
     }
+
+    /// <summary>
+    /// 학생 연결별 파일 목록 전달·다운로드 요청 라우팅입니다. 세션이 열려 있지 않으면 null입니다.
+    /// 보호 채널이 확정되면 인증된 연결마다 AttachAsync로 붙입니다.
+    /// </summary>
+    public SessionFileTransferRouter? FileTransfers => _fileTransfers;
 
     /// <summary>
     /// 현재 강의의 파일 목록 스냅샷입니다. 세션이 열려 있지 않으면 null입니다.
     /// revision은 등록/해제마다 증가하므로 학생 쪽 동기화 여부 판단에 사용할 수 있습니다.
     /// </summary>
     public SessionFileCatalogSnapshot? GetFileCatalogSnapshot() => _fileCatalog?.GetSnapshot();
+
+    private void PublishFileCatalog()
+    {
+        var router = _fileTransfers;
+        if (router is null) return;
+        // 등록/해제 호출자는 학생 전달 완료를 기다리지 않는다. 송신 실패는 라우터가 연결별로 로그만 남긴다.
+        _ = router.PublishCatalogAsync().ContinueWith(
+            task => _logSink.Write($"[FileRoute] 목록 전달 오류: {task.Exception?.GetBaseException().GetType().Name}"),
+            TaskContinuationOptions.OnlyOnFaulted);
+    }
 
     /// <summary>
     /// 승인은 회수했지만 실제 입력 차단 확인이 아직 끝나지 않은 원격 제어가 있으면 true입니다.
@@ -326,6 +347,7 @@ public sealed class SessionManager
             _roomPassword = passwordVerifier;
             _fileCatalog = new SessionFileCatalog(
                 CurrentSession.SessionId, new SessionFileRequestAuthorizer(_participantRegistry));
+            _fileTransfers = new SessionFileTransferRouter(_fileCatalog, _participantRegistry, _logSink);
         }
 
         _tcpServer.Start(port);
@@ -358,6 +380,8 @@ public sealed class SessionManager
             _controlCoordinator = null;
             _professorConnection = null;
             _roomPassword = null;
+            _fileTransfers?.Dispose();
+            _fileTransfers = null;
             _fileCatalog?.Dispose();
             _fileCatalog = null;
         }
