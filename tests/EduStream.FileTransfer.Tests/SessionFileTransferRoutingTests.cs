@@ -310,6 +310,138 @@ public sealed class SessionFileTransferRoutingTests
         Assert.Equal(CollaborationError.ResourceLimit, error.Code);
     }
 
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1024)]
+    [InlineData(FileTransferRules.DefaultChunkSize * 5 + 17)]
+    public async Task StoredBeforeFinalSendReturns_IsAcceptedOnceAfterSendSucceeds(int length)
+    {
+        using var fixture = new Fixture();
+        var file = await fixture.RegisterAsync(length);
+        SessionFileRequestClient? client = null;
+        var earlyAck = new TaskCompletionSource<FileStoredNotice>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseSend = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var stored = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var raised = 0;
+        fixture.Router.FileStored += (_, _) => { Interlocked.Increment(ref raised); stored.TrySetResult(); };
+        var toClient = new CallbackChannel(async (frame, token) =>
+        {
+            await client!.HandleFrameAsync(frame, token);
+            if (CollaborationFrameInspector.PeekKind(frame) == CollaborationMessageKind.FileChunk &&
+                CollaborationMessageCodec.Decode<SessionFileChunk>(frame, out _).Index == file.TotalChunks - 1)
+                await releaseSend.Task.WaitAsync(token);
+        });
+        var toServer = new CallbackChannel(async (frame, token) =>
+        {
+            await fixture.Router.HandleFrameAsync(fixture.Student, frame);
+            if (CollaborationFrameInspector.PeekKind(frame) == CollaborationMessageKind.FileStored)
+                earlyAck.TrySetResult(CollaborationMessageCodec.Decode<FileStoredNotice>(frame, out _));
+        });
+        client = new SessionFileRequestClient(fixture.SessionId, toServer,
+            new SessionFileDownloader(new ReadinessDirectory(fixture.Downloads)), fixture.Log);
+        await fixture.Router.AttachAsync(fixture.Student, toClient);
+        try
+        {
+            var receipt = await client.DownloadAsync(file.FileId).WaitAsync(Timeout);
+            var notice = await earlyAck.Task.WaitAsync(Timeout);
+            Assert.Equal(await File.ReadAllBytesAsync(fixture.SourcePath(file)), await File.ReadAllBytesAsync(receipt.LocalPath));
+            Assert.Equal(0, Volatile.Read(ref raised));
+            Assert.Equal(1, fixture.Router.PendingTransferCount);
+            // 같은 ACK를 여러 번 받아도 송신 성공 이후 딱 한 번만 완료한다.
+            await fixture.Router.HandleFrameAsync(fixture.Student, Encode(notice));
+            releaseSend.TrySetResult();
+            await stored.Task.WaitAsync(Timeout);
+            await fixture.Router.HandleFrameAsync(fixture.Student, Encode(notice));
+            Assert.Equal(1, Volatile.Read(ref raised));
+            Assert.Equal(0, fixture.Router.PendingTransferCount);
+        }
+        finally { releaseSend.TrySetResult(); }
+    }
+
+    [Theory]
+    [InlineData("failure")]
+    [InlineData("cancel")]
+    [InlineData("disconnect")]
+    public async Task EarlyStored_DoesNotCompleteAfterSendFailureCancelOrDisconnect(string end)
+    {
+        using var fixture = new Fixture();
+        var file = await fixture.RegisterAsync(1024);
+        var reached = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var channel = new CallbackChannel(async (frame, token) =>
+        {
+            if (CollaborationFrameInspector.PeekKind(frame) != CollaborationMessageKind.FileChunk) return;
+            reached.TrySetResult();
+            await release.Task.WaitAsync(token);
+            if (end == "failure") throw new IOException("송신 실패 대역");
+        });
+        await fixture.Router.AttachAsync(fixture.Student, channel);
+        var raised = 0;
+        fixture.Router.FileStored += (_, _) => Interlocked.Increment(ref raised);
+        var request = new SessionFileRequest(Guid.NewGuid(), fixture.SessionId, file.FileId, file.Revision);
+        await fixture.Router.HandleFrameAsync(fixture.Student, Encode(request));
+        try
+        {
+            await reached.Task.WaitAsync(Timeout);
+            var notice = new FileStoredNotice(request.RequestId, file.FileId, file.Length, file.Sha256);
+            await fixture.Router.HandleFrameAsync(fixture.Student, Encode(notice));
+            Assert.Equal(0, Volatile.Read(ref raised));
+            if (end == "cancel")
+                await fixture.Router.HandleFrameAsync(fixture.Student, Encode(new FileCancelRequest(request.RequestId, fixture.SessionId)));
+            if (end == "disconnect") fixture.Registry.Disconnect(Fixture.StudentClientId);
+            release.TrySetResult();
+            await WaitUntilAsync(() => fixture.Router.PendingTransferCount == 0);
+            await fixture.Router.HandleFrameAsync(fixture.Student, Encode(notice));
+            Assert.Equal(0, Volatile.Read(ref raised));
+        }
+        finally { release.TrySetResult(); }
+    }
+
+    [Fact]
+    public async Task StoredBeforeFinalChunkOrWithWrongMetadata_IsNotBufferedAsSuccess()
+    {
+        using var fixture = new Fixture();
+        var file = await fixture.RegisterAsync(FileTransferRules.DefaultChunkSize + 1);
+        var firstReached = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseFirst = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var lastReached = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseLast = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var channel = new CallbackChannel(async (frame, token) =>
+        {
+            if (CollaborationFrameInspector.PeekKind(frame) != CollaborationMessageKind.FileChunk) return;
+            var chunk = CollaborationMessageCodec.Decode<SessionFileChunk>(frame, out _);
+            if (chunk.Index == 0) { firstReached.TrySetResult(); await releaseFirst.Task.WaitAsync(token); }
+            else { lastReached.TrySetResult(); await releaseLast.Task.WaitAsync(token); }
+        });
+        await fixture.Router.AttachAsync(fixture.Student, channel);
+        var raised = 0;
+        fixture.Router.FileStored += (_, _) => Interlocked.Increment(ref raised);
+        var request = new SessionFileRequest(Guid.NewGuid(), fixture.SessionId, file.FileId, file.Revision);
+        var notice = new FileStoredNotice(request.RequestId, file.FileId, file.Length, file.Sha256);
+        await fixture.Router.HandleFrameAsync(fixture.Student, Encode(request));
+        try
+        {
+            await firstReached.Task.WaitAsync(Timeout);
+            await fixture.Router.HandleFrameAsync(fixture.Student, Encode(notice));
+            releaseFirst.TrySetResult();
+            await lastReached.Task.WaitAsync(Timeout);
+            await fixture.Router.HandleFrameAsync(fixture.Student, Encode(notice with { Sha256 = new string('0', 64) }));
+            releaseLast.TrySetResult();
+            await WaitUntilAsync(() => fixture.Log.Snapshot().Any(line => line.Contains("저장 확인 대기")));
+            Assert.Equal(0, Volatile.Read(ref raised));
+            Assert.Equal(1, fixture.Router.PendingTransferCount);
+            await fixture.Router.HandleFrameAsync(fixture.Student, Encode(notice));
+            Assert.Equal(1, Volatile.Read(ref raised));
+            Assert.Equal(0, fixture.Router.PendingTransferCount);
+        }
+        finally { releaseFirst.TrySetResult(); releaseLast.TrySetResult(); }
+    }
+
+    private sealed class CallbackChannel(Func<byte[], CancellationToken, Task> send) : ICollaborationChannel
+    {
+        public Task SendAsync(byte[] frame, CancellationToken cancellationToken = default) => send(frame, cancellationToken);
+    }
+
     private static byte[] Encode<T>(T payload) where T : notnull => CollaborationMessageCodec.Encode(Guid.NewGuid(), payload);
 
     private static async Task WaitUntilAsync(Func<bool> condition)
