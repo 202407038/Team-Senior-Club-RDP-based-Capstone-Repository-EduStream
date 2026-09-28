@@ -3,6 +3,7 @@ using System.Security.Cryptography;
 using System.Text.Json;
 using EduStream.Core.Collaboration;
 using EduStream.Core.Factories;
+using EduStream.Core.FileSharing;
 using EduStream.Core.Logging;
 using EduStream.Core.Models;
 using EduStream.Core.Network;
@@ -31,9 +32,13 @@ public sealed class SessionManager
     private readonly object _sessionLock = new();
     private IRdpSharingService? _rdpSharingService;
     private Guid _rdpSharingId;
+    // 공유 수명 동안만 유효한 토큰. 공유 중지/세션 종료 시 취소해 그 공유에서 시작된 제어 요청을 끝낸다.
+    private CancellationTokenSource? _sharingLifetime;
     private ParticipantConnection? _professorConnection;
     private ServerRemoteControlCoordinator? _controlCoordinator;
     private IRemoteInputGate _remoteInputGate = UnavailableRemoteInputGate.Instance;
+    private RoomPasswordVerifier? _roomPassword;
+    private ISessionFileCatalog? _fileCatalog;
 
     /// <summary>
     /// 참여자 목록이 변경되었을 때 발생합니다.
@@ -135,6 +140,8 @@ public sealed class SessionManager
         {
             _rdpSharingService = sharingService;
             _rdpSharingId = sharingId;
+            if (_sharingLifetime is null || _sharingLifetime.IsCancellationRequested)
+                _sharingLifetime = new CancellationTokenSource();
         }
         _logSink.Write($"[Rdp] 공유 서비스 연결: sharingId={sharingId}");
     }
@@ -157,6 +164,7 @@ public sealed class SessionManager
     /// <summary>
     /// 교수자가 선택한 학생 한 명에게 원격 제어를 요청합니다. 기존 대상은 먼저 회수하고
     /// 3번의 실제 입력 회수 확인 후에 새 대상으로 전환합니다. Active는 입력 허용 완료 후에만 표시됩니다.
+    /// 화면 공유가 연결되어 있을 때만 요청할 수 있고, 요청 중 공유가 중지되면 요청은 회수되어 Active가 되지 않습니다.
     /// </summary>
     public async Task RequestControlAsync(string targetDisplayName)
     {
@@ -170,9 +178,28 @@ public sealed class SessionManager
         var target = _participantRegistry.TryGetConnection(clientId)
             ?? throw new InvalidOperationException($"{targetDisplayName}의 연결 정보를 찾을 수 없습니다.");
 
-        await _controlCoordinator.RequestAsync(target);
+        CancellationToken sharingToken;
+        lock (_sessionLock)
+        {
+            // 공유 중지가 시작되면 서비스 참조가 먼저 비워지므로, 중지 중·중지 후 요청은 여기서 막힌다.
+            if (_rdpSharingService is null || _sharingLifetime is null || _sharingLifetime.IsCancellationRequested)
+                throw new InvalidOperationException("현재 화면 공유가 시작되지 않았습니다.");
+            sharingToken = _sharingLifetime.Token;
+        }
 
-        var state = _controlCoordinator.Current;
+        var coordinator = _controlCoordinator;
+        try
+        {
+            await coordinator.RequestAsync(target, sharingToken);
+        }
+        catch (OperationCanceledException) when (sharingToken.IsCancellationRequested)
+        {
+            // 진입 확인 뒤 공유 중지가 끼어든 경우. 조정자가 요청을 이미 회수했다.
+            _logSink.Write($"[Control] 공유 중지로 요청 취소: 대상={targetDisplayName}");
+            return;
+        }
+
+        var state = coordinator.Current;
         if (state is not null && state.Student == target && state.Phase == ControlPhase.Active)
             _logSink.Write($"[Control] 활성: 대상={targetDisplayName}, requestId={state.RequestId}");
         else
@@ -210,21 +237,72 @@ public sealed class SessionManager
     }
 
     /// <summary>
-    /// 화면 공유가 종료될 때 팀장이 호출합니다. 남아 있는 초대를 모두 정리합니다.
+    /// 교수자 로컬 파일을 강의 카탈로그에 등록합니다. 본문은 아직 전송하지 않으며
+    /// 이름·길이·SHA256·청크 크기만 목록에 올라갑니다.
     /// </summary>
-    public async Task DetachRdpSharingAsync()
+    public Task<SessionFileDescriptor> RegisterFileAsync(string localPath, CancellationToken cancellationToken = default)
     {
-        lock (_sessionLock)
-        {
-            _rdpSharingService = null;
-            _rdpSharingId = Guid.Empty;
-        }
-        await RevokeAllRdpInvitationsAsync(RdpFailureReason.SessionClosed);
-        _logSink.Write("[Rdp] 공유 서비스 연결 해제");
+        if (_fileCatalog is null)
+            throw new InvalidOperationException("현재 열려 있는 세션이 없습니다.");
+        return _fileCatalog.RegisterAsync(localPath, cancellationToken);
     }
 
-    public Task<SessionInfo> OpenSessionAsync(string sessionName, int port)
+    /// <summary>
+    /// 등록된 파일을 목록에서 내립니다. 이후 요청/미완료 청크는 차단되지만
+    /// 이미 저장 완료된 파일은 학생 쪽에 그대로 남습니다.
+    /// </summary>
+    public bool UnregisterFile(Guid fileId)
     {
+        if (_fileCatalog is null)
+            throw new InvalidOperationException("현재 열려 있는 세션이 없습니다.");
+        return _fileCatalog.Unregister(fileId);
+    }
+
+    /// <summary>
+    /// 현재 강의의 파일 목록 스냅샷입니다. 세션이 열려 있지 않으면 null입니다.
+    /// revision은 등록/해제마다 증가하므로 학생 쪽 동기화 여부 판단에 사용할 수 있습니다.
+    /// </summary>
+    public SessionFileCatalogSnapshot? GetFileCatalogSnapshot() => _fileCatalog?.GetSnapshot();
+
+    /// <summary>
+    /// 승인은 회수했지만 실제 입력 차단 확인이 아직 끝나지 않은 원격 제어가 있으면 true입니다.
+    /// <see cref="DetachRdpSharingAsync"/>가 Pending/Failed를 반환한 뒤 차단 완료 여부를 다시 확인할 때 사용합니다.
+    /// </summary>
+    public bool IsControlInputRevokePending => _controlCoordinator?.IsInputRevokePending ?? false;
+
+    /// <summary>
+    /// 화면 공유가 종료될 때 팀장이 호출합니다. 남아 있는 초대와 진행 중인 원격 제어를 모두 정리합니다.
+    /// 공유가 없는 상태에서 제어만 남아 있는 것은 의미가 없으므로, 세션 종료가 아니라
+    /// "화면 공유만 중지"하는 경우에도 항상 함께 회수합니다.
+    /// </summary>
+    /// <returns>
+    /// 실제 입력 차단 확인 결과. 승인 상태는 항상 즉시 회수되지만, Confirmed가 아니면
+    /// 학생 PC 입력이 막혔다고 표시하면 안 됩니다.
+    /// </returns>
+    public async Task<RemoteInputRevokeStatus> DetachRdpSharingAsync()
+    {
+        EndSharingLifetime();
+        // 공유 재시작 뒤 제어를 자동 재승인하지 않는다(화면 수신 자동 복귀와 별개, 협의 필요 항목).
+        var inputRevoke = await StopControlForTeardownAsync("공유 중지");
+        await RevokeAllRdpInvitationsAsync(RdpFailureReason.SessionClosed);
+        _logSink.Write($"[Rdp] 공유 서비스 연결 해제: 입력 차단={inputRevoke}");
+        return inputRevoke;
+    }
+
+    /// <summary>
+    /// 방 비밀번호가 설정된 세션인지 여부입니다. 비밀번호 값 자체는 어디에도 노출하지 않습니다.
+    /// </summary>
+    public bool IsRoomPasswordProtected => _roomPassword is not null;
+
+    /// <summary>
+    /// roomPassword가 비어 있으면 비밀번호 없는 방입니다. 비밀번호는 해시로만 보관하며
+    /// SessionInfo에 넣지 않습니다(브로드캐스트/직렬화 노출 방지).
+    /// </summary>
+    public Task<SessionInfo> OpenSessionAsync(string sessionName, int port, ReadOnlyMemory<char> roomPassword = default)
+    {
+        // 해시 계산은 잠금 밖에서 끝내고, 입력 오류면 세션을 열지 않는다.
+        var passwordVerifier = RoomPasswordVerifier.Create(roomPassword.Span);
+
         lock (_sessionLock)
         {
             if (CurrentSession is not null)
@@ -245,33 +323,22 @@ public sealed class SessionManager
                 CurrentSession.SessionId, Guid.NewGuid(), Guid.NewGuid(), ParticipantRole.Professor);
             _controlCoordinator = new ServerRemoteControlCoordinator(
                 _professorConnection, _participantRegistry, _remoteInputGate, _logSink);
+            _roomPassword = passwordVerifier;
+            _fileCatalog = new SessionFileCatalog(
+                CurrentSession.SessionId, new SessionFileRequestAuthorizer(_participantRegistry));
         }
 
         _tcpServer.Start(port);
-        _logSink.Write($"[Session] 개설: 이름={sessionName}, 포트={port}");
+        _logSink.Write($"[Session] 개설: 이름={sessionName}, 포트={port}, 방 비밀번호={(passwordVerifier is null ? "없음" : "설정")}");
         return Task.FromResult(CurrentSession);
     }
 
     public async Task CloseSessionAsync()
     {
-        // 종료 정리 전에 새 초대 발급을 막는다. 기존 초대는 발급한 서비스로 회수한다.
-        lock (_sessionLock)
-        {
-            _rdpSharingService = null;
-            _rdpSharingId = Guid.Empty;
-        }
-        if (_controlCoordinator is not null)
-        {
-            try
-            {
-                await _controlCoordinator.StopAsync();
-            }
-            catch (Exception ex)
-            {
-                // 입력 회수 확인 실패가 세션 종료 자체를 막지 않게 한다. 승인 상태는 이미 Revoked다.
-                _logSink.Write($"[Control] 종료 중 입력 회수 확인 실패: {ex.GetType().Name}");
-            }
-        }
+        // 종료 정리 전에 새 초대 발급과 제어 요청을 막는다. 기존 초대는 발급한 서비스로 회수한다.
+        EndSharingLifetime();
+        // 입력 회수 확인 실패가 세션 종료 자체를 막지 않게 한다. 결과는 로그로만 남긴다.
+        await StopControlForTeardownAsync("세션 종료");
         // 연결 정리 전에 클라이언트들에게 세션 종료 알림
         if (_participants.Count > 0)
         {
@@ -290,6 +357,9 @@ public sealed class SessionManager
             _controlCoordinator?.Dispose();
             _controlCoordinator = null;
             _professorConnection = null;
+            _roomPassword = null;
+            _fileCatalog?.Dispose();
+            _fileCatalog = null;
         }
 
         ClearParticipants();
@@ -298,13 +368,34 @@ public sealed class SessionManager
     }
 
     /// <summary>
-    /// 모든 연결된 클라이언트에게 패킷을 브로드캐스트합니다.
+    /// 참가 승인된 연결에게만 패킷을 브로드캐스트합니다. TCP 연결만 하고 참가하지 않은 연결은 받지 않습니다.
     /// </summary>
     public async Task BroadcastPacketAsync(BasePacket packet)
     {
         ValidateOutboundPacket(packet);
         _logSink.Write($"[Packet] 브로드캐스트: 타입={packet.MessageType}, 길이={packet.DataLength}");
-        await _tcpServer.BroadcastAsync(packet);
+        await BroadcastToParticipantsAsync(packet);
+    }
+
+    /// <summary>
+    /// 강의 데이터(채팅·화면·파일·시스템 메시지)는 참가 승인된 연결에만 보낸다.
+    /// 연결 유지용 heartbeat만 TcpServerService.BroadcastAsync로 전체 연결에 나간다.
+    /// </summary>
+    private Task BroadcastToParticipantsAsync(BasePacket packet) =>
+        _tcpServer.SendToClientsAsync(_clientDisplayNames.Keys.ToArray(), packet);
+
+    /// <summary>
+    /// 참가하지 않은 연결의 기능 요청이면 NotParticipant 오류를 보내고 true를 반환합니다.
+    /// </summary>
+    private async Task<bool> RejectIfNotParticipantAsync(string clientId, BasePacket packet, string feature)
+    {
+        if (_clientDisplayNames.ContainsKey(clientId))
+            return false;
+
+        _logSink.Write($"[{feature}] 비참가자 차단: clientId={clientId}");
+        await _tcpServer.SendToClientAsync(clientId, CreateError(ErrorCodes.NotParticipant,
+            "세션에 참여하지 않은 상태에서는 요청할 수 없습니다.", true, packet));
+        return true;
     }
 
     public HeartbeatPacket CreateHeartbeat()
@@ -390,22 +481,26 @@ public sealed class SessionManager
                     break;
 
                 case PacketType.Screen:
-                    // 화면 패킷은 모든 클라이언트에게 브로드캐스트
+                    // 화면 패킷은 참가자에게만 브로드캐스트
                     var screenPacket = JsonSerializer.Deserialize<ScreenPacket>(payload);
                     if (screenPacket is not null)
                     {
+                        if (await RejectIfNotParticipantAsync(clientId, screenPacket, "Screen"))
+                            break;
                         ScreenTransferUtility.ValidatePacketMetadata(screenPacket);
-                        await _tcpServer.BroadcastAsync(screenPacket);
+                        await BroadcastToParticipantsAsync(screenPacket);
                         _logSink.Write($"[Screen] 브로드캐스트: 프레임#{screenPacket.FrameIndex}");
                     }
                     break;
 
                 case PacketType.File:
-                    // 파일 패킷은 모든 클라이언트에게 브로드캐스트
+                    // 파일 패킷은 참가자에게만 브로드캐스트
                     var filePacket = JsonSerializer.Deserialize<FilePacket>(payload);
                     if (filePacket is not null)
                     {
-                        await _tcpServer.BroadcastAsync(filePacket);
+                        if (await RejectIfNotParticipantAsync(clientId, filePacket, "File"))
+                            break;
+                        await BroadcastToParticipantsAsync(filePacket);
                         _logSink.Write($"[File] 브로드캐스트: {filePacket.FileName}");
                     }
                     break;
@@ -482,7 +577,7 @@ public sealed class SessionManager
 
         // 5) 브로드캐스트
         var targetCount = _participants.Count;
-        await _tcpServer.BroadcastAsync(chatPacket);
+        await BroadcastToParticipantsAsync(chatPacket);
 
         ChatReceived?.Invoke(verifiedName, chatPacket.Message);
         _logSink.Write($"[Chat] 브로드캐스트: {verifiedName} → {targetCount}명");
@@ -498,6 +593,14 @@ public sealed class SessionManager
         if (string.IsNullOrWhiteSpace(packet.DisplayName))
         {
             return CreateError(ErrorCodes.DisplayNameRequired, "참여자 이름은 비워둘 수 없습니다.", true, packet);
+        }
+
+        if (_roomPassword is not null)
+        {
+            // 현재 단계에서는 보호 채널 인증 계약이 없어 비밀번호를 받을 경로가 없다.
+            // 평문 v1 참가 요청으로 우회되지 않도록 비밀번호 방은 참가를 거부한다(fail-closed).
+            _logSink.Write($"[Session] 비밀번호 방 참가 거부(보호 채널 미지원): clientId={clientId}");
+            return CreateError(ErrorCodes.JoinRejected, "비밀번호가 설정된 방은 보호된 인증 연결이 준비된 뒤 참가할 수 있습니다.", false, packet);
         }
 
         if (_clientDisplayNames.TryGetValue(clientId, out var existingDisplayName))
@@ -722,6 +825,51 @@ public sealed class SessionManager
         }
     }
 
+    /// <summary>
+    /// 새 초대 발급과 새 제어 요청을 막고, 이 공유에서 진행 중인 제어 요청을 취소합니다.
+    /// </summary>
+    private void EndSharingLifetime()
+    {
+        CancellationTokenSource? lifetime;
+        lock (_sessionLock)
+        {
+            _rdpSharingService = null;
+            _rdpSharingId = Guid.Empty;
+            lifetime = _sharingLifetime;
+            _sharingLifetime = null;
+        }
+        // 진행 중인 요청이 토큰을 계속 참조할 수 있어 Dispose하지 않는다(타이머 없는 CTS라 누수 없음).
+        lifetime?.Cancel();
+    }
+
+    /// <summary>
+    /// 공유 중지/세션 종료 정리 중 원격 제어를 회수합니다. 회수 실패가 뒤따르는 초대·세션 정리를
+    /// 막지 않도록 예외 대신 결과로 돌려줍니다. 승인 상태는 어느 경우든 이미 Revoked입니다.
+    /// </summary>
+    private async Task<RemoteInputRevokeStatus> StopControlForTeardownAsync(string reason)
+    {
+        var coordinator = _controlCoordinator;
+        if (coordinator is null) return RemoteInputRevokeStatus.Confirmed;
+
+        try
+        {
+            await coordinator.StopAsync();
+        }
+        catch (Exception ex)
+        {
+            _logSink.Write($"[Control] {reason} 중 입력 회수 확인 실패: {ex.GetType().Name}");
+            return RemoteInputRevokeStatus.Failed;
+        }
+
+        // StopAsync는 취소를 무시한 허용 작업이 남아도 최초 회수 후 반환하므로, 반환만으로 차단 완료로 보지 않는다.
+        if (coordinator.IsInputRevokePending)
+        {
+            _logSink.Write($"[Control] {reason}: 허용 작업 종료 대기, 입력 차단 확인 미완료");
+            return RemoteInputRevokeStatus.Pending;
+        }
+        return RemoteInputRevokeStatus.Confirmed;
+    }
+
     private string? GetDisplayName(string clientId, string? packetDisplayName)
     {
         if (!string.IsNullOrWhiteSpace(packetDisplayName))
@@ -803,7 +951,7 @@ public sealed class SessionManager
 
         systemChat.SenderId = "Server";
 
-        await _tcpServer.BroadcastAsync(systemChat);
+        await BroadcastToParticipantsAsync(systemChat);
         ChatReceived?.Invoke("System", message);
         _logSink.Write($"[Chat] 시스템 브로드캐스트: {message}");
     }

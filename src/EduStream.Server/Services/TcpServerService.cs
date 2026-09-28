@@ -77,14 +77,23 @@ public sealed class TcpServerService
     /// 모든 연결된 클라이언트에게 패킷을 브로드캐스트합니다.
     /// 전송 실패한 클라이언트는 자동 제거됩니다.
     /// </summary>
-    public async Task BroadcastAsync(BasePacket packet)
+    public Task BroadcastAsync(BasePacket packet) => SendToClientsAsync(_clients.Keys.ToArray(), packet);
+
+    /// <summary>
+    /// 지정한 클라이언트들에게만 같은 패킷을 전송합니다. 연결이 이미 없는 ID는 건너뜁니다.
+    /// 전송 실패한 클라이언트는 자동 제거됩니다.
+    /// </summary>
+    public async Task SendToClientsAsync(IReadOnlyCollection<string> clientIds, BasePacket packet)
     {
+        ArgumentNullException.ThrowIfNull(clientIds);
         var data = _serializer.Serialize(packet);
         var frame = BuildFrame(data);
         var failedClients = new List<string>();
 
-        foreach (var (clientId, connection) in _clients)
+        foreach (var clientId in clientIds)
         {
+            if (!_clients.TryGetValue(clientId, out var connection))
+                continue;
             try
             {
                 await connection.SendAsync(frame);
