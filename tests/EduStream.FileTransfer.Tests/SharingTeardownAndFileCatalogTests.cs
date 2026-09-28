@@ -96,6 +96,70 @@ public sealed class SharingTeardownAndFileCatalogTests
     }
 
     [Fact]
+    public async Task RequestControl_WhileDetachWaitsForInputRevoke_IsRejected()
+    {
+        await using var rig = await Rig.OpenAsync();
+        rig.SessionManager.AttachRdpSharing(new NoopRdpSharingService(), Guid.NewGuid());
+        await rig.ConnectAndJoinAsync("Alice");
+        await rig.ConnectAndJoinAsync("Bob");
+        await rig.SessionManager.RequestControlAsync("Alice");
+        var bob = rig.GetConnection("Bob");
+        var revoke = rig.InputGate.HoldNextRevoke();
+
+        // 공유 중지가 Alice 입력 회수 확인을 기다리는 동안 새 제어 요청이 들어온다.
+        var detachTask = rig.SessionManager.DetachRdpSharingAsync();
+        await rig.InputGate.RevokeEntered.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        var lateRequest = rig.SessionManager.RequestControlAsync("Bob");
+        revoke.TrySetResult();
+        await detachTask.WaitAsync(TimeSpan.FromSeconds(2));
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => lateRequest.WaitAsync(TimeSpan.FromSeconds(2)));
+
+        Assert.Equal(ControlPhase.Revoked, rig.SessionManager.CurrentControlState!.Phase);
+        Assert.DoesNotContain(rig.InputGate.Granted, g => g.Student == bob);
+    }
+
+    [Fact]
+    public async Task RequestControl_AfterDetachWithoutReattach_IsRejected()
+    {
+        await using var rig = await Rig.OpenAsync();
+        rig.SessionManager.AttachRdpSharing(new NoopRdpSharingService(), Guid.NewGuid());
+        await rig.ConnectAndJoinAsync("Alice");
+        await rig.SessionManager.DetachRdpSharingAsync();
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => rig.SessionManager.RequestControlAsync("Alice"));
+
+        Assert.Null(rig.SessionManager.CurrentControlState);
+        Assert.Empty(rig.InputGate.Granted);
+    }
+
+    [Fact]
+    public async Task RequestControl_WithoutSharing_IsRejected()
+    {
+        await using var rig = await Rig.OpenAsync();
+        await rig.ConnectAndJoinAsync("Alice");
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => rig.SessionManager.RequestControlAsync("Alice"));
+
+        Assert.Empty(rig.InputGate.Granted);
+    }
+
+    [Fact]
+    public async Task RequestControl_AfterReattach_BecomesActive()
+    {
+        await using var rig = await Rig.OpenAsync();
+        rig.SessionManager.AttachRdpSharing(new NoopRdpSharingService(), Guid.NewGuid());
+        await rig.ConnectAndJoinAsync("Alice");
+        await rig.SessionManager.DetachRdpSharingAsync();
+        rig.SessionManager.AttachRdpSharing(new NoopRdpSharingService(), Guid.NewGuid());
+
+        // 이전 공유의 취소가 새 공유에서의 요청에 남아 있으면 안 된다.
+        await rig.SessionManager.RequestControlAsync("Alice");
+
+        Assert.Equal(ControlPhase.Active, rig.SessionManager.CurrentControlState!.Phase);
+    }
+
+    [Fact]
     public async Task DetachRdpSharing_WithNoActiveControl_DoesNotThrow()
     {
         await using var rig = await Rig.OpenAsync();
