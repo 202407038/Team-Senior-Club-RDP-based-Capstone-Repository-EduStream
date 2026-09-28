@@ -28,6 +28,8 @@ public sealed class SessionManager
     private readonly ConcurrentDictionary<string, RdpInvitationPacket> _rdpInvitations = new(); // participantId(displayName) → 발급된 초대
     private readonly ConcurrentDictionary<Guid, IRdpSharingService> _invitationOwners = new();
     private readonly ConcurrentDictionary<string, RdpInvitationHandoff> _pendingInvitationHandoffs = new(); // participantId → 인계 대기 중인 비밀번호
+    // U03: 공유 시작 전 요청했거나 공유 멈춤으로 초대가 회수된 학생. 공유가 다시 붙으면 재요청 알림을 받는다.
+    private readonly ConcurrentDictionary<string, ParticipantConnection> _screenWaiters = new(); // clientId → 대기 시점 연결
     private readonly ParticipantRegistry _participantRegistry = new();
     private readonly object _sessionLock = new();
     private IRdpSharingService? _rdpSharingService;
@@ -145,7 +147,17 @@ public sealed class SessionManager
                 _sharingLifetime = new CancellationTokenSource();
         }
         _logSink.Write($"[Rdp] 공유 서비스 연결: sharingId={sharingId}");
+
+        // 호출자(교수자 UI)는 학생 알림 전송을 기다리지 않는다. 전송 실패는 연결별로 TcpServerService가 정리한다.
+        _ = ResumeScreenWaitersAsync(sharingService).ContinueWith(
+            task => _logSink.Write($"[Rdp] 화면 복귀 알림 오류: {task.Exception?.GetBaseException().GetType().Name}"),
+            TaskContinuationOptions.OnlyOnFaulted);
     }
+
+    /// <summary>
+    /// 공유 재시작 자동 복귀 대기 중인 학생 수입니다. 테스트/모니터링용입니다.
+    /// </summary>
+    public int ScreenWaiterCount => _screenWaiters.Count;
 
     /// <summary>
     /// 3번이 구현한 실제 원격 입력 엔진을 연결합니다. 연결 전에는 제어 요청이 Active가 되지 않고 Failed로 끝납니다.
@@ -232,6 +244,8 @@ public sealed class SessionManager
         if (connection is null || !_participantRegistry.SetPermissions(connection.ConnectionId, allowViewing, allowControl))
             return false;
 
+        // 보기 허용을 철회한 학생은 공유 재시작 때 자동 복귀시키지 않는다(U03).
+        if (!allowViewing) _screenWaiters.TryRemove(clientId, out _);
         _logSink.Write($"[Control] 허용 변경: 대상={displayName}, 보기={allowViewing}, 제어={allowViewing && allowControl}");
         await ConfirmControlInputRevokedAsync();
         return true;
@@ -303,6 +317,12 @@ public sealed class SessionManager
     public async Task<RemoteInputRevokeStatus> DetachRdpSharingAsync()
     {
         EndSharingLifetime();
+        // 공유 멈춤은 강의 종료가 아니므로 지금 화면을 받던 학생은 재시작 때 자동 복귀 대상으로 남긴다.
+        foreach (var participantId in _rdpInvitations.Keys.ToList())
+        {
+            if (_participants.TryGetValue(participantId, out var clientId))
+                TryAddScreenWaiter(clientId);
+        }
         // 공유 재시작 뒤 제어를 자동 재승인하지 않는다(화면 수신 자동 복귀와 별개, 협의 필요 항목).
         var inputRevoke = await StopControlForTeardownAsync("공유 중지");
         await RevokeAllRdpInvitationsAsync(RdpFailureReason.SessionClosed);
@@ -732,8 +752,17 @@ public sealed class SessionManager
             return;
         }
 
-        var sharingService = _rdpSharingService;
-        var sharingId = _rdpSharingId;
+        IRdpSharingService? sharingService;
+        Guid sharingId;
+        lock (_sessionLock)
+        {
+            sharingService = _rdpSharingService;
+            sharingId = _rdpSharingId;
+            // 발급 중인 요청도 공유 중지·재시작 때 복귀 대상으로 남긴다.
+            // 성공 시 아래에서 제거하며 퇴장/철회/종료는 기존 정리 경로가 제거한다.
+            // 공유 연결과 같은 잠금으로 등록해 재시작 알림과의 경합을 막는다.
+            TryAddScreenWaiter(clientId);
+        }
         if (sharingService is null)
         {
             await _tcpServer.SendToClientAsync(clientId,
@@ -775,6 +804,7 @@ public sealed class SessionManager
                 !_clientDisplayNames.TryGetValue(clientId, out var name) || name != participantId;
             if (!isStaleAfterCreation)
             {
+                _screenWaiters.TryRemove(clientId, out _);
                 _invitationOwners[invitation.InvitationId] = sharingService;
                 _pendingInvitationHandoffs[participantId] = handoff;
                 _rdpInvitations[participantId] = invitation;
@@ -867,6 +897,52 @@ public sealed class SessionManager
     }
 
     /// <summary>
+    /// 현재 참가 중이고 보기를 허용한 학생만 자동 복귀 대기에 넣습니다. 연결은 대기 시점 것을 기록해
+    /// 재접속으로 교체된 연결에는 알림을 보내지 않게 합니다.
+    /// </summary>
+    private void TryAddScreenWaiter(string clientId)
+    {
+        var connection = _participantRegistry.TryGetConnection(clientId);
+        if (connection is null) return;
+        if (_participantRegistry.TryResolve(connection.ConnectionId) is not { Connected: true, AllowViewing: true }) return;
+        _screenWaiters[clientId] = connection;
+    }
+
+    /// <summary>
+    /// 공유가 붙은 뒤 대기 중인 학생에게 초대 재요청 알림을 보냅니다. 초대는 학생이 새 연결 ID로 요청할 때 발급하며,
+    /// 이 알림 자체는 초대·비밀번호를 담지 않습니다. 보내는 도중 공유가 다시 멈추면 남은 학생은 대기로 둡니다.
+    /// </summary>
+    private async Task ResumeScreenWaitersAsync(IRdpSharingService sharingService)
+    {
+        foreach (var (clientId, waitedConnection) in _screenWaiters.ToArray())
+        {
+            Guid sessionId;
+            lock (_sessionLock)
+            {
+                if (!ReferenceEquals(_rdpSharingService, sharingService) || CurrentSession is null) return;
+                sessionId = CurrentSession.SessionId;
+            }
+            if (!_screenWaiters.TryRemove(new KeyValuePair<string, ParticipantConnection>(clientId, waitedConnection)))
+                continue;
+
+            var current = _participantRegistry.TryResolve(waitedConnection.ConnectionId);
+            if (current is not { Connected: true, AllowViewing: true } ||
+                _participantRegistry.TryGetConnection(clientId) != waitedConnection)
+            {
+                _logSink.Write($"[Rdp] 화면 복귀 대상 제외(퇴장/교체/보기 철회): clientId={clientId}");
+                continue;
+            }
+
+            await _tcpServer.SendToClientAsync(clientId, PacketFactory.CreateAck(
+                senderId: "Server",
+                ackCode: AckCodes.RdpSharingStarted,
+                message: "화면 공유가 시작되었습니다.",
+                sessionId: sessionId));
+            _logSink.Write($"[Rdp] 화면 복귀 알림: clientId={clientId}");
+        }
+    }
+
+    /// <summary>
     /// 공유 중지/세션 종료 정리 중 원격 제어를 회수합니다. 회수 실패가 뒤따르는 초대·세션 정리를
     /// 막지 않도록 예외 대신 결과로 돌려줍니다. 승인 상태는 어느 경우든 이미 Revoked입니다.
     /// </summary>
@@ -946,6 +1022,8 @@ public sealed class SessionManager
         {
             if (!_clientDisplayNames.TryRemove(clientId, out displayName)) return null;
             _participants.TryRemove(displayName, out _);
+            // 실제 퇴장·연결 끊김 후에는 자동 복귀하지 않는다. 다시 오면 새 참가로 처리한다(U03).
+            _screenWaiters.TryRemove(clientId, out _);
         }
         UpdateParticipantCount();
         ParticipantsChanged?.Invoke();
@@ -957,6 +1035,7 @@ public sealed class SessionManager
         _participants.Clear();
         _clientDisplayNames.Clear();
         _clientLastSeen.Clear();
+        _screenWaiters.Clear();
         UpdateParticipantCount();
         ParticipantsChanged?.Invoke();
     }
