@@ -29,6 +29,10 @@ git checkout -b feature/<작업명>
 git pull --ff-only origin <현재브랜치>
 ```
 
+이 명령은 **원격의 같은 작업 브랜치**만 동기화하며, 최신 main을 포함시킨다는 뜻은 아닙니다. 리뷰에서 main 반영을 요청받았다면 작업 브랜치에서 `git fetch origin --prune` 후 `git merge origin/main`도 수행하고 충돌 해결·빌드·테스트를 다시 확인합니다. 기존 PR 브랜치에 후속 커밋을 추가하며 새 PR 생성/force push를 기본 절차로 삼지 않습니다.
+
+먼저 `git remote -v`로 EduStream 새 저장소 URL을 확인합니다. 팀장 이식 작업본은 올바른 원격 이름이 `new-origin`이므로 위 예제의 `origin`을 그대로 쓰지 않습니다. 미커밋 변경을 보존한 뒤 진행하며, 실패 시 강제 초기화하지 않습니다. #51을 포함한 현재 인계의 구체 순서는 [최신 main 적용 절차](./SESSION_RDP_HANDOFF_PR57.md)를 참고합니다.
+
 작업 전에 현재 브랜치와 원격 상태를 확인하는 것이 기본입니다.
 
 ## 3. 브랜치 전략
