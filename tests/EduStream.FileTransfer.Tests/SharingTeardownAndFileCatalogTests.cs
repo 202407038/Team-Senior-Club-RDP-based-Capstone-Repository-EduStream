@@ -29,8 +29,9 @@ public sealed class SharingTeardownAndFileCatalogTests
         await rig.SessionManager.RequestControlAsync("Alice");
         Assert.Equal(ControlPhase.Active, rig.SessionManager.CurrentControlState!.Phase);
 
-        await rig.SessionManager.DetachRdpSharingAsync();
+        var inputRevoke = await rig.SessionManager.DetachRdpSharingAsync();
 
+        Assert.Equal(RemoteInputRevokeStatus.Confirmed, inputRevoke);
         Assert.Equal(ControlPhase.Revoked, rig.SessionManager.CurrentControlState!.Phase);
         Assert.Equal(alice, Assert.Single(rig.InputGate.Revoked).Student);
     }
@@ -160,13 +161,60 @@ public sealed class SharingTeardownAndFileCatalogTests
     }
 
     [Fact]
+    public async Task DetachRdpSharing_WhileGrantIgnoresCancellation_ReportsPendingUntilRevoked()
+    {
+        await using var rig = await Rig.OpenAsync();
+        rig.SessionManager.AttachRdpSharing(new NoopRdpSharingService(), Guid.NewGuid());
+        await rig.ConnectAndJoinAsync("Alice");
+        var grant = rig.InputGate.HoldNextGrantIgnoringCancellation();
+
+        var request = rig.SessionManager.RequestControlAsync("Alice");
+        await rig.InputGate.GrantEntered.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        var inputRevoke = await rig.SessionManager.DetachRdpSharingAsync().WaitAsync(TimeSpan.FromSeconds(2));
+
+        // 승인은 회수됐지만 native 허용이 끝나지 않았으므로 차단 완료로 보고하면 안 된다.
+        Assert.Equal(RemoteInputRevokeStatus.Pending, inputRevoke);
+        Assert.Equal(ControlPhase.Revoked, rig.SessionManager.CurrentControlState!.Phase);
+        Assert.True(rig.SessionManager.IsControlInputRevokePending);
+
+        var revokesBeforeGrantEnds = rig.InputGate.Revoked.Count;
+        grant.TrySetResult();
+        await request.WaitAsync(TimeSpan.FromSeconds(2));
+
+        // 허용 작업이 끝나면 조정자가 다시 회수하고 대기 상태가 풀린다.
+        Assert.False(rig.SessionManager.IsControlInputRevokePending);
+        Assert.True(rig.InputGate.Revoked.Count > revokesBeforeGrantEnds);
+        Assert.Equal(ControlPhase.Revoked, rig.SessionManager.CurrentControlState!.Phase);
+    }
+
+    [Fact]
+    public async Task DetachRdpSharing_WhenInputRevokeFails_ReportsFailedAndStillCleansUp()
+    {
+        await using var rig = await Rig.OpenAsync();
+        rig.SessionManager.AttachRdpSharing(new NoopRdpSharingService(), Guid.NewGuid());
+        await rig.ConnectAndJoinAsync("Alice");
+        await rig.SessionManager.RequestControlAsync("Alice");
+        rig.InputGate.FailNextRevoke();
+
+        var inputRevoke = await rig.SessionManager.DetachRdpSharingAsync();
+
+        Assert.Equal(RemoteInputRevokeStatus.Failed, inputRevoke);
+        Assert.Equal(ControlPhase.Revoked, rig.SessionManager.CurrentControlState!.Phase);
+        // 실패한 회수는 대기열에 남아 다음 중지 때 다시 시도된다.
+        Assert.True(rig.SessionManager.IsControlInputRevokePending);
+        await rig.SessionManager.StopControlAsync();
+        Assert.False(rig.SessionManager.IsControlInputRevokePending);
+    }
+
+    [Fact]
     public async Task DetachRdpSharing_WithNoActiveControl_DoesNotThrow()
     {
         await using var rig = await Rig.OpenAsync();
         rig.SessionManager.AttachRdpSharing(new NoopRdpSharingService(), Guid.NewGuid());
 
-        await rig.SessionManager.DetachRdpSharingAsync();
+        var inputRevoke = await rig.SessionManager.DetachRdpSharingAsync();
 
+        Assert.Equal(RemoteInputRevokeStatus.Confirmed, inputRevoke);
         Assert.Null(rig.SessionManager.CurrentControlState);
     }
 
@@ -246,7 +294,9 @@ public sealed class SharingTeardownAndFileCatalogTests
     private sealed class RecordingInputGate : IRemoteInputGate
     {
         private TaskCompletionSource? _nextGrant;
+        private TaskCompletionSource? _nextStubbornGrant;
         private TaskCompletionSource? _nextRevoke;
+        private int _failNextRevoke;
 
         public System.Collections.Concurrent.ConcurrentQueue<RemoteControlState> Granted { get; } = new();
         public System.Collections.Concurrent.ConcurrentQueue<RemoteControlState> Revoked { get; } = new();
@@ -259,10 +309,18 @@ public sealed class SharingTeardownAndFileCatalogTests
         public TaskCompletionSource HoldNextRevoke() =>
             _nextRevoke = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
 
+        /// <summary>native 허용이 취소를 무시하고 끝까지 진행되는 경우를 흉내 냅니다.</summary>
+        public TaskCompletionSource HoldNextGrantIgnoringCancellation() =>
+            _nextStubbornGrant = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public void FailNextRevoke() => Interlocked.Exchange(ref _failNextRevoke, 1);
+
         public Task GrantAsync(RemoteControlState requested, CancellationToken cancellationToken)
         {
             Granted.Enqueue(requested);
             GrantEntered.TrySetResult();
+            var stubborn = Interlocked.Exchange(ref _nextStubbornGrant, null);
+            if (stubborn is not null) return stubborn.Task;
             var hold = Interlocked.Exchange(ref _nextGrant, null);
             return hold?.Task.WaitAsync(cancellationToken) ?? Task.CompletedTask;
         }
@@ -271,6 +329,8 @@ public sealed class SharingTeardownAndFileCatalogTests
         {
             Revoked.Enqueue(revoked);
             RevokeEntered.TrySetResult();
+            if (Interlocked.Exchange(ref _failNextRevoke, 0) == 1)
+                return Task.FromException(new InvalidOperationException("입력 차단 실패(대역)"));
             var hold = Interlocked.Exchange(ref _nextRevoke, null);
             return hold?.Task ?? Task.CompletedTask;
         }
