@@ -187,22 +187,99 @@ public sealed class SharingRestartRestoreTests
             System.Threading.Channels.Channel.CreateUnbounded<BasePacket>();
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task StopDuringInvitationCreation_RestartNotifiesAndReissues(bool finishBeforeRestart)
+    {
+        await using var rig = await Rig.OpenAsync();
+        var alice = await rig.JoinAsync("Alice");
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        rig.Sharing.BeforeInvitation = async () => { entered.TrySetResult(); await release.Task; };
+        rig.SessionManager.AttachRdpSharing(rig.Sharing, Guid.NewGuid());
+        await rig.SendInvitationRequestAsync(alice, Guid.NewGuid());
+        try
+        {
+            await entered.Task.WaitAsync(Wait);
+            await rig.SessionManager.DetachRdpSharingAsync();
+            Assert.Equal(1, rig.SessionManager.ScreenWaiterCount);
+            rig.Sharing.BeforeInvitation = null;
+            if (finishBeforeRestart)
+            {
+                release.TrySetResult();
+                await WaitUntilAsync(() => !rig.Sharing.RevokedInvitations.IsEmpty);
+            }
+            // 같은 서비스 객체를 재사용해도 sharingId가 바뀐 이전 초대는 폐기한다.
+            rig.SessionManager.AttachRdpSharing(rig.Sharing, Guid.NewGuid());
+            await alice.SharingStarted.Reader.ReadAsync().AsTask().WaitAsync(Wait);
+            release.TrySetResult();
+            await WaitUntilAsync(() => !rig.Sharing.RevokedInvitations.IsEmpty);
+            var newConnection = Guid.NewGuid();
+            var invitation = Assert.IsType<RdpInvitationPacket>(await rig.RequestInvitationAsync(alice, newConnection));
+            Assert.Equal(newConnection, invitation.ConnectionId);
+            Assert.DoesNotContain(invitation.InvitationId, rig.Sharing.RevokedInvitations);
+            Assert.Equal(0, rig.SessionManager.ScreenWaiterCount);
+            Assert.Equal(1, rig.SessionManager.RdpInvitationCount);
+        }
+        finally { release.TrySetResult(); }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task PendingInvitation_DoesNotRestoreAfterPermissionWithdrawalOrSessionClose(bool closeSession)
+    {
+        await using var rig = await Rig.OpenAsync();
+        var alice = await rig.JoinAsync("Alice");
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        rig.Sharing.BeforeInvitation = async () => { entered.TrySetResult(); await release.Task; };
+        rig.SessionManager.AttachRdpSharing(rig.Sharing, Guid.NewGuid());
+        await rig.SendInvitationRequestAsync(alice, Guid.NewGuid());
+        try
+        {
+            await entered.Task.WaitAsync(Wait);
+            await rig.SessionManager.DetachRdpSharingAsync();
+            Assert.Equal(1, rig.SessionManager.ScreenWaiterCount);
+            if (closeSession) await rig.CloseAsync();
+            else await rig.SessionManager.UpdateParticipantPermissionsAsync("Alice", false, false);
+            Assert.Equal(0, rig.SessionManager.ScreenWaiterCount);
+            if (!closeSession) rig.SessionManager.AttachRdpSharing(rig.Sharing, Guid.NewGuid());
+            release.TrySetResult();
+            await WaitUntilAsync(() => !rig.Sharing.RevokedInvitations.IsEmpty);
+            Assert.Equal(0, rig.SessionManager.RdpInvitationCount);
+            Assert.Equal(0, rig.SessionManager.ScreenWaiterCount);
+            Assert.False(alice.SharingStarted.Reader.TryRead(out _));
+            Assert.False(alice.Responses.Reader.TryRead(out _));
+        }
+        finally { release.TrySetResult(); }
+    }
+
     /// <summary>3번 실제 공유 서비스 없이 초대 발급/폐기만 흉내 내는 대역입니다.</summary>
     private sealed class FakeSharing : IRdpSharingService
     {
+        public Func<Task>? BeforeInvitation { get; set; }
+        public System.Collections.Concurrent.ConcurrentQueue<Guid> RevokedInvitations { get; } = new();
         public Task<Guid> StartAsync(Guid sessionId, CancellationToken cancellationToken = default) =>
             Task.FromResult(Guid.NewGuid());
 
-        public Task<RdpInvitationPacket> CreateInvitationAsync(Guid sessionId, Guid sharingId, string participantId,
+        public async Task<RdpInvitationPacket> CreateInvitationAsync(Guid sessionId, Guid sharingId, string participantId,
             Guid connectionId, string invitationPassword, DateTimeOffset expiresAt,
-            CancellationToken cancellationToken = default) =>
-            Task.FromResult(PacketFactory.CreateRdpInvitation(
+            CancellationToken cancellationToken = default)
+        {
+            if (BeforeInvitation is { } before) await before();
+            return PacketFactory.CreateRdpInvitation(
                 senderId: "Server", sessionId: sessionId, participantId: participantId, sharingId: sharingId,
                 invitationId: Guid.NewGuid(), connectionId: connectionId,
-                connectionString: "fake-connection-string", expiresAt: expiresAt));
+                connectionString: "fake-connection-string", expiresAt: expiresAt);
+        }
 
-        public Task RevokeInvitationAsync(Guid invitationId, CancellationToken cancellationToken = default) =>
-            Task.CompletedTask;
+        public Task RevokeInvitationAsync(Guid invitationId, CancellationToken cancellationToken = default)
+        {
+            RevokedInvitations.Enqueue(invitationId);
+            return Task.CompletedTask;
+        }
 
         public Task StopAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
 
@@ -271,10 +348,15 @@ public sealed class SharingRestartRestoreTests
         /// <summary>초대 또는 오류 응답 하나를 기다립니다.</summary>
         public async Task<BasePacket> RequestInvitationAsync(Student student, Guid connectionId)
         {
-            await student.Client.SendAsync(PacketFactory.CreateRdpInvitationRequest(
+            await SendInvitationRequestAsync(student, connectionId);
+            return await student.Responses.Reader.ReadAsync().AsTask().WaitAsync(Wait);
+        }
+
+        public Task SendInvitationRequestAsync(Student student, Guid connectionId)
+        {
+            return student.Client.SendAsync(PacketFactory.CreateRdpInvitationRequest(
                 senderId: student.DisplayName, sessionId: SessionManager.CurrentSession!.SessionId,
                 participantId: student.DisplayName, connectionId: connectionId));
-            return await student.Responses.Reader.ReadAsync().AsTask().WaitAsync(Wait);
         }
 
         public async Task CloseAsync()
