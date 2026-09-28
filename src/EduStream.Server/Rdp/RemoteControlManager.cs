@@ -2,19 +2,28 @@ using System;
 using System.Collections.Concurrent;
 using System.Threading;
 using System.Threading.Tasks;
+using EduStream.Core.Collaboration;
+using EduStream.Server.Services;
 
 namespace EduStream.Server.Rdp;
 
 /// <summary>
 /// 원격 제어 입력 레벨 관리자 프로토타입 구현
 /// EduStream.Core에 의존하지 않고 Server 내부에서 독립 동작
+/// IRemoteInputGate/ServerRemoteControlCoordinator와 연동하여 실제 입력 허용/차단을 처리
+/// 네이티브 입력 엔진 연동 및 실제 PC 입력 적용/차단 파이프라인 지원
 /// </summary>
-public sealed class RemoteControlManager : IRemoteControlManager
+public sealed class RemoteControlManager : IRemoteControlManager, IRemoteInputGate
 {
     private readonly ConcurrentDictionary<string, ControlPermission> _permissions = new();
     private ControlLevel _currentLevel = ControlLevel.ViewOnly;
+    private readonly object _gateLock = new();
+    private RemoteControlState? _activeControlState;
+    private INativeInputPipeline _nativeInputPipeline = UnavailableNativeInputPipeline.Instance;
+    private bool _isNativeEngineConnected = false;
 
     public ControlLevel CurrentControlLevel => _currentLevel;
+    public bool IsNativeEngineConnected => _isNativeEngineConnected;
 
     public Task SetControlLevelAsync(ControlLevel level, CancellationToken cancellationToken = default)
     {
@@ -125,5 +134,145 @@ public sealed class RemoteControlManager : IRemoteControlManager
             return false;
 
         return true;
+    }
+
+    // IRemoteInputGate 구현 - ServerRemoteControlCoordinator와 연동
+    public async Task GrantAsync(RemoteControlState requested, CancellationToken cancellationToken)
+    {
+        // 네이티브 입력 엔진 연결 상태 확인
+        if (!_isNativeEngineConnected || !_nativeInputPipeline.IsConnected)
+        {
+            throw new InputPipelineException("네이티브 입력 엔진이 연결되지 않아 입력 허용을 진행할 수 없습니다.");
+        }
+
+        lock (_gateLock)
+        {
+            _activeControlState = requested;
+            // 요청된 참가자에게 제어 권한 부여
+            if (requested.Student != null)
+            {
+                var connectionIdStr = requested.Student.ConnectionId.ToString();
+                _permissions[connectionIdStr] = new ControlPermission
+                {
+                    ParticipantId = connectionIdStr,
+                    Level = _currentLevel,
+                    HasControl = true,
+                    GrantedAt = DateTimeOffset.UtcNow
+                };
+            }
+        }
+
+        // 실제 네이티브 입력 허용(Inject) 확인
+        if (requested.Student != null)
+        {
+            var targetId = requested.Student.ConnectionId.ToString();
+            try
+            {
+                await _nativeInputPipeline.InjectInputAsync(targetId, cancellationToken);
+            }
+            catch (InputPipelineException ex)
+            {
+                // 네이티브 허용 실패 시 권한 철회
+                lock (_gateLock)
+                {
+                    if (requested.Student != null)
+                    {
+                        var connectionIdStr = requested.Student.ConnectionId.ToString();
+                        if (_permissions.ContainsKey(connectionIdStr))
+                        {
+                            _permissions[connectionIdStr].HasControl = false;
+                        }
+                    }
+                    _activeControlState = null;
+                }
+                throw new InputPipelineException($"네이티브 입력 허용 실패: {ex.Message}", ex);
+            }
+        }
+    }
+
+    public async Task RevokeAsync(RemoteControlState revoked, CancellationToken cancellationToken)
+    {
+        lock (_gateLock)
+        {
+            if (revoked.Student != null)
+            {
+                var connectionIdStr = revoked.Student.ConnectionId.ToString();
+                if (_permissions.ContainsKey(connectionIdStr))
+                {
+                    _permissions[connectionIdStr].HasControl = false;
+                }
+            }
+            _activeControlState = null;
+        }
+
+        // 실제 네이티브 입력 차단(Block) 확인
+        if (revoked.Student != null && _isNativeEngineConnected)
+        {
+            var targetId = revoked.Student.ConnectionId.ToString();
+            try
+            {
+                await _nativeInputPipeline.BlockInputAsync(targetId, cancellationToken);
+            }
+            catch (InputPipelineException ex)
+            {
+                // 차단 실패 시에도 로그만 남기고 예외는 전달하지 않음 (멱등성)
+                Console.WriteLine($"[RemoteControlManager] 네이티브 입력 차단 실패 (무시): {ex.Message}");
+            }
+        }
+    }
+
+    /// <summary>
+    /// 네이티브 입력 엔진 연결
+    /// </summary>
+    public async Task ConnectNativeEngineAsync(INativeInputPipeline pipeline, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(pipeline);
+
+        lock (_gateLock)
+        {
+            if (_isNativeEngineConnected)
+                throw new InvalidOperationException("네이티브 입력 엔진이 이미 연결되어 있습니다.");
+        }
+
+        try
+        {
+            await pipeline.ConnectAsync(cancellationToken);
+            lock (_gateLock)
+            {
+                _nativeInputPipeline = pipeline;
+                _isNativeEngineConnected = true;
+            }
+        }
+        catch (InputPipelineException ex)
+        {
+            throw new InputPipelineException($"네이티브 입력 엔진 연결 실패: {ex.Message}", ex);
+        }
+    }
+
+    /// <summary>
+    /// 네이티브 입력 엔진 연결 해제
+    /// </summary>
+    public async Task DisconnectNativeEngineAsync(CancellationToken cancellationToken = default)
+    {
+        lock (_gateLock)
+        {
+            if (!_isNativeEngineConnected)
+                return;
+        }
+
+        try
+        {
+            await _nativeInputPipeline.DisconnectAsync(cancellationToken);
+            lock (_gateLock)
+            {
+                _nativeInputPipeline = UnavailableNativeInputPipeline.Instance;
+                _isNativeEngineConnected = false;
+                _activeControlState = null;
+            }
+        }
+        catch (InputPipelineException ex)
+        {
+            throw new InputPipelineException($"네이티브 입력 엔진 연결 해제 실패: {ex.Message}", ex);
+        }
     }
 }
