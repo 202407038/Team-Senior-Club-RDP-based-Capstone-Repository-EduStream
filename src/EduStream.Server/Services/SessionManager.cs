@@ -523,6 +523,14 @@ public sealed class SessionManager
                     if (_clientDisplayNames.TryGetValue(clientId, out var displayName))
                         await UpdatePermissionsForClientAsync(clientId, displayName, request.AllowViewing, request.AllowControl);
                     break;
+                case CollaborationMessageKind.FileRequest:
+                case CollaborationMessageKind.FileCancel:
+                case CollaborationMessageKind.FileStored:
+                    var participant = _participantRegistry.TryGetConnection(clientId);
+                    var router = _fileTransfers;
+                    if (participant is not null && router is not null)
+                        await router.HandleFrameAsync(participant, frame);
+                    break;
                 default:
                     _logSink.Write($"[Secure] 처리하지 않는 메시지 무시: kind={kind}, clientId={clientId}");
                     break;
@@ -651,6 +659,25 @@ public sealed class SessionManager
 
     private static string Base64Url(byte[] bytes) =>
         Convert.ToBase64String(bytes).TrimEnd('=').Replace('+', '-').Replace('/', '_');
+
+    /// <summary>
+    /// 참가 학생의 보호 채널을 파일 라우터에 붙여 현재 파일 목록을 보내고, 이후 등록/해제 목록과 다운로드 응답을 받게 합니다.
+    /// 이탈·끊김 시 라우터는 레지스트리의 ConnectionRemoved로 스스로 떼어 냅니다.
+    /// </summary>
+    private async Task AttachFileRoutingAsync(string clientId, ParticipantConnection participant, SecureCollaborationConnection secure)
+    {
+        var router = _fileTransfers;
+        if (router is null) return;
+        try
+        {
+            await router.AttachAsync(participant, secure);
+        }
+        catch (Exception ex)
+        {
+            // 연결 직후 이탈 등. 파일 목록만 못 받을 뿐 참가 자체는 유지한다.
+            _logSink.Write($"[FileRoute] 채널 연결 실패: clientId={clientId}, {ex.GetType().Name}");
+        }
+    }
 
     private async Task SendSecureAsync(SecureCollaborationConnection secure, byte[] frame, string clientId)
     {
@@ -982,6 +1009,7 @@ public sealed class SessionManager
             _ = IssueReconnectGrantAsync(clientId, packet.DisplayName, secure);
             // 참가 직후 학생이 기본 허용 상태(보기·제어 ON)를 바로 표시할 수 있게 한다(U07).
             _ = PushStudentStatusAsync(clientId);
+            _ = AttachFileRoutingAsync(clientId, participant, secure);
             // 등록 직전에 닫혔다면 닫힘 알림이 이 참가자를 찾지 못했으므로 여기서 정리한다.
             if (secure.IsClosed) _ = _tcpServer.DisconnectClientAsync(clientId, "보호 채널 종료");
         }

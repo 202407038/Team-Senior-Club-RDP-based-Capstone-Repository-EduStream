@@ -4,6 +4,8 @@ using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Windows;
 using EduStream.Core.Network;
+using EduStream.Core.Collaboration;
+using EduStream.Core.FileSharing;
 using EduStream.Core.Common;
 using EduStream.Core.Logging;
 using EduStream.Core.Models;
@@ -74,6 +76,7 @@ public sealed class ServerViewModel : ObservableObject
         SendSampleFileCommand = new RelayCommand(() => _ = SendSampleFileAsync(), () => IsSessionOpen);
         SelectFileCommand = new RelayCommand(SelectFile);
         SendSelectedFileCommand = new RelayCommand(() => _ = SendSelectedFileAsync(), () => IsSessionOpen && File.Exists(SelectedFilePath));
+        RegisterSelectedFileCommand = new RelayCommand(() => _ = RegisterSelectedFileAsync(), () => IsSessionOpen && File.Exists(SelectedFilePath));
         SendChatCommand = new RelayCommand(() => _ = SendChatAsync(), () => IsSessionOpen && !string.IsNullOrWhiteSpace(ChatInput));
         StartRdpShareCommand = new RelayCommand(() => _ = StartRdpShareAsync(), () => IsSessionOpen && !IsBusy && !IsRdpBusy && !IsRdpSharing);
         StopRdpShareCommand = new RelayCommand(() => _ = StopRdpShareAsync(), () => IsRdpSharing && !IsBusy && !IsRdpBusy);
@@ -170,6 +173,7 @@ public sealed class ServerViewModel : ObservableObject
                 StopAutoShareCommand.RaiseCanExecuteChanged();
                 SendSampleFileCommand.RaiseCanExecuteChanged();
                 SendSelectedFileCommand.RaiseCanExecuteChanged();
+                RegisterSelectedFileCommand.RaiseCanExecuteChanged();
                 SendChatCommand.RaiseCanExecuteChanged();
                 UpdateRdpCommands();
             }
@@ -231,6 +235,12 @@ public sealed class ServerViewModel : ObservableObject
 
     public ObservableCollection<string> SharedFiles { get; } = [];
 
+    /// <summary>학생이 골라 받을 수 있게 등록한 강의 파일 목록입니다(U08).</summary>
+    public ObservableCollection<RegisteredFileItem> RegisteredFiles { get; } = [];
+
+    /// <summary>선택한 파일을 강의 파일 목록에 등록합니다. 본문은 학생이 요청할 때만 보냅니다.</summary>
+    public RelayCommand RegisterSelectedFileCommand { get; }
+
     public ObservableCollection<ChatLine> ChatMessages { get; } = [];
 
     public RelayCommand OpenSessionCommand { get; }
@@ -263,6 +273,7 @@ public sealed class ServerViewModel : ObservableObject
             if (SetProperty(ref _selectedFilePath, value))
             {
                 SendSelectedFileCommand.RaiseCanExecuteChanged();
+                RegisterSelectedFileCommand.RaiseCanExecuteChanged();
             }
         }
     }
@@ -286,6 +297,7 @@ public sealed class ServerViewModel : ObservableObject
             _heartbeatService.Start();
             IsSessionOpen = true;
             ConnectionCode = _sessionManager.ConnectionCode ?? "-";
+            if (_sessionManager.FileTransfers is { } fileTransfers) fileTransfers.FileStored += OnStudentFileStored;
             SessionStatus = $"세션 Open · 포트 {Port}";
             StatusMessage = $"'{SessionName}' 세션이 시작되었습니다. 학생에게 호스트 IP, 포트, 접속 코드를 알려 주세요." +
                             (_sessionManager.IsRoomPasswordProtected ? " 방 비밀번호도 함께 알려 주세요." : string.Empty);
@@ -323,6 +335,7 @@ public sealed class ServerViewModel : ObservableObject
             }
             IsSessionOpen = false;
             ConnectionCode = "세션을 열면 표시됩니다.";
+            RegisteredFiles.Clear();
             IsScreenSharing = false;
             ParticipantCount = 0;
             SessionStatus = "세션 닫힘";
@@ -547,6 +560,47 @@ public sealed class ServerViewModel : ObservableObject
         var handoff = _sessionManager.TryGetPendingInvitationHandoff(participantId);
         return IsRdpSharing && handoff?.ExpiresAt > DateTimeOffset.UtcNow ? handoff.Password : null;
     }
+
+    private async Task RegisterSelectedFileAsync()
+    {
+        var path = SelectedFilePath;
+        try
+        {
+            var file = await _sessionManager.RegisterFileAsync(path);
+            RegisteredFiles.Add(new RegisteredFileItem(file, UnregisterFile));
+            FileShareStatus = $"강의 파일 목록에 등록했습니다: {file.FileName}. 학생이 목록에서 골라 받을 수 있습니다.";
+        }
+        catch (Exception ex)
+        {
+            // 로컬 경로가 담긴 예외 메시지는 화면에 그대로 보여 주지 않는다.
+            FileShareStatus = "파일을 등록하지 못했습니다: " + CollaborationErrorCatalog.FromException(ex).UserMessage;
+            _logSink.Write($"[FileRoute] 등록 실패: {ex.GetType().Name}");
+        }
+        SyncLogs();
+    }
+
+    private void UnregisterFile(RegisteredFileItem item)
+    {
+        try
+        {
+            _sessionManager.UnregisterFile(item.File.FileId);
+            FileShareStatus = $"목록에서 내렸습니다: {item.File.FileName}. 이미 받은 학생의 파일은 그대로 남습니다.";
+        }
+        catch (InvalidOperationException)
+        {
+            FileShareStatus = "세션이 닫혀 있어 목록을 바꿀 수 없습니다.";
+        }
+        RegisteredFiles.Remove(item);
+        SyncLogs();
+    }
+
+    private void OnStudentFileStored(ParticipantConnection student, FileStoredNotice notice) => RunOnUi(() =>
+    {
+        var name = _sessionManager.Participants.TryResolve(student.ConnectionId)?.DisplayName ?? "학생";
+        var file = RegisteredFiles.FirstOrDefault(item => item.File.FileId == notice.FileId)?.File.FileName ?? "파일";
+        FileShareStatus = $"{name}님이 {file} 저장을 완료했습니다.";
+        SyncLogs();
+    });
 
     private static void RunOnUi(Action action)
     {
