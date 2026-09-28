@@ -244,9 +244,20 @@ public class WdsViewportAdapterTests
     }
 
     [Fact]
-    public void ViewerApplied_ShouldRaiseEventOnViewportChange()
+    public async Task ApplyToViewerAsync_WithoutViewer_ShouldThrowInvalidOperationException()
     {
-        // Arrange
+        // 1. 뷰어 없음: 핸들러가 없는데 적용 시도 시 예외 발생 검증
+        var wheelAdapter = new WheelScrollAdapter();
+        var viewportAdapter = new ViewportFitAdapter();
+        var wdsAdapter = new WdsViewportAdapter(wheelAdapter, viewportAdapter);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => wdsAdapter.ApplyToViewerAsync());
+    }
+
+    [Fact]
+    public void ApplyWheelZoom_WithViewerRegistered_ShouldNotRaiseViewerAppliedUntilApplied()
+    {
+        // 2. 등록만 됨: 휠 줌을 실행해도 실제 적용 전에는 ViewerApplied 이벤트가 발생하지 않음 검증
         var wheelAdapter = new WheelScrollAdapter();
         var viewportAdapter = new ViewportFitAdapter();
         var wdsAdapter = new WdsViewportAdapter(wheelAdapter, viewportAdapter);
@@ -257,15 +268,46 @@ public class WdsViewportAdapterTests
         ViewerAppliedEventArgs? eventArgs = null;
         wdsAdapter.ViewerApplied += (sender, args) => eventArgs = args;
 
-        // Act
         wdsAdapter.ApplyWheelZoom(120);
 
-        // Assert
-        Assert.NotNull(eventArgs);
-        Assert.NotNull(eventArgs.ViewportInfo);
-        Assert.True(eventArgs.ViewportInfo.ZoomLevel > 1.0);
+        Assert.Null(eventArgs);
     }
 
+    [Fact]
+    public async Task ApplyToViewerAsync_Success_ShouldRaiseViewerApplied()
+    {
+        // 3. 적용 성공: ApplyToViewerAsync가 정상 완료되었을 때만 ViewerApplied 이벤트 발생 검증
+        var wheelAdapter = new WheelScrollAdapter();
+        var viewportAdapter = new ViewportFitAdapter();
+        var wdsAdapter = new WdsViewportAdapter(wheelAdapter, viewportAdapter);
+        wdsAdapter.SetSourceSize(new Size(1920, 1080));
+        wdsAdapter.SetViewportSize(new Size(1280, 720));
+        wdsAdapter.AddViewerHandler(_ => Task.CompletedTask);
+
+        ViewerAppliedEventArgs? eventArgs = null;
+        wdsAdapter.ViewerApplied += (sender, args) => eventArgs = args;
+
+        await wdsAdapter.ApplyToViewerAsync();
+
+        Assert.NotNull(eventArgs);
+        Assert.NotNull(eventArgs.ViewportInfo);
+    }
+
+    [Fact]
+    public async Task ApplyToViewerAsync_WhenHandlerFails_ShouldThrowExceptionAndNotRaiseViewerApplied()
+    {
+        // 4. 적용 실패: 뷰어 핸들러에서 에러 발생 시 예외 전파 및 ViewerApplied 미발생 검증
+        var wheelAdapter = new WheelScrollAdapter();
+        var viewportAdapter = new ViewportFitAdapter();
+        var wdsAdapter = new WdsViewportAdapter(wheelAdapter, viewportAdapter);
+        wdsAdapter.AddViewerHandler(_ => throw new InvalidOperationException("뷰어 렌더링 실패"));
+
+        ViewerAppliedEventArgs? eventArgs = null;
+        wdsAdapter.ViewerApplied += (sender, args) => eventArgs = args;
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => wdsAdapter.ApplyToViewerAsync());
+        Assert.Null(eventArgs);
+    }
     [Fact]
     public async Task AddViewerHandler_ShouldReceiveViewportInfo()
     {

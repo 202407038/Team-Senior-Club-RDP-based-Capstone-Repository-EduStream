@@ -463,4 +463,26 @@ public class AnnotationEngineAdapterTests
         var strokesAfterUndo = await engineAdapter.GetAllStrokesAsync();
         Assert.Empty(strokesAfterUndo);
     }
+    [Fact]
+    public async Task ActivateAndDeactivateEngine_ShouldUpdateDrawingStateWhilePreservingVisibility()
+    {
+        // 1. 초기 상태: 판서 비활성화 및 그리기 모드 해제 상태 검증
+        var manager = new EduStream.Server.Rdp.AnnotationManager();
+        var adapter = new EduStream.Server.Rdp.AnnotationEngineAdapter(manager);
+
+        Assert.False(adapter.IsEngineActive);
+        Assert.False(adapter.CurrentState.IsDrawing);
+        Assert.True(adapter.CurrentState.IsVisible);
+
+        // 2. 판서 활성화 시: IsDrawing이 true로 일치하는지 상태 전이 검증
+        await adapter.ActivateEngineAsync();
+        Assert.True(adapter.IsEngineActive);
+        Assert.True(adapter.CurrentState.IsDrawing);
+
+        // 3. 판서 비활성화 시: IsDrawing은 false로 복귀하나, 그려둔 스트로크 표시(IsVisible)는 유지되는지 검증
+        await adapter.DeactivateEngineAsync();
+        Assert.False(adapter.IsEngineActive);
+        Assert.False(adapter.CurrentState.IsDrawing);
+        Assert.True(adapter.CurrentState.IsVisible);
+    }
 }
