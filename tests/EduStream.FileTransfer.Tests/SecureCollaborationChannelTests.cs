@@ -312,7 +312,7 @@ public sealed class SecureCollaborationChannelTests
         public static Task<Rig> StartAsync(TimeSpan? handshakeTimeout = null)
         {
             var rig = new Rig(handshakeTimeout);
-            rig.Listener.Start(0);
+            rig.Listener.Start(TestPortAllocator.GetFreePortPair());
             return Task.FromResult(rig);
         }
 
