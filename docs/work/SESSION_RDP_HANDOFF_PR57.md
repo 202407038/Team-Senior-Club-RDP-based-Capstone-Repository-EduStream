@@ -1,6 +1,6 @@
-# #57까지의 세션 기반과 3번 RDP 구현 인계
+# #63까지의 세션 기반과 3번 RDP 구현 인계
 
-갱신: 2026-09-29. 코드 기준 main `2355761` (#52~#57 모두 병합, 마지막 병합은 #55).
+갱신: 2026-09-29. 코드 기준 main `ea87cbf` (#52~#59 및 #61~#63 병합). 기존 링크 호환을 위해 파일명은 유지합니다.
 문서의 PR 번호는 기능 식별용이며 머지 순서가 아닙니다. 이 문서는 역할 변경이나 완료 기준 완화가 아니라 **이미 제공된 기능과 남은 구현을 구분하는 최신 인계**입니다.
 
 ## 1. 현재 기준과 읽는 순서
@@ -9,7 +9,7 @@
 2. [역할 배분](./UI_RDP_WORK_ALLOCATION.md)의 2번/3번/5번 경계를 따릅니다.
 3. [확정 요구](./UI_FEEDBACK_SPEC.md) 및 [전체 주차별 로드맵](./FULL_WEEKLY_ROADMAP.md)의 9월 4~5주차를 대조합니다.
 4. [기존 단방향 RDP 계약](./RDP_IMPLEMENTATION_CONTRACT.md)은 기존 교수자→학생 공유의 구현 참고입니다. 과거의 '학생 수신은 5번' 설명을 신규 학생→교수자 엔진까지 5번에게 배정한 것으로 해석하지 않습니다.
-5. [1·4번 인계](./FINAL_CORE_FILE_HANDOFF.md)의 계약·파일 정책은 유지하며, 아래에 명시된 #52~#57 구현을 더 이상 전체 미구현으로 취급하지 않습니다.
+5. [1·4번 인계](./FINAL_CORE_FILE_HANDOFF.md)의 계약·파일 정책은 유지하며, 아래에 명시된 #61까지의 구현을 더 이상 전체 미구현으로 취급하지 않습니다. #62·#63 후속 회귀는 [별도 기록](./CORE_FILE_INTEGRATION_READINESS.md)으로 구분합니다.
 
 '인터페이스 있음', '테스트 대역에서 성공', '실제 엔진 동작', '앱 연결', '최종 다중 PC 인수'는 서로 다른 상태입니다. 각각의 근거를 따로 적습니다.
 
@@ -18,19 +18,21 @@
 | PR | 제공된 코드/기능 | 아직 완료로 볼 수 없는 부분 |
 |---|---|---|
 | [#52](https://github.com/202407038/Team-Senior-Club-RDP-based-Capstone-Repository-EduStream/pull/52) | ParticipantRegistry, ServerRemoteControlCoordinator, IRemoteInputGate, 파일 요청 인가. 실제 참가 연결 대조 및 단일 제어 대상 승인/회수 | 학생 OS 입력 엔진 자체. IRemoteInputGate는 엔진을 연결할 계약이지 마우스·키보드 구현체가 아님 |
-| [#53](https://github.com/202407038/Team-Senior-Club-RDP-based-Capstone-Repository-EduStream/pull/53) | RoomPasswordVerifier 해시 검증·시도 제한, HostNetworkInfoService | 보호 채널을 통한 앱 참가 인증. main은 보호 인증 경로 없는 비밀번호 방 참가를 거부하는 fail-closed 상태 |
+| [#53](https://github.com/202407038/Team-Senior-Club-RDP-based-Capstone-Repository-EduStream/pull/53) | RoomPasswordVerifier 해시 검증·시도 제한, HostNetworkInfoService | 보호 앱 참가 인증은 후속 #58에서 연결. 다중 PC 신뢰/실행 UX 인수는 별도 |
 | [#54](https://github.com/202407038/Team-Senior-Club-RDP-based-Capstone-Repository-EduStream/pull/54) | 공유 중지 시 제어 회수·차단 확인 결과, SessionManager의 파일 카탈로그 연결 | 실제 native 차단은 3번 엔진 필요. 카탈로그 API만으로 앱 다운로드 전체가 완성되지는 않음 |
 | [#55](https://github.com/202407038/Team-Senior-Club-RDP-based-Capstone-Repository-EduStream/pull/55) | 학생 먼저 실행 시 교수자 실행 제한, 교수자 먼저 실행 시 학생 실행 허용 | 같은 Windows 로그인 세션의 실행 정책이며 다른 PC 전체를 통제하는 기능 아님 |
-| [#56](https://github.com/202407038/Team-Senior-Club-RDP-based-Capstone-Repository-EduStream/pull/56) | SessionFileTransferRouter/SessionFileRequestClient, 요청별 전송·취소·저장 ACK 대조. 빠른 저장 ACK와 최종 송신 경합 보완 포함 | 보호 채널 및 양 앱 파일 UI 연결은 #59 검토 대상. 로컬 라우터 회귀를 실제 배포 완료로 표시하지 않음 |
-| [#57](https://github.com/202407038/Team-Senior-Club-RDP-based-Capstone-Repository-EduStream/pull/57) | 공유 중지/재시작 시 유효 참가자의 초대 재요청/재발급 흐름. 초대 발급 중 재시작 경합 보완 포함 | 내부 초대 비밀 자동 전달과 실제 viewer 자동 연결은 남음. '초대 복귀'와 '화면 자동 복귀'를 구분하고 제어권은 자동 재승인하지 않음 |
+| [#56](https://github.com/202407038/Team-Senior-Club-RDP-based-Capstone-Repository-EduStream/pull/56) | SessionFileTransferRouter/SessionFileRequestClient, 요청별 전송·취소·저장 ACK 대조. 빠른 저장 ACK와 최종 송신 경합 보완 포함 | 보호 채널/양 앱 기본 파일 연결은 후속 #59 반영. 최종 UI/배포 인수는 별도 |
+| [#57](https://github.com/202407038/Team-Senior-Club-RDP-based-Capstone-Repository-EduStream/pull/57) | 공유 중지/재시작 시 초대 재요청/재발급 및 경합 보완 | 자동 비밀 전달/Connect는 #61 반영. 실제 화면 자동 복귀 인수와 제어권 재승인은 별도 |
+| [#58](https://github.com/202407038/Team-Senior-Club-RDP-based-Capstone-Repository-EduStream/pull/58) | TLS 보호 방 인증·일회용 TCP 참가 티켓·권한/제어 상태·재연결 토큰·종료 알림, 승인 ACK 후 참가 확정 | 실제 입력 엔진/역방향 초대 계약은 별도. 다중 PC 실환경 인수 필요 |
+| [#59](https://github.com/202407038/Team-Senior-Club-RDP-based-Capstone-Repository-EduStream/pull/59) | 참가한 보호 연결의 파일 라우팅, 양 앱 등록/목록/해제/다운로드와 실제 루프백 TLS/TCP 검증 | 드롭·최종 UI 배치 및 실제 Downloads 권한/RDP 병행/배포 검수 별도 |
+| [#61](https://github.com/202407038/Team-Senior-Club-RDP-based-Capstone-Repository-EduStream/pull/61) | RdpInvitationSecretNotice 보호 전달, 초대/비밀 순서 무관 결합·자동 Connect, 중복 연결 차단 | 자동 테스트의 viewer는 대역. 실제 WDS 화면 복귀·신규 역방향 화면/입력 엔진 완료가 아님 |
 
 위 서비스·정책의 코드 병합은 완료됐지만 **2번 전체 작업 또는 U03/U07/U08 전체 인수가 완료됐다는 뜻은 아닙니다.**
 
 검토 중인 브랜치는 main의 확정 기반과 구분합니다(9/29 확인 시점).
 
-- #58: 보호 채널·방 인증·학생 상태 메시지·토큰 재참가. 미머지이며 승인 응답 전 성공 판정/단절 복구 보완 요청 상태입니다. 검토 코드는 참고할 수 있으나 확정 배포 계약으로 가정하지 않습니다.
-- #59: #58 위의 파일 앱/채널 연결. 미머지이며 #58 반영 후 재검증 대상입니다.
-- #51: 3번 신규 어댑터 검토본. 상태/이벤트 보완과 실제 native 엔진 완성을 구분합니다.
+- #51: 3번 신규 어댑터 검토본이며 main에 포함하지 않습니다. 상태/이벤트 보완과 실제 native 엔진 완성을 구분하고 후속 head는 별도로 재검토합니다.
+- #58/#59/#61은 더 이상 미병합 대기가 아닙니다. 단, main 코드 반영과 Releases 실행 파일 배포는 다릅니다.
 
 ## 3. 기존 #51 브랜치를 최신화하는 순서
 
@@ -59,7 +61,7 @@ fast-forward가 불가능하거나 충돌이 발생하면 일단 이력을 확�
 
 ## 4. 3번이 바로 연결할 수 있는 main의 접점
 
-경로는 저장소 루트 기준이며, 아래 API는 #57까지의 main에 실제 존재합니다.
+경로는 저장소 루트 기준이며, 아래 API는 #61까지의 main에 실제 존재합니다.
 
 | 파일/접점 | 2번이 이미 제공한 것 | 3번의 다음 작업 |
 |---|---|---|
@@ -71,7 +73,7 @@ fast-forward가 불가능하거나 충돌이 발생하면 일단 이력을 확�
 | `SessionManager.UpdateParticipantPermissionsAsync` | 서버 내부 권한 변경 및 차단 확인 | 허용 철회/이탈/단절 때 실제 입력 중단 검증. 학생 앱의 보호된 변경 메시지는 #58 연결 범위와 구분 |
 | `SessionManager.AttachRdpSharing` / `DetachRdpSharingAsync` | 공유 시작 연결 및 중지/초대 정리/입력 회수 흐름 | 실제 공유 서비스와 연결하고 Pending/Failed를 차단 성공으로 표시하지 않음 |
 | `SessionManager.IsControlInputRevokePending` / `ServerRemoteControlCoordinator.ConfirmInputRevokedAsync` | 회수 미확인 상태 조회 및 조정자 수준 재확인 | 엔진 차단 실패 복구 후 기존 회수 흐름으로 재확인. SessionManager의 `ConfirmControlInputRevokedAsync`는 내부 private 메서드이므로 UI가 직접 호출하는 API로 취급하지 않음 |
-| `TryGetPendingInvitationHandoff` / `RdpInvitationPasswordReady` | 기존 초대 비밀 인계 접점 | 기존 단방향 공급자 구현 참고. 실제 자동/역방향 초대 전달은 1·2번과 인증된 수신 대상·수명·메시지 계약을 조율 |
+| `TryGetPendingInvitationHandoff` / `RdpInvitationPasswordReady` 및 `RdpInvitationSecretNotice` | 기존 수동 인계 접점과 #61 단방향 초대 비밀 보호 전달 | 기존 공급자 구현 참고. 역방향 초대는 별도로 인증 대상·수명·방향을 1·2번과 조율 |
 
 `INativeInputPipeline`은 #51 브랜치에서 정의한 접점입니다. **#52가 그 구현체를 제공하기를 기다리는 관계가 아닙니다.** #52의 `IRemoteInputGate`가 상위 승인/회수 계약이며, #51이 선택한 하위 입력 엔진을 실제로 구현·연결해야 합니다.
 
@@ -110,9 +112,9 @@ fast-forward가 불가능하거나 충돌이 발생하면 일단 이력을 확�
 - 실제 컨트롤의 STA/수명·DPI·모니터/해상도 변경을 고려하고, 선택한 방식이 실제 WDS 화면에 작동하는지 확인합니다.
 - 적용 완료 이벤트는 실제 적용 성공 후에만 발행합니다. 미등록·실패·부분 실패를 상위가 알 수 있어야 합니다.
 
-## 6. #51 현재 검토본에서 해결된 것과 남은 것
+## 6. #51 과거 검토 기록 (head별 판단)
 
-9/29 검토 head `5dbd4d3`에 대한 기록입니다. 후속 커밋에 자동 적용되는 판정이 아니며 PR별 재검토합니다.
+아래는 9/29에 검토한 이전 head `5dbd4d3`의 이력입니다. 최신 head의 현재 판정이 아니며, 후속 수정 유무와 테스트 수는 해당 리뷰 근거를 따릅니다. 이번 1·4번 후속 작업에서는 #51을 다시 검증하거나 수정하지 않았습니다.
 
 - 해결 확인: 뷰어 등록만으로 ViewerApplied가 발생하던 오류, 뷰어 적용 실패 누락, 판서 활성화와 IsDrawing 상태 불일치. fix/test 커밋 분리도 확인했습니다.
 - 미해결: 실제 native 입력 구현, 학생→교수자 화면 엔진, 판서 렌더링/공유, 실제 WDS 변환 적용.
@@ -125,10 +127,10 @@ fast-forward가 불가능하거나 충돌이 발생하면 일단 이력을 확�
 
 | 항목 | 필요한 협의/연계 | 기다리지 않고 진행할 수 있는 3번 작업 |
 |---|---|---|
-| 내부 초대/역방향 연결 정보의 자동 전달 | 1번 계약, 2번 인증된 참가자·보호 채널/라우팅. #58은 아직 검토 중이며 역방향/native 초대 wire까지 전부 제공하는 PR은 아님 | 실제 공급자 공유/수신·초대 생성·폐기와 최소 연결 예제, 인증된 채널 경계를 대역으로 둔 로컬 기술 검증 |
+| 내부 초대/역방향 연결 정보의 자동 전달 | #58 보호 채널, #61 기존 단방향 자동 전달은 main 반영. 역방향/native 초대 wire는 방향/신원/수명을 1·2·3번이 별도 협의 | 기존 WDS 공급자/수신 구조 재사용 가능성을 확인하고 실제 공유·수신·초대 생성/폐기와 최소 연결 예제 제공 |
 | 권한 승인/회수 | 이미 main에 있는 #52/#54 접점, 학생 보호 상태 메시지는 #58 | 실제 입력 게이트 구현, 승인/회수 실패·이전 연결 차단 테스트 |
 | 표시 컨트롤 부착·판서 버튼 | 5번 UI STA/호스트/입력 바인딩 | 동작하는 표시/판서 엔진, 최소 호스트에서의 시각적 검증 및 초기화/해제 예제 |
-| 파일/채팅과 실제 병행 | 기존 main 회귀 및 후속 #59 앱 연결 | 화면/입력 자체 검증과 종료 회귀. 파일 앱 미완료를 전체 native 엔진 대기 사유로 삼지 않음 |
+| 파일/채팅과 실제 병행 | #59 파일 앱 연결까지 반영된 main 회귀 | 화면/입력 자체 검증과 종료 회귀. 파일 앱 연결을 전체 native 엔진 대기 사유로 삼지 않음 |
 
 공통 계약이 부족하면 **필요한 입력/출력, 어느 프로세스에서 호출하는지, 대상 신원/세대, 성공·실패·취소, 비밀 정보 수명, 상대 담당**을 구체적으로 제안합니다. 1번 Core나 5번 MainWindow를 임의로 재설계하지 않습니다. 반대로 이러한 계약 조율이 필요하다는 이유로 자신의 실제 기술 구현을 다른 담당 책임으로 바꾸지도 않습니다.
 
