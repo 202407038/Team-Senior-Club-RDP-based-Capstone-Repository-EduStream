@@ -8,6 +8,7 @@ namespace EduStream.Server.Rdp;
 
 /// <summary>
 /// Windows OS 실제 네이티브 입력 주입 파이프라인 (Win32 user32.dll API 기반)
+/// 대상 검증, 눌림 상태 추적, Win32 API 호출 및 단절/차단 릴리즈를 단일 락 경계로 원자화하여 Stuck 방지
 /// </summary>
 public sealed class WindowsNativeInputPipeline : INativeInputPipeline
 {
@@ -40,11 +41,11 @@ public sealed class WindowsNativeInputPipeline : INativeInputPipeline
     public Task DisconnectAsync(CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        ReleaseAllHeldInputs();
         lock (_lock)
         {
             _isConnected = false;
             _activeTargetId = null;
+            ReleaseAllHeldInputsLocked();
         }
         return Task.CompletedTask;
     }
@@ -53,14 +54,17 @@ public sealed class WindowsNativeInputPipeline : INativeInputPipeline
     {
         cancellationToken.ThrowIfCancellationRequested();
         ArgumentException.ThrowIfNullOrWhiteSpace(targetId);
+
         lock (_lock)
         {
             if (!_isConnected)
+            {
                 throw new InputPipelineException("Windows 네이티브 입력 엔진이 연결되어 있지 않습니다.");
+            }
 
             if (_activeTargetId != null && _activeTargetId != targetId)
             {
-                ReleaseAllHeldInputs();
+                ReleaseAllHeldInputsLocked();
             }
 
             _activeTargetId = targetId;
@@ -72,12 +76,13 @@ public sealed class WindowsNativeInputPipeline : INativeInputPipeline
     {
         cancellationToken.ThrowIfCancellationRequested();
         ArgumentException.ThrowIfNullOrWhiteSpace(targetId);
+
         lock (_lock)
         {
             if (_activeTargetId == targetId)
             {
                 _activeTargetId = null;
-                ReleaseAllHeldInputs();
+                ReleaseAllHeldInputsLocked();
             }
         }
         return Task.CompletedTask;
@@ -86,35 +91,39 @@ public sealed class WindowsNativeInputPipeline : INativeInputPipeline
     public Task InjectMouseMoveAsync(string targetId, int x, int y, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        ValidateTargetAndConnection(targetId);
 
-        if (OperatingSystem.IsWindows())
+        lock (_lock)
         {
-            if (!SetCursorPos(x, y))
+            ValidateTargetAndConnectionLocked(targetId);
+
+            if (OperatingSystem.IsWindows())
             {
-                throw new InputPipelineException($"마우스 좌표 이동 실패 (X: {x}, Y: {y})");
+                if (!SetCursorPos(x, y))
+                {
+                    throw new InputPipelineException($"마우스 좌표 이동 실패 (X: {x}, Y: {y})");
+                }
             }
         }
-
         return Task.CompletedTask;
     }
 
     public Task InjectMouseClickAsync(string targetId, MouseButton button, bool isPressed, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        ValidateTargetAndConnection(targetId);
 
-        if (OperatingSystem.IsWindows())
+        uint flags = button switch
         {
-            uint flags = button switch
-            {
-                MouseButton.Left => isPressed ? MOUSEEVENTF_LEFTDOWN : MOUSEEVENTF_LEFTUP,
-                MouseButton.Right => isPressed ? MOUSEEVENTF_RIGHTDOWN : MOUSEEVENTF_RIGHTUP,
-                MouseButton.Middle => isPressed ? MOUSEEVENTF_MIDDLEDOWN : MOUSEEVENTF_MIDDLEUP,
-                _ => throw new ArgumentOutOfRangeException(nameof(button), button, "지원되지 않는 마우스 버튼입니다.")
-            };
+            MouseButton.Left => isPressed ? MOUSEEVENTF_LEFTDOWN : MOUSEEVENTF_LEFTUP,
+            MouseButton.Right => isPressed ? MOUSEEVENTF_RIGHTDOWN : MOUSEEVENTF_RIGHTUP,
+            MouseButton.Middle => isPressed ? MOUSEEVENTF_MIDDLEDOWN : MOUSEEVENTF_MIDDLEUP,
+            _ => throw new ArgumentOutOfRangeException(nameof(button), button, "지원되지 않는 마우스 버튼입니다.")
+        };
 
-            lock (_lock)
+        lock (_lock)
+        {
+            ValidateTargetAndConnectionLocked(targetId);
+
+            if (OperatingSystem.IsWindows())
             {
                 if (isPressed)
                 {
@@ -124,9 +133,9 @@ public sealed class WindowsNativeInputPipeline : INativeInputPipeline
                 {
                     _heldMouseButtons.Remove(button);
                 }
-            }
 
-            mouse_event(flags, 0, 0, 0, UIntPtr.Zero);
+                mouse_event(flags, 0, 0, 0, UIntPtr.Zero);
+            }
         }
         return Task.CompletedTask;
     }
@@ -134,11 +143,15 @@ public sealed class WindowsNativeInputPipeline : INativeInputPipeline
     public Task InjectMouseWheelAsync(string targetId, int delta, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        ValidateTargetAndConnection(targetId);
 
-        if (OperatingSystem.IsWindows())
+        lock (_lock)
         {
-            mouse_event(MOUSEEVENTF_WHEEL, 0, 0, unchecked((uint)delta), UIntPtr.Zero);
+            ValidateTargetAndConnectionLocked(targetId);
+
+            if (OperatingSystem.IsWindows())
+            {
+                mouse_event(MOUSEEVENTF_WHEEL, 0, 0, unchecked((uint)delta), UIntPtr.Zero);
+            }
         }
         return Task.CompletedTask;
     }
@@ -146,13 +159,14 @@ public sealed class WindowsNativeInputPipeline : INativeInputPipeline
     public Task InjectKeyboardInputAsync(string targetId, int keyCode, bool isPressed, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        ValidateTargetAndConnection(targetId);
 
-        if (OperatingSystem.IsWindows())
+        uint flags = isPressed ? 0u : KEYEVENTF_KEYUP;
+
+        lock (_lock)
         {
-            uint flags = isPressed ? 0u : KEYEVENTF_KEYUP;
+            ValidateTargetAndConnectionLocked(targetId);
 
-            lock (_lock)
+            if (OperatingSystem.IsWindows())
             {
                 if (isPressed)
                 {
@@ -162,57 +176,53 @@ public sealed class WindowsNativeInputPipeline : INativeInputPipeline
                 {
                     _heldKeys.Remove(keyCode);
                 }
-            }
 
-            keybd_event((byte)keyCode, 0, flags, UIntPtr.Zero);
+                keybd_event((byte)keyCode, 0, flags, UIntPtr.Zero);
+            }
         }
         return Task.CompletedTask;
     }
 
-    private void ValidateTargetAndConnection(string targetId)
+    private void ValidateTargetAndConnectionLocked(string targetId)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(targetId);
-        lock (_lock)
-        {
-            if (!_isConnected)
-                throw new InputPipelineException("Windows 네이티브 입력 엔진이 연결되어 있지 않습니다.");
 
-            if (_activeTargetId != targetId)
-                throw new InputPipelineException($"선택되지 않은 대상 ({targetId})의 입력 주입은 차단되었습니다. 활성 대상: {_activeTargetId ?? "없음"}");
+        if (!_isConnected)
+        {
+            throw new InputPipelineException("Windows 네이티브 입력 엔진이 연결되어 있지 않습니다.");
+        }
+
+        if (_activeTargetId != targetId)
+        {
+            throw new InputPipelineException($"선택되지 않은 대상 ({targetId})의 입력 주입은 차단되었습니다. 활성 대상: {_activeTargetId ?? "없음"}");
         }
     }
 
-    /// <summary>
-    /// 연결 종료 또는 대상 차단 시 누르고 있던 마우스 버튼 및 키보드 키 자동 해제
-    /// </summary>
-    private void ReleaseAllHeldInputs()
+    private void ReleaseAllHeldInputsLocked()
     {
         if (!OperatingSystem.IsWindows()) return;
 
-        lock (_lock)
+        foreach (var button in _heldMouseButtons)
         {
-            foreach (var button in _heldMouseButtons)
+            uint flags = button switch
             {
-                uint flags = button switch
-                {
-                    MouseButton.Left => MOUSEEVENTF_LEFTUP,
-                    MouseButton.Right => MOUSEEVENTF_RIGHTUP,
-                    MouseButton.Middle => MOUSEEVENTF_MIDDLEUP,
-                    _ => 0
-                };
-                if (flags != 0)
-                {
-                    mouse_event(flags, 0, 0, 0, UIntPtr.Zero);
-                }
-            }
-            _heldMouseButtons.Clear();
-
-            foreach (var keyCode in _heldKeys)
+                MouseButton.Left => MOUSEEVENTF_LEFTUP,
+                MouseButton.Right => MOUSEEVENTF_RIGHTUP,
+                MouseButton.Middle => MOUSEEVENTF_MIDDLEUP,
+                _ => 0
+            };
+            if (flags != 0)
             {
-                keybd_event((byte)keyCode, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
+                mouse_event(flags, 0, 0, 0, UIntPtr.Zero);
             }
-            _heldKeys.Clear();
         }
+        _heldMouseButtons.Clear();
+
+        foreach (var keyCode in _heldKeys)
+        {
+            keybd_event((byte)keyCode, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
+        }
+        _heldKeys.Clear();
     }
 
     #region Win32 Native Interop

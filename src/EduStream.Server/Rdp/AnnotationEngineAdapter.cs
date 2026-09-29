@@ -41,15 +41,10 @@ public sealed class AnnotationEngineAdapter : IAnnotationEngineAdapter
     public AnnotationEngineAdapter(IAnnotationManager annotationManager)
     {
         _annotationManager = annotationManager ?? throw new ArgumentNullException(nameof(annotationManager));
-
-        // AnnotationManager의 이벤트를 어댑터 파이프라인에 연결
         _annotationManager.OnStrokeRendered += OnStrokeRenderedFromManager;
         _annotationManager.OnStrokeDispatched += OnStrokeDispatchedFromManager;
     }
 
-    /// <summary>
-    /// 판서 엔진 활성화
-    /// </summary>
     public Task ActivateEngineAsync(CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -69,9 +64,6 @@ public sealed class AnnotationEngineAdapter : IAnnotationEngineAdapter
         return Task.CompletedTask;
     }
 
-    /// <summary>
-    /// 판서 엔진 비활성화
-    /// </summary>
     public Task DeactivateEngineAsync(CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -91,9 +83,6 @@ public sealed class AnnotationEngineAdapter : IAnnotationEngineAdapter
         return Task.CompletedTask;
     }
 
-    /// <summary>
-    /// 스트로크 수신 및 유효성 검증 후 처리
-    /// </summary>
     public async Task ReceiveStrokeAsync(AnnotationStroke stroke, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -107,7 +96,6 @@ public sealed class AnnotationEngineAdapter : IAnnotationEngineAdapter
             }
         }
 
-        // AnnotationManager에 스트로크 저장 (매니저 내부 이벤트 디스패치 트리거)
         await _annotationManager.AddStrokeAsync(stroke, cancellationToken);
     }
 
@@ -162,9 +150,6 @@ public sealed class AnnotationEngineAdapter : IAnnotationEngineAdapter
         }
     }
 
-    /// <summary>
-    /// 스트로크 렌더링 이벤트 핸들러 (매니저 발생 이벤트 -> 등록된 실제 렌더러 파이프라인 전달)
-    /// </summary>
     private async void OnStrokeRenderedFromManager(object? sender, StrokeRenderedEventArgs e)
     {
         Func<AnnotationStroke, Task>[] renderCopy;
@@ -180,12 +165,21 @@ public sealed class AnnotationEngineAdapter : IAnnotationEngineAdapter
             _currentState = _currentState.ContentChanged();
         }
 
-        // 1. 일반 렌더링 파이프라인 실행
+        // 렌더러가 하나도 등록되어 있지 않으면 완료 이벤트를 발생시키지 않음
+        if (renderCopy.Length == 0 && rendererCopy.Length == 0)
+        {
+            return;
+        }
+
+        int successCount = 0;
+
         foreach (var handler in renderCopy)
         {
+            lock (_syncRoot) { if (!_isEngineActive) return; }
             try
             {
                 await handler(e.Stroke);
+                successCount++;
             }
             catch (Exception ex)
             {
@@ -193,13 +187,14 @@ public sealed class AnnotationEngineAdapter : IAnnotationEngineAdapter
             }
         }
 
-        // 2. 실제 화면 렌더러 핸들러 실행 (좌표 배열 전달)
         var points = e.Stroke.Points?.ToArray() ?? Array.Empty<Point>();
         foreach (var rendererHandler in rendererCopy)
         {
+            lock (_syncRoot) { if (!_isEngineActive) return; }
             try
             {
                 await rendererHandler(e.Stroke, points);
+                successCount++;
             }
             catch (Exception ex)
             {
@@ -207,12 +202,15 @@ public sealed class AnnotationEngineAdapter : IAnnotationEngineAdapter
             }
         }
 
-        OnStrokeRendered?.Invoke(this, e);
+        lock (_syncRoot) { if (!_isEngineActive) return; }
+
+        // 실제 1개 이상의 핸들러가 성공적으로 렌더링을 마친 경우에만 완료 이벤트 발생
+        if (successCount > 0)
+        {
+            OnStrokeRendered?.Invoke(this, e);
+        }
     }
 
-    /// <summary>
-    /// 스트로크 디스패치 이벤트 핸들러 (매니저 발생 이벤트 -> 원격 참가자 네트워크 전송 파이프라인 전달)
-    /// </summary>
     private async void OnStrokeDispatchedFromManager(object? sender, StrokeDispatchedEventArgs e)
     {
         Func<AnnotationStroke, string, Task>[] transmissionCopy;
@@ -223,11 +221,21 @@ public sealed class AnnotationEngineAdapter : IAnnotationEngineAdapter
             transmissionCopy = _transmissionPipeline.ToArray();
         }
 
+        // 전송 핸들러가 미등록된 경우 완료 이벤트 미발생
+        if (transmissionCopy.Length == 0)
+        {
+            return;
+        }
+
+        int successCount = 0;
+
         foreach (var handler in transmissionCopy)
         {
+            lock (_syncRoot) { if (!_isEngineActive) return; }
             try
             {
                 await handler(e.Stroke, e.TargetParticipantId);
+                successCount++;
             }
             catch (Exception ex)
             {
@@ -235,12 +243,15 @@ public sealed class AnnotationEngineAdapter : IAnnotationEngineAdapter
             }
         }
 
-        OnStrokeDispatched?.Invoke(this, e);
+        lock (_syncRoot) { if (!_isEngineActive) return; }
+
+        // 실제 전송에 성공한 경우에만 완료 이벤트 발생
+        if (successCount > 0)
+        {
+            OnStrokeDispatched?.Invoke(this, e);
+        }
     }
 
-    /// <summary>
-    /// 판서 레이어 표시/숨김 설정
-    /// </summary>
     public async Task SetLayerVisibilityAsync(bool isVisible, CancellationToken cancellationToken = default)
     {
         await _annotationManager.SetLayerVisibilityAsync(isVisible, cancellationToken);
@@ -257,18 +268,12 @@ public sealed class AnnotationEngineAdapter : IAnnotationEngineAdapter
         });
     }
 
-    /// <summary>
-    /// 판서 레이어 표시 토글
-    /// </summary>
     public async Task ToggleLayerVisibilityAsync(CancellationToken cancellationToken = default)
     {
         var currentVisibility = _annotationManager.IsLayerVisible;
         await SetLayerVisibilityAsync(!currentVisibility, cancellationToken);
     }
 
-    /// <summary>
-    /// 모든 판서 스트로크 일괄 삭제
-    /// </summary>
     public async Task ClearAllStrokesAsync(CancellationToken cancellationToken = default)
     {
         await _annotationManager.ClearAllStrokesAsync(cancellationToken);
@@ -286,13 +291,9 @@ public sealed class AnnotationEngineAdapter : IAnnotationEngineAdapter
         });
     }
 
-    /// <summary>
-    /// 마지막 스트로크 실행 취소 (Undo 스택 팝 및 매니저 동기화)
-    /// </summary>
     public async Task UndoAsync(CancellationToken cancellationToken = default)
     {
         AnnotationStroke? lastStroke = null;
-
         lock (_syncRoot)
         {
             if (_undoStack.Count > 0)
