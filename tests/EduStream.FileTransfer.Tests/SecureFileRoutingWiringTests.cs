@@ -16,7 +16,7 @@ namespace EduStream.FileTransfer.Tests;
 /// 2번 담당(U08): 참가 인증을 마친 보호 채널이 파일 라우터에 연결되어, 학생이 목록을 받고 골라 내려받고
 /// 교수자가 저장 완료를 확인하는 전체 흐름을 로컬 TLS/TCP로 검증합니다.
 /// </summary>
-public sealed class SecureFileRoutingWiringTests
+public sealed partial class SecureFileRoutingWiringTests
 {
     private static readonly TimeSpan Wait = TimeSpan.FromSeconds(10);
 
@@ -171,13 +171,15 @@ public sealed class SecureFileRoutingWiringTests
             return path;
         }
 
-        public async Task<Student> JoinAsync(string displayName)
+        public async Task<Student> JoinAsync(string displayName,
+            Func<ISessionFileDownloader, ISessionFileDownloader>? decorateDownloader = null)
         {
             var secure = await SecureRoomJoinClient.AuthenticateAsync("127.0.0.1", Port, SessionManager.ConnectionCode!,
                 displayName, ReadOnlyMemory<char>.Empty, new InMemoryLogSink(), Wait);
             var downloads = Path.Combine(Root, "downloads-" + displayName);
+            ISessionFileDownloader downloader = new SessionFileDownloader(new ReadinessDirectory(downloads));
             var files = new SessionFileRequestClient(secure.SessionId, secure.Connection,
-                new SessionFileDownloader(new ReadinessDirectory(downloads)), new InMemoryLogSink());
+                decorateDownloader?.Invoke(downloader) ?? downloader, new InMemoryLogSink());
             secure.FrameReceived += frame => files.HandleFrameAsync(frame);
             var tcp = new TcpClientService(new InMemoryLogSink(), _serializer);
             var joined = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);

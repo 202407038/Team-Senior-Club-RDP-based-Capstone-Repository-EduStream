@@ -10,12 +10,16 @@ if (Test-Path -LiteralPath $output) { throw "Choose a new evidence directory: $o
 New-Item -ItemType Directory -Path $output | Out-Null
 Push-Location $repo
 $previousSmoke = [Environment]::GetEnvironmentVariable('EDUSTREAM_WDS_SMOKE', 'Process')
+$filter = (@('FinalReadiness', 'SecureRoomJoinTests', 'SecureCollaborationChannelTests',
+    'StudentPermissionSyncTests', 'AutoReconnectTests', 'ClientReconnectViewModelTests',
+    'SecureFileRoutingWiringTests', 'RdpInvitationSecretDeliveryTests', 'RdpAutoConnectDeduplicationTests') |
+    ForEach-Object { "FullyQualifiedName~$_" }) -join '|'
 try {
     $env:EDUSTREAM_WDS_SMOKE = '0'
     & dotnet build EduStream.sln --nologo
     if ($LASTEXITCODE -ne 0) { throw 'Build failed' }
     for ($i = 1; $i -le $Repeat; $i++) {
-        & dotnet test EduStream.sln --no-build --nologo --filter 'FullyQualifiedName~FinalReadiness' --logger "trx;LogFileName=readiness-$i.trx" --results-directory $output
+        & dotnet test EduStream.sln --no-build --nologo --filter $filter --logger "trx;LogFileName=readiness-$i.trx" --results-directory $output
         if ($LASTEXITCODE -ne 0) { throw "Readiness run $i failed" }
     }
     & dotnet test EduStream.sln --no-build --nologo --logger 'trx;LogFileName=full.trx' --results-directory $output
@@ -33,7 +37,9 @@ try {
         Timestamp = [DateTimeOffset]::Now.ToString('o')
         BaseCommit = $head
         UncommittedChanges = $changes
-        Scope = 'Core/file local contracts and simulated integration; not real WDS or multi-PC acceptance'
+        Scope = 'Core/file contracts, real loopback TLS/TCP authentication and file routing, simulated RDP viewer; not native WDS or multi-PC acceptance'
+        RepeatedTestFilter = $filter
+        RepeatCount = $Repeat
         SourceHashes = $hashes
     } | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $output 'evidence.json') -Encoding UTF8
     Write-Host "Local automatic checks passed; not real RDP or multi-PC acceptance. Evidence: $output"
