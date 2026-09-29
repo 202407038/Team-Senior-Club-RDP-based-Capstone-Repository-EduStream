@@ -1,17 +1,19 @@
 ﻿<Application x:Class="EduStream.Server.App"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-             xmlns:local="clr-namespace:EduStream.Server"
              xmlns:conv="clr-namespace:EduStream.Server.Converters"
              StartupUri="MainWindow.xaml">
     <Application.Resources>
         <ResourceDictionary>
             <ResourceDictionary.MergedDictionaries>
-                <ResourceDictionary Source="Themes/EduStreamTheme.xaml" />
+                <!-- 테마 리소스 (BrushBgPrimary, PanelCard, ChatBubbleTemplate 등) 연결 -->
+                <ResourceDictionary Source="Themes/EduStreamTheme.xaml"/>
             </ResourceDictionary.MergedDictionaries>
 
+            <!-- 컨버터 글로벌 리소스 키 연결 -->
+            <conv:BoolToColorConverter x:Key="BoolToColorConverter" />
             <conv:BoolToVisibilityConverter x:Key="BoolToVis" />
-            <conv:ConnectionStateToBrushConverter x:Key="StateToBrush" />
+            <conv:ConnectionStateToBrushConverter x:Key="ConnectionStateToBrushConverter" />
             <conv:InverseBooleanConverter x:Key="InverseBool" />
         </ResourceDictionary>
     </Application.Resources>

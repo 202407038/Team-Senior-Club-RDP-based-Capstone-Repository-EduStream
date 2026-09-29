@@ -1,7 +1,10 @@
+using System;
 using System.Collections.ObjectModel;
+using System.ComponentModel;
 using System.IO;
-using System.Security.Cryptography;
-using System.Security.Cryptography.X509Certificates;
+using System.Linq;
+using System.Runtime.CompilerServices;
+using System.Threading.Tasks;
 using System.Windows;
 using EduStream.Core.Network;
 using EduStream.Core.Collaboration;
@@ -16,6 +19,39 @@ using EduStream.Server.Services;
 namespace EduStream.Server.ViewModels;
 
 /// <summary>
+/// UI 카드 전용 학생 상태 모델
+/// </summary>
+public class ParticipantItem : INotifyPropertyChanged
+{
+    private string _name = string.Empty;
+    private bool _isExpanded = true;
+
+    public string Name
+    {
+        get => _name;
+        set { _name = value; OnPropertyChanged(); }
+    }
+
+    public bool IsExpanded
+    {
+        get => _isExpanded;
+        set { _isExpanded = value; OnPropertyChanged(); }
+    }
+
+    // 👈 각 카드 자체 토글 커맨드 (매개변수 없음)
+    public RelayCommand ToggleCommand { get; }
+
+    public ParticipantItem()
+    {
+        ToggleCommand = new RelayCommand(() => IsExpanded = !IsExpanded);
+    }
+
+    public event PropertyChangedEventHandler? PropertyChanged;
+    protected void OnPropertyChanged([CallerMemberName] string? propertyName = null)
+        => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
+}
+
+/// <summary>
 /// 교수자 대시보드의 상태와 명령을 관리합니다.
 /// WDS 화면 공유와 세션 네트워크 흐름을 함께 연결합니다.
 /// </summary>
@@ -23,6 +59,7 @@ public sealed class ServerViewModel : ObservableObject
 {
     private readonly InMemoryLogSink _logSink = new();
     private readonly SessionManager _sessionManager;
+
     private readonly TcpServerService _tcpServer;
     private readonly HeartbeatService _heartbeatService;
     private readonly ScreenShareService _screenShareService;
@@ -32,12 +69,15 @@ public sealed class ServerViewModel : ObservableObject
     private bool _shuttingDown;
     private readonly SemaphoreSlim _rdpLifecycle = new(1, 1);
     private readonly FileDistributor _fileDistributor;
+
     private string _sessionName = "Capstone Live Class";
     private int _port = 5000;
     private string _chatInput = "Announcement: today's lecture note has been uploaded.";
     private string _latestScreenStatus = "Screen sharing has not started yet.";
     private string _rdpStatus = "WDS 화면 공유 대기 중";
     private string _selectedFilePath = string.Empty;
+    private string _sharedFileName = string.Empty;
+    private bool _isFileShared;
     private string _fileShareStatus = "아직 공유한 파일이 없습니다.";
     private bool _isSessionOpen;
     private bool _isBusy;
@@ -75,11 +115,15 @@ public sealed class ServerViewModel : ObservableObject
         StopAutoShareCommand = new RelayCommand(() => _ = StopAutoShareAsync(), () => IsScreenSharing);
         SendSampleFileCommand = new RelayCommand(() => _ = SendSampleFileAsync(), () => IsSessionOpen);
         SelectFileCommand = new RelayCommand(SelectFile);
-        SendSelectedFileCommand = new RelayCommand(() => _ = SendSelectedFileAsync(), () => IsSessionOpen && File.Exists(SelectedFilePath));
-        RegisterSelectedFileCommand = new RelayCommand(() => _ = RegisterSelectedFileAsync(), () => IsSessionOpen && File.Exists(SelectedFilePath));
+        SendSelectedFileCommand = new RelayCommand(() => _ = SendSelectedFileAsync(), () => IsSessionOpen);
+        UnshareFileCommand = new RelayCommand(UnshareFile, () => IsFileShared);
         SendChatCommand = new RelayCommand(() => _ = SendChatAsync(), () => IsSessionOpen && !string.IsNullOrWhiteSpace(ChatInput));
-        StartRdpShareCommand = new RelayCommand(() => _ = StartRdpShareAsync(), () => IsSessionOpen && !IsBusy && !IsRdpBusy && !IsRdpSharing);
-        StopRdpShareCommand = new RelayCommand(() => _ = StopRdpShareAsync(), () => IsRdpSharing && !IsBusy && !IsRdpBusy);
+        StartRdpPreviewCommand = new RelayCommand(() => _ = StartRdpPreviewAsync(), () => IsSessionOpen && _rdpHost.IsAttached);
+        StopRdpPreviewCommand = new RelayCommand(() => _ = StopRdpPreviewAsync(), () => _rdpHost.IsAttached);
+
+        ExpandAllCommand = new RelayCommand(() => SetAllExpanded(true));
+        CollapseAllCommand = new RelayCommand(() => SetAllExpanded(false));
+       // ToggleParticipantCommand = new RelayCommand<ParticipantItem>(p => ToggleParticipant(p));
     }
 
     public string SessionName
@@ -231,6 +275,24 @@ public sealed class ServerViewModel : ObservableObject
         }
     }
 
+    public bool IsFileShared
+    {
+        get => _isFileShared;
+        private set
+        {
+            if (SetProperty(ref _isFileShared, value))
+            {
+                UnshareFileCommand?.RaiseCanExecuteChanged();
+            }
+        }
+    }
+
+    public string SharedFileName
+    {
+        get => _sharedFileName;
+        private set => SetProperty(ref _sharedFileName, value);
+    }
+
     public ObservableCollection<string> ActivityLogs { get; } = [];
 
     public ObservableCollection<string> SharedFiles { get; } = [];
@@ -243,27 +305,24 @@ public sealed class ServerViewModel : ObservableObject
 
     public ObservableCollection<ChatLine> ChatMessages { get; } = [];
 
+    public ObservableCollection<ParticipantItem> Participants { get; } = [];
+
+    // Commands
     public RelayCommand OpenSessionCommand { get; }
-
     public RelayCommand CloseSessionCommand { get; }
-
     public RelayCommand StartScreenShareCommand { get; }
-
     public RelayCommand StartAutoShareCommand { get; }
-
     public RelayCommand StopAutoShareCommand { get; }
-
     public RelayCommand SendSampleFileCommand { get; }
-
     public RelayCommand SelectFileCommand { get; }
-
     public RelayCommand SendSelectedFileCommand { get; }
-
+    public RelayCommand UnshareFileCommand { get; }
     public RelayCommand SendChatCommand { get; }
-
-    public RelayCommand StartRdpShareCommand { get; }
-
-    public RelayCommand StopRdpShareCommand { get; }
+    public RelayCommand StartRdpPreviewCommand { get; }
+    public RelayCommand StopRdpPreviewCommand { get; }
+    public RelayCommand ExpandAllCommand { get; }
+    public RelayCommand CollapseAllCommand { get; }
+   // public RelayCommand<ParticipantItem> ToggleParticipantCommand { get; }
 
     public string SelectedFilePath
     {
@@ -338,6 +397,7 @@ public sealed class ServerViewModel : ObservableObject
             RegisteredFiles.Clear();
             IsScreenSharing = false;
             ParticipantCount = 0;
+            Participants.Clear();
             SessionStatus = "세션 닫힘";
             LatestScreenStatus = "화면 공유가 중지되었습니다.";
             RdpStatus = "WDS 화면 공유가 중지되었습니다.";
@@ -411,14 +471,41 @@ public sealed class ServerViewModel : ObservableObject
 
     private async Task SendSelectedFileAsync()
     {
-        if (!File.Exists(SelectedFilePath))
+        _logSink.Write($"[File Debug] 파일 공유 버튼 클릭됨! 입력 경로: '{SelectedFilePath}'");
+        SyncLogs();
+
+        if (string.IsNullOrWhiteSpace(SelectedFilePath))
         {
             FileShareStatus = "전송할 파일을 먼저 선택해 주세요.";
             StatusMessage = FileShareStatus;
             IsStatusError = true;
+            _logSink.Write("[File Error] 경로가 비어있습니다.");
+            SyncLogs();
             return;
         }
 
+        // 폴더를 선택한 경우 처리
+        if (Directory.Exists(SelectedFilePath))
+        {
+            FileShareStatus = "폴더는 공유할 수 없습니다. 파일을 선택해 주세요.";
+            StatusMessage = FileShareStatus;
+            IsStatusError = true;
+            _logSink.Write($"[File Error] 선택한 경로가 폴더입니다: '{SelectedFilePath}'");
+            SyncLogs();
+            return;
+        }
+
+        if (!File.Exists(SelectedFilePath))
+        {
+            FileShareStatus = "파일을 찾을 수 없습니다.";
+            StatusMessage = FileShareStatus;
+            IsStatusError = true;
+            _logSink.Write($"[File Error] 파일이 존재하지 않음: '{SelectedFilePath}'");
+            SyncLogs();
+            return;
+        }
+
+        // 실제 파일 전송 실행
         await SendFileAsync(SelectedFilePath, "선택 파일");
     }
 
@@ -452,12 +539,21 @@ public sealed class ServerViewModel : ObservableObject
                 FileShareStatus = $"{label} 전송 중: {packet.FileName} / {sentChunks}/{packet.TotalChunks} chunks";
             }
 
-            if (firstPacket is null)
-                throw new InvalidOperationException("파일 패킷이 생성되지 않았습니다.");
-            FileShareStatus = $"{label} 전송 완료: {firstPacket.FileName} / {sentChunks} chunks / {firstPacket.FileSize} byte";
+            var firstPacket = packets[0];
+
+            // 💡 핵심: UI 파일 카드 및 바인딩 상태 활성화
+            SharedFileName = firstPacket.FileName;
+            IsFileShared = true;
+
+            FileShareStatus = $"{label} 전송 완료: {firstPacket.FileName} / {packets.Count} chunks / {firstPacket.FileSize} byte";
             StatusMessage = FileShareStatus;
-            SharedFiles.Insert(0, $"{firstPacket.FileName} ({firstPacket.FileSize} byte, {sentChunks} chunks)");
-            _logSink.Write($"파일 전송 완료: {firstPacket.FileName}, chunks={sentChunks}, checksum={firstPacket.Checksum[..Math.Min(12, firstPacket.Checksum.Length)]}...");
+
+            if (!SharedFiles.Contains(firstPacket.FileName))
+            {
+                SharedFiles.Insert(0, $"{firstPacket.FileName} ({firstPacket.FileSize} byte, {packets.Count} chunks)");
+            }
+
+            _logSink.Write($"파일 전송 완료: {firstPacket.FileName}, chunks={packets.Count}");
             SyncLogs();
         }
         catch (Exception ex)
@@ -468,6 +564,16 @@ public sealed class ServerViewModel : ObservableObject
             _logSink.Write(FileShareStatus);
             SyncLogs();
         }
+    }
+
+    private void UnshareFile()
+    {
+        IsFileShared = false;
+        SharedFileName = string.Empty;
+        FileShareStatus = "아직 공유한 파일이 없습니다.";
+        StatusMessage = "파일 공유가 해제되었습니다.";
+        _logSink.Write("세션 파일 공유 해제 완료");
+        SyncLogs();
     }
 
     private async Task SendChatAsync()
@@ -628,20 +734,59 @@ public sealed class ServerViewModel : ObservableObject
                 SessionStatus = $"세션 Open · 참가자 {ParticipantCount}명";
             }
 
+            SyncParticipantsList();
             SyncLogs();
         });
     }
 
+    private void SyncParticipantsList()
+    {
+        if (ParticipantCount == 0)
+        {
+            Participants.Clear();
+            return;
+        }
+
+        while (Participants.Count < ParticipantCount)
+        {
+            int index = Participants.Count + 1;
+            Participants.Add(new ParticipantItem { Name = $"학생 {index}", IsExpanded = true });
+        }
+        while (Participants.Count > ParticipantCount)
+        {
+            Participants.RemoveAt(Participants.Count - 1);
+        }
+    }
+
     private void OnChatReceived(string sender, string message)
     {
-        // ChatReceived는 TCP 수신 스레드에서 발생하므로 UI 스레드로 마샬링해야
-        // ObservableCollection 바인딩이 깨지지 않습니다.
         System.Windows.Application.Current?.Dispatcher.Invoke(() =>
         {
             var line = string.Equals(sender, "System", StringComparison.Ordinal)
                 ? ChatLine.System(message)
                 : ChatLine.User(sender, message, isSelf: false);
             ChatMessages.Insert(0, line);
+
+            // 채팅을 보낸 학생 이름을 UI 카드 목록에 실시간 반영
+            if (!string.Equals(sender, "System", StringComparison.Ordinal) &&
+                !string.Equals(sender, "Professor", StringComparison.Ordinal) &&
+                !string.Equals(sender, "교수자", StringComparison.Ordinal))
+            {
+                var existing = Participants.FirstOrDefault(p => p.Name == sender);
+                if (existing == null)
+                {
+                    var generic = Participants.FirstOrDefault(p => p.Name.StartsWith("학생 "));
+                    if (generic != null)
+                    {
+                        generic.Name = sender;
+                    }
+                    else if (Participants.Count < ParticipantCount)
+                    {
+                        Participants.Add(new ParticipantItem { Name = sender, IsExpanded = true });
+                    }
+                }
+            }
+
             SyncLogs();
         });
     }
@@ -656,21 +801,19 @@ public sealed class ServerViewModel : ObservableObject
         });
     }
 
-    /// <summary>
-    /// 저장소 인증서를 쓰면 앱을 다시 켜도 접속 코드가 같습니다. 저장소를 쓸 수 없으면 이번 실행에만 쓰는 인증서로 대체하며,
-    /// 이 경우 접속 코드는 실행할 때마다 바뀝니다.
-    /// </summary>
-    private X509Certificate2 LoadSecureCertificate()
+    private void SetAllExpanded(bool isExpanded)
     {
-        if (_certificateProvider is not null) return _certificateProvider();
-        try
+        foreach (var p in Participants)
         {
-            return ProfessorCertificateStore.LoadOrCreate();
+            p.IsExpanded = isExpanded;
         }
-        catch (Exception ex) when (ex is CryptographicException or UnauthorizedAccessException or PlatformNotSupportedException)
+    }
+
+    private void ToggleParticipant(ParticipantItem? item)
+    {
+        if (item != null)
         {
-            _logSink.Write($"[Secure] 인증서 저장소 사용 불가, 임시 인증서 사용: {ex.GetType().Name}");
-            return ProfessorCertificateStore.CreateEphemeral();
+            item.IsExpanded = !item.IsExpanded;
         }
     }
 

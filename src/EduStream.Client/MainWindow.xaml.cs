@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Windows;
 using EduStream.Client.ViewModels;
 
@@ -5,36 +6,35 @@ namespace EduStream.Client;
 
 public partial class MainWindow : Window
 {
-    private bool _shutdownComplete;
+    private readonly ClientViewModel _viewModel;
+
     public MainWindow()
     {
         InitializeComponent();
-        DataContext = new ClientViewModel();
-        if (DataContext is ClientViewModel vm)
-        {
-            vm.AttachRdpHost(RdpHost);
-            // 방 비밀번호는 참가를 시도할 때 한 번 읽고 바로 비운다.
-            vm.RoomPasswordProvider = () =>
-            {
-                var password = RoomPasswordBox.Password;
-                RoomPasswordBox.Clear();
-                return password;
-            };
-        }
-        Closing += async (_, e) =>
-        {
-            if (_shutdownComplete) return;
-            e.Cancel = true;
-            IsEnabled = false;
-            try { if (DataContext is ClientViewModel model) await model.ShutdownAsync(); }
-            finally { _shutdownComplete = true; Close(); }
-        };
+
+        _viewModel = new ClientViewModel();
+        _viewModel.PropertyChanged += OnViewModelChanged;
+        DataContext = _viewModel;
     }
 
-    private async void ConnectRdp_Click(object sender, RoutedEventArgs e)
+    private void OnViewModelChanged(object? sender, PropertyChangedEventArgs e)
     {
-        var password = RdpPassword.Password;
-        RdpPassword.Clear();
-        if (DataContext is ClientViewModel vm) await vm.ConnectRdpWithPasswordAsync(password);
+        if (e.PropertyName != nameof(ClientViewModel.IsConnected)) return;
+
+        Dispatcher.BeginInvoke(new Action(() =>
+        {
+            if (WindowState != WindowState.Normal) return;
+
+            bool connected = _viewModel.IsConnected;
+
+            MinWidth = connected ? 960 : 480;
+            MinHeight = connected ? 700 : 600;
+            Width = connected ? 1360 : 520;
+            Height = connected ? 820 : 740;
+
+            var area = SystemParameters.WorkArea;
+            Left = area.Left + (area.Width - Width) / 2;
+            Top = area.Top + (area.Height - Height) / 2;
+        }));
     }
 }

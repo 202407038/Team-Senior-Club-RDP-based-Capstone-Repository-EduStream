@@ -135,20 +135,21 @@
     </Style>
 
     <DataTemplate x:Key="ChatBubbleTemplate" DataType="{x:Type models:ChatLine}">
-        <Border Margin="0,2"
-                Padding="10,8"
-                CornerRadius="10"
-                MaxWidth="320"
-                HorizontalAlignment="Left">
+        <Border Margin="0,4"
+            Padding="10,8"
+            CornerRadius="10"
+            MaxWidth="320">
             <Border.Style>
                 <Style TargetType="Border">
                     <Setter Property="Background" Value="#2A2A2A" />
                     <Setter Property="HorizontalAlignment" Value="Left" />
                     <Style.Triggers>
+                        <!-- 시스템 메시지 (중앙 정렬) -->
                         <DataTrigger Binding="{Binding IsSystem}" Value="True">
                             <Setter Property="Background" Value="#1E2A28" />
-                            <Setter Property="HorizontalAlignment" Value="Stretch" />
+                            <Setter Property="HorizontalAlignment" Value="Center" />
                         </DataTrigger>
+                        <!-- 본인 메시지 (우측 정렬, 카카오톡 스타일) -->
                         <DataTrigger Binding="{Binding IsSelf}" Value="True">
                             <Setter Property="Background" Value="#2D2540" />
                             <Setter Property="HorizontalAlignment" Value="Right" />
@@ -157,26 +158,36 @@
                 </Style>
             </Border.Style>
             <StackPanel>
+                <!-- 보낸 사람 이름 -->
                 <TextBlock FontSize="11"
-                           FontWeight="SemiBold"
-                           Foreground="{StaticResource BrushAccentTeal}">
+                       FontWeight="SemiBold">
                     <TextBlock.Style>
                         <Style TargetType="TextBlock">
+                            <!-- 기본 학생 색상 (민트계열) -->
                             <Setter Property="Foreground" Value="{StaticResource BrushAccentTeal}" />
                             <Style.Triggers>
                                 <DataTrigger Binding="{Binding IsSystem}" Value="True">
                                     <Setter Property="Foreground" Value="{StaticResource BrushTextMuted}" />
                                 </DataTrigger>
+                                <!-- 교수자 메시지 전용 색상 (포인트 보라/황금색) -->
+                                <DataTrigger Binding="{Binding Sender}" Value="교수자">
+                                    <Setter Property="Foreground" Value="#FFA726" />
+                                </DataTrigger>
+                                <DataTrigger Binding="{Binding Sender}" Value="Professor">
+                                    <Setter Property="Foreground" Value="#FFA726" />
+                                </DataTrigger>
                             </Style.Triggers>
                         </Style>
                     </TextBlock.Style>
-                    <Run Text="{Binding Sender, Mode=OneWay}" />
+                <Run Text="{Binding Sender, Mode=OneWay}" />
                 </TextBlock>
+
+                <!-- 본문 메시지 -->
                 <TextBlock Margin="0,4,0,0"
-                           Text="{Binding Message}"
-                           TextWrapping="Wrap"
-                           Foreground="#E8E8E8"
-                           FontSize="13" />
+                       Text="{Binding Message}"
+                       TextWrapping="Wrap"
+                       Foreground="#E8E8E8"
+                       FontSize="13" />
             </StackPanel>
         </Border>
     </DataTemplate>
@@ -238,13 +249,9 @@
                             <Setter TargetName="Root" Property="Background" Value="{StaticResource BrushAccentPurple}" />
                             <Setter Property="Foreground" Value="{StaticResource BrushBgPrimary}" />
                         </Trigger>
-                        <MultiTrigger>
-                            <MultiTrigger.Conditions>
-                                <Condition Property="IsMouseOver" Value="True" />
-                                <Condition Property="IsSelected" Value="False" />
-                            </MultiTrigger.Conditions>
+                        <Trigger Property="IsMouseOver" Value="True">
                             <Setter TargetName="Root" Property="Background" Value="#303030" />
-                        </MultiTrigger>
+                        </Trigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>
             </Setter.Value>

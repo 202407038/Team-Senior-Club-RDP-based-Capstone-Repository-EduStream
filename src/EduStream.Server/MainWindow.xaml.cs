@@ -1,6 +1,8 @@
+using System.Collections.Specialized;
 using System.Windows;
-using MessageBox = System.Windows.MessageBox;
-using Clipboard = System.Windows.Clipboard;
+using System.Windows.Controls;
+using System.Windows.Media;
+using System.Windows.Threading;
 using EduStream.Server.ViewModels;
 
 namespace EduStream.Server;
@@ -12,16 +14,42 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
-        _viewModel = new ServerViewModel();
-        // 방 비밀번호는 화면 공유로 노출되지 않게 PasswordBox로 받고, 세션을 열 때 한 번 읽은 뒤 비운다.
-        _viewModel.RoomPasswordProvider = () =>
-        {
-            var password = RoomPasswordBox.Password;
-            RoomPasswordBox.Clear();
-            return password;
-        };
+
+        _viewModel = DataContext as ServerViewModel ?? new ServerViewModel();
         DataContext = _viewModel;
-        Closing += OnClosing;
+
+        // ChatMessages�� �� �޽����� �߰��� �� WPF�� ���̾ƿ��� �� �׸� �� �� �Ʒ��� ��ũ��
+        ((INotifyCollectionChanged)_viewModel.ChatMessages).CollectionChanged += (s, e) =>
+        {
+            if (e.Action == NotifyCollectionChangedAction.Add && ChatListBox.Items.Count > 0)
+            {
+                // WPF UI �������� �Ϸ�� ����(DispatcherPriority.Background) ��ũ�� ����
+                Dispatcher.BeginInvoke(DispatcherPriority.Background, new Action(() =>
+                {
+                    // 1. ListBox ������ ������ ��ũ��
+                    var lastItem = ChatListBox.Items[ChatListBox.Items.Count - 1];
+                    ChatListBox.ScrollIntoView(lastItem);
+
+                    // 2. ���� ScrollViewer�� ã�� ������ �� �Ʒ� �ٴ����� ��ũ��
+                    var scrollViewer = GetScrollViewer(ChatListBox);
+                    scrollViewer?.ScrollToBottom();
+                }));
+            }
+        };
+    }
+
+    // ListBox ������ ScrollViewer ��Ҹ� ã�� ����� �޼���
+    private static ScrollViewer? GetScrollViewer(DependencyObject depObj)
+    {
+        if (depObj is ScrollViewer sv) return sv;
+
+        for (int i = 0; i < VisualTreeHelper.GetChildrenCount(depObj); i++)
+        {
+            var child = VisualTreeHelper.GetChild(depObj, i);
+            var result = GetScrollViewer(child);
+            if (result != null) return result;
+        }
+        return null;
     }
 
     private bool _closed;

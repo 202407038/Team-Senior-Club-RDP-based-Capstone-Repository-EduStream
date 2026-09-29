@@ -15,11 +15,6 @@ using EduStream.Core.Serialization;
 using EduStream.Core.Utils;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
-using Application = System.Windows.Application;
-using Color = System.Windows.Media.Color;
-using Point = System.Windows.Point;
-using Brushes = System.Windows.Media.Brushes;
-using FlowDirection = System.Windows.FlowDirection;
 
 
 namespace EduStream.Client.ViewModels;
@@ -30,6 +25,7 @@ namespace EduStream.Client.ViewModels;
 /// </summary>
 public sealed class ClientViewModel : ObservableObject
 {
+    private bool _allowRemoteControl = true;
     private readonly InMemoryLogSink _logSink = new();
     private readonly SessionClient _sessionClient;
     private readonly ScreenRenderer _screenRenderer;
@@ -119,24 +115,16 @@ public sealed class ClientViewModel : ObservableObject
         // 참가 승인 대기·자동 재연결 중에도 사용자가 중단할 수 있어야 한다.
         DisconnectCommand = new RelayCommand(() => _ = DisconnectAsync(), () => IsConnected || IsConnecting);
         SendChatCommand = new RelayCommand(() => _ = SendChatAsync(), () => IsConnected && !string.IsNullOrWhiteSpace(ChatInput));
+        StopRemoteControlCommand = new RelayCommand(() => AllowRemoteControl = false, () => AllowRemoteControl);
         SimulateScreenRenderCommand = new RelayCommand(() => _ = SimulateScreenRenderAsync());
         SimulateFileReceiveCommand = new RelayCommand(() => _ = SimulateFileReceiveAsync());
-        ReconnectRdpCommand = new RelayCommand(() => _ = SendRdpInvitationRequestAsync());
-        ToggleControlPermissionCommand = new RelayCommand(
-            () => _ = ChangePermissionsAsync(_studentStatus.AllowViewing, !_studentStatus.AllowControl),
-            () => _statusClient is not null && _studentStatus.AllowViewing);
-        ToggleViewingPermissionCommand = new RelayCommand(
-            () => _ = ChangePermissionsAsync(!_studentStatus.AllowViewing, _studentStatus.AllowControl),
-            () => _statusClient is not null);
-        StopControlNowCommand = new RelayCommand(
-            () => _ = ChangePermissionsAsync(_studentStatus.AllowViewing, false),
-            () => _statusClient is not null && _studentStatus.AllowControl);
-        _freshnessTimer = new System.Windows.Threading.DispatcherTimer
+
+        var freshnessTimer = new System.Windows.Threading.DispatcherTimer
         {
             Interval = TimeSpan.FromMilliseconds(500)
         };
-        _freshnessTimer.Tick += (_, _) => UpdateFrameFreshness();
-        _freshnessTimer.Start();
+        freshnessTimer.Tick += (_, _) => UpdateFrameFreshness();
+        freshnessTimer.Start();
 
         SyncLogs();
     }
@@ -152,11 +140,6 @@ public sealed class ClientViewModel : ObservableObject
         FrameFreshness = elapsed.TotalSeconds < 1.5
             ? "방금 갱신됨"
             : $"{elapsed.TotalSeconds:F1}초 전 갱신";
-    }
-
-    public void AttachRdpHost(System.Windows.Forms.Integration.WindowsFormsHost host)
-    {
-        if (_rdpViewerService is RdpViewerService viewer) viewer.AttachTo(host);
     }
     public string FrameFreshness
     {
@@ -268,6 +251,19 @@ public sealed class ClientViewModel : ObservableObject
         }
     }
 
+    public bool AllowRemoteControl
+    {
+        get => _allowRemoteControl;
+        set
+        {
+            if (SetProperty(ref _allowRemoteControl, value))
+            {
+                StopRemoteControlCommand.RaiseCanExecuteChanged();
+            }
+        }
+    }
+
+    public RelayCommand StopRemoteControlCommand { get; }
     public bool IsConnected
     {
         get => _isConnected;
@@ -346,36 +342,11 @@ public sealed class ClientViewModel : ObservableObject
 
     public RelayCommand SendChatCommand { get; }
 
+
     public RelayCommand SimulateScreenRenderCommand { get; }
 
     public RelayCommand SimulateFileReceiveCommand { get; }
 
-    public RelayCommand ReconnectRdpCommand { get; }
-
-    /// <summary>교수자 원격 제어 허용 켜기/끄기(U07). 화면 표시는 교수자가 반영한 상태로만 바뀝니다.</summary>
-    public RelayCommand ToggleControlPermissionCommand { get; }
-
-    /// <summary>교수자의 내 화면 보기 허용 켜기/끄기. 보기를 끄면 제어 허용도 함께 꺼집니다.</summary>
-    public RelayCommand ToggleViewingPermissionCommand { get; }
-
-    /// <summary>진행 중인 원격 제어를 즉시 끝내고 제어 허용을 끕니다.</summary>
-    public RelayCommand StopControlNowCommand { get; }
-
-    public string PermissionSummary =>
-        $"내 화면 보기 허용: {(_studentStatus.AllowViewing ? "ON" : "OFF")} · 원격 제어 허용: {(_studentStatus.AllowControl ? "ON" : "OFF")}";
-
-    public string ControlStatusText => _studentStatus.ControlPhase switch
-    {
-        ControlPhase.Active => "교수자가 내 PC를 제어하고 있습니다.",
-        ControlPhase.Requested => "교수자가 원격 제어를 시작하는 중입니다.",
-        _ => "원격 제어 중이 아닙니다."
-    };
-
-    public bool IsUnderControl => _studentStatus.UnderControl;
-
-    public string ControlToggleLabel => _studentStatus.AllowControl ? "원격 제어 허용 끄기" : "원격 제어 허용 켜기";
-
-    public string ViewingToggleLabel => _studentStatus.AllowViewing ? "내 화면 보기 허용 끄기" : "내 화면 보기 허용 켜기";
     private async Task JoinSessionAsync()
     {
         if (string.IsNullOrWhiteSpace(DisplayName))
@@ -463,7 +434,6 @@ public sealed class ClientViewModel : ObservableObject
 
     private async Task SimulateScreenRenderAsync()
     {
-
         // 즉석에서 400x300 단색 PNG 생성
         var visual = new DrawingVisual();
         using (var dc = visual.RenderOpen())
@@ -489,6 +459,7 @@ public sealed class ClientViewModel : ObservableObject
         using var ms = new MemoryStream();
         encoder.Save(ms);
         var pngBytes = ms.ToArray();
+
         var fakePacket = new ScreenPacket
         {
             FrameIndex = new Random().Next(1, 9999),
@@ -937,7 +908,6 @@ public sealed class ClientViewModel : ObservableObject
 
     private async Task HandleScreenAsync(ScreenPacket packet)
     {
-        var frameGeneration = Volatile.Read(ref _frameGeneration);
         string renderStatus;
         try
         {
@@ -957,8 +927,8 @@ public sealed class ClientViewModel : ObservableObject
             return;
         }
 
+   
         BitmapImage? bitmap = null;
-        string? decodeError = null;
         try
         {
             bitmap = await Task.Run(() =>
@@ -975,35 +945,23 @@ public sealed class ClientViewModel : ObservableObject
         }
         catch (Exception ex)
         {
-            decodeError = ex.Message;
             _logSink.Write($"프레임 디코딩 실패: {ex.Message}");
         }
 
         RunOnUiThread(() =>
         {
-            if (frameGeneration != Volatile.Read(ref _frameGeneration) || _disposing) return;
-            // 프레임 신선도/누락 감지는 디코딩 성공 여부와 무관하게 기록 (패킷 자체는 도착했으므로)
-            _lastFrameReceivedAt = DateTimeOffset.UtcNow;
-            if (_lastFrameIndex.HasValue && packet.FrameIndex > _lastFrameIndex.Value + 1)
+            if (bitmap is not null)
             {
-                var missedCount = packet.FrameIndex - _lastFrameIndex.Value - 1;
-                _logSink.Write($"[Screen] 프레임 누락 감지: #{_lastFrameIndex.Value} 이후 {missedCount}개 프레임 누락, 현재 #{packet.FrameIndex}");
+                DisplaySource = bitmap;
+                _lastFrameReceivedAt = DateTimeOffset.UtcNow;
+                if (_lastFrameIndex.HasValue && packet.FrameIndex > _lastFrameIndex.Value + 1)
+                {
+                    var missedCount = packet.FrameIndex - _lastFrameIndex.Value - 1;
+                    _logSink.Write($"[Screen] 프레임 누락 감지: #{_lastFrameIndex.Value} 이후 {missedCount}개 프레임 누락, 현재 #{packet.FrameIndex}");
+                }
+                _lastFrameIndex = packet.FrameIndex;
+                HasRemoteFrame = true;
             }
-            _lastFrameIndex = packet.FrameIndex;
-
-            if (decodeError is not null)
-            {
-                RenderStatus = $"프레임 #{packet.FrameIndex} 디코딩 실패: {decodeError}";
-                ScreenDetail = $"{packet.Width}x{packet.Height} / {packet.Encoding} / {packet.ContentLength} bytes — 디코딩 실패";
-                LastErrorMessage = $"SCREEN_DECODE_FAILED: {decodeError}";
-                UpdateStatus($"화면 프레임 디코딩 실패 (#{packet.FrameIndex})", StatusPriority.Error, isError: true);
-                _logSink.Write($"[Screen] 프레임 디코딩 실패: #{packet.FrameIndex}, {decodeError}");
-                SyncLogs();
-                return;
-            }
-
-            DisplaySource = bitmap;
-            HasRemoteFrame = true;
 
             RenderStatus = renderStatus;
             LastServerMessage = "화면 프레임을 수신했습니다.";
