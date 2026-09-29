@@ -348,6 +348,18 @@ public sealed class MockNativeInputPipeline : INativeInputPipeline
         return Task.CompletedTask;
     }
 
+    public Task InjectMouseMoveAsync(string targetId, int x, int y, CancellationToken cancellationToken = default)
+        => Task.CompletedTask;
+
+    public Task InjectMouseClickAsync(string targetId, MouseButton button, bool isPressed, CancellationToken cancellationToken = default)
+        => Task.CompletedTask;
+
+    public Task InjectMouseWheelAsync(string targetId, int delta, CancellationToken cancellationToken = default)
+        => Task.CompletedTask;
+
+    public Task InjectKeyboardInputAsync(string targetId, int keyCode, bool isPressed, CancellationToken cancellationToken = default)
+        => Task.CompletedTask;
+
     public Task BlockInputAsync(string targetId, CancellationToken cancellationToken = default)
     {
         LastBlockCalled = true;
@@ -376,6 +388,18 @@ public sealed class FailingNativeInputPipeline : INativeInputPipeline
     {
         return Task.FromException(new InputPipelineException("의도적인 네이티브 입력 허용 실패"));
     }
+
+    public Task InjectMouseMoveAsync(string targetId, int x, int y, CancellationToken cancellationToken = default)
+        => Task.FromException(new InputPipelineException("의도적인 네이티브 입력 허용 실패"));
+
+    public Task InjectMouseClickAsync(string targetId, MouseButton button, bool isPressed, CancellationToken cancellationToken = default)
+        => Task.FromException(new InputPipelineException("의도적인 네이티브 입력 허용 실패"));
+
+    public Task InjectMouseWheelAsync(string targetId, int delta, CancellationToken cancellationToken = default)
+        => Task.FromException(new InputPipelineException("의도적인 네이티브 입력 허용 실패"));
+
+    public Task InjectKeyboardInputAsync(string targetId, int keyCode, bool isPressed, CancellationToken cancellationToken = default)
+        => Task.FromException(new InputPipelineException("의도적인 네이티브 입력 허용 실패"));
 
     public Task BlockInputAsync(string targetId, CancellationToken cancellationToken = default)
     {

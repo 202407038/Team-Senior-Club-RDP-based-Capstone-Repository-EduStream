@@ -21,28 +21,24 @@ public interface INativeInputPipeline
     Task InjectInputAsync(string targetId, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// 마우스 이동 입력 주입 (기본 무해 동작)
+    /// 마우스 이동 입력 주입
     /// </summary>
-    Task InjectMouseMoveAsync(string targetId, int x, int y, CancellationToken cancellationToken = default)
-        => Task.CompletedTask;
+    Task InjectMouseMoveAsync(string targetId, int x, int y, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// 마우스 클릭 입력 주입 (기본 무해 동작)
+    /// 마우스 클릭 입력 주입
     /// </summary>
-    Task InjectMouseClickAsync(string targetId, MouseButton button, bool isPressed, CancellationToken cancellationToken = default)
-        => Task.CompletedTask;
+    Task InjectMouseClickAsync(string targetId, MouseButton button, bool isPressed, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// 마우스 휠 입력 주입 (기본 무해 동작)
+    /// 마우스 휠 입력 주입
     /// </summary>
-    Task InjectMouseWheelAsync(string targetId, int delta, CancellationToken cancellationToken = default)
-        => Task.CompletedTask;
+    Task InjectMouseWheelAsync(string targetId, int delta, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// 키보드 입력 주입 (기본 무해 동작)
+    /// 키보드 입력 주입
     /// </summary>
-    Task InjectKeyboardInputAsync(string targetId, int keyCode, bool isPressed, CancellationToken cancellationToken = default)
-        => Task.CompletedTask;
+    Task InjectKeyboardInputAsync(string targetId, int keyCode, bool isPressed, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// 대상 PC 입력 차단 (Block) 적용
