@@ -55,6 +55,9 @@ public sealed class ClientViewModel : ObservableObject
     private bool _permissionNoticeShown;
     private string _connectionCode = string.Empty;
     private RdpInvitationPacket? _activeRdpInvitation;
+    // 초대(TCP)와 비밀번호(보호 채널)는 도착 순서가 정해져 있지 않아, 둘이 같은 초대로 짝지어질 때까지 보관한다.
+    private readonly object _rdpAutoConnectLock = new();
+    private RdpInvitationSecretNotice? _pendingRdpSecret;
     private Guid _rdpSessionId;
     private string _rdpParticipant = string.Empty;
     private bool _isRdpActive;
@@ -703,11 +706,57 @@ public sealed class ClientViewModel : ObservableObject
             RdpInvitationContract.Validate(invitation, _rdpSessionId, _rdpParticipant,
                 _currentRdpConnectionId, DateTimeOffset.UtcNow);
             if (_disposing || !IsConnected) return;
-            _activeRdpInvitation = invitation;
-            RunOnUiThread(() => RdpStatusText = "초대 수신: 설정 탭에서 별도로 전달받은 비밀번호를 입력해 주세요.");
+            lock (_rdpAutoConnectLock) _activeRdpInvitation = invitation;
+            // 보호 채널이 있으면 비밀번호가 그쪽으로 오므로 입력을 요구하지 않는다.
+            RunOnUiThread(() => RdpStatusText = _secureChannel is not null
+                ? "초대 수신: 교수자 화면 연결 정보를 확인하는 중입니다."
+                : "초대 수신: 설정 탭에서 별도로 전달받은 비밀번호를 입력해 주세요.");
+            TryStartRdpAutoConnect();
         }
         catch (ArgumentException) { _logSink.Write("[RDP] 유효하지 않거나 이전 연결의 초대 무시"); }
         await Task.CompletedTask;
+    }
+
+    /// <summary>보호 채널로 받은 초대 비밀번호입니다. 지금 기다리는 초대 요청(연결 ID)에 대한 것만 보관합니다.</summary>
+    private void OnRdpInvitationSecret(RdpInvitationSecretNotice secret)
+    {
+        lock (_rdpAutoConnectLock)
+        {
+            if (secret.SessionId != _rdpSessionId || secret.ConnectionId != _currentRdpConnectionId)
+            {
+                _logSink.Write("[RDP] 현재 초대 요청과 맞지 않는 초대 비밀번호 무시");
+                return;
+            }
+            _pendingRdpSecret = secret;
+        }
+        TryStartRdpAutoConnect();
+    }
+
+    /// <summary>
+    /// 초대와 비밀번호가 같은 초대(InvitationId·ConnectionId)로 짝지어지면 한 번만 자동 연결합니다.
+    /// 참가 직후·공유 재시작·재참가 모두 초대 재요청을 거치므로 이 경로로 화면이 자동 복귀합니다.
+    /// </summary>
+    private void TryStartRdpAutoConnect()
+    {
+        RdpInvitationSecretNotice secret;
+        lock (_rdpAutoConnectLock)
+        {
+            if (_activeRdpInvitation is not { } invitation || _pendingRdpSecret is not { } pending ||
+                pending.InvitationId != invitation.InvitationId || pending.ConnectionId != invitation.ConnectionId)
+                return;
+            secret = pending;
+            _pendingRdpSecret = null;
+        }
+
+        if (secret.ExpiresAt <= DateTimeOffset.UtcNow)
+        {
+            _logSink.Write("[RDP] 만료된 초대 비밀번호로 자동 연결하지 않음");
+            RunOnUiThread(() => RdpStatusText = "RDP 초대가 만료되었습니다. 다시 요청해 주세요.");
+            return;
+        }
+        _logSink.Write("[RDP] 보호 채널로 받은 초대로 자동 연결 시작");
+        RunOnUiThread(() => RdpStatusText = "교수자 화면에 자동으로 연결하는 중입니다.");
+        _ = ConnectRdpWithPasswordAsync(secret.Password);
     }
 
     public async Task ConnectRdpWithPasswordAsync(string password)
@@ -1202,6 +1251,7 @@ public sealed class ClientViewModel : ObservableObject
 
     private async Task ResetRdpAsync()
     {
+        lock (_rdpAutoConnectLock) _pendingRdpSecret = null;
         _currentRdpConnectionId = Guid.Empty;
         _activeRdpInvitation = null;
         _rdpSessionId = Guid.Empty;
@@ -1255,6 +1305,11 @@ public sealed class ClientViewModel : ObservableObject
                     CollaborationMessageCodec.Decode<SessionEndedNotice>(frame, out _);
                     _sessionEnded = true;
                     _reconnectToken = null;
+                }
+                else if (kind == CollaborationMessageKind.RdpInvitationSecret)
+                {
+                    var secret = CollaborationMessageCodec.Decode<RdpInvitationSecretNotice>(frame, out _);
+                    if (secret.SessionId == secure.SessionId) OnRdpInvitationSecret(secret);
                 }
                 else if (kind is CollaborationMessageKind.FileCatalog or CollaborationMessageKind.FileChunk
                          or CollaborationMessageKind.Failure)

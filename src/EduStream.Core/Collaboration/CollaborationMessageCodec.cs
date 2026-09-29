@@ -9,7 +9,8 @@ public enum CollaborationMessageKind
     FileCancel = 5, FileStored = 6, Failure = 7,
     RoomAuthRequest = 8, RoomAuthResult = 9,
     ControlStatus = 10, PermissionChange = 11,
-    ReconnectGrant = 12, SessionEnded = 13
+    ReconnectGrant = 12, SessionEnded = 13,
+    RdpInvitationSecret = 14
 }
 public sealed record FileCancelRequest(Guid RequestId, Guid SessionId);
 public sealed record FileStoredNotice(Guid RequestId, Guid FileId, long Length, string Sha256);
@@ -80,6 +81,7 @@ public static class CollaborationMessageCodec
         if (type == typeof(PermissionChangeRequest)) return CollaborationMessageKind.PermissionChange;
         if (type == typeof(ReconnectGrantNotice)) return CollaborationMessageKind.ReconnectGrant;
         if (type == typeof(SessionEndedNotice)) return CollaborationMessageKind.SessionEnded;
+        if (type == typeof(RdpInvitationSecretNotice)) return CollaborationMessageKind.RdpInvitationSecret;
         throw new CollaborationException(CollaborationError.UnsupportedCapability);
     }
 
@@ -135,6 +137,7 @@ public static class CollaborationMessageCodec
             case PermissionChangeRequest change: StudentStatusRules.Validate(change); break;
             case ReconnectGrantNotice grant: ReconnectRules.Validate(grant); break;
             case SessionEndedNotice ended: ReconnectRules.Validate(ended); break;
+            case RdpInvitationSecretNotice secret: RdpInvitationSecretRules.Validate(secret); break;
             default: throw new CollaborationException(CollaborationError.UnsupportedCapability);
         }
     }
