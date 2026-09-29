@@ -121,6 +121,11 @@
             Margin="0,0,8,8"
             Content="선택 파일 전송"
             Command="{Binding SendSelectedFileCommand}" />
+
+                                <Button Style="{StaticResource GhostButton}"
+            Margin="0,0,8,8"
+            Content="강의 파일 목록에 등록"
+            Command="{Binding RegisterSelectedFileCommand}" />
                             </WrapPanel>
 
                             <Border Margin="0,14,0,0"
@@ -259,6 +264,21 @@
                                  Style="{StaticResource DarkListBox}"
                                  ItemsSource="{Binding SharedFiles}"
                                  ItemTemplate="{StaticResource FileLineTemplate}" />
+                        <TextBlock Style="{StaticResource FieldLabel}" Margin="0,12,0,6" Text="강의 파일 목록 (학생이 골라 받음)" />
+                        <ListBox Height="120"
+                                 Style="{StaticResource DarkListBox}"
+                                 ItemsSource="{Binding RegisteredFiles}">
+                            <ListBox.ItemTemplate>
+                                <DataTemplate>
+                                    <DockPanel Margin="0,4">
+                                        <Button DockPanel.Dock="Right" Style="{StaticResource GhostButton}" Padding="10,0"
+                                                Content="해제" Command="{Binding UnregisterCommand}" />
+                                        <TextBlock Text="{Binding DisplayText}" VerticalAlignment="Center"
+                                                   Foreground="#DDDDDD" TextTrimming="CharacterEllipsis" />
+                                    </DockPanel>
+                                </DataTemplate>
+                            </ListBox.ItemTemplate>
+                        </ListBox>
                     </StackPanel>
                 </Border>
 

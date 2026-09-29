@@ -4,6 +4,7 @@ using System.Text.Json;
 using System.Windows;
 using EduStream.Client.Services;
 using EduStream.Core.Collaboration;
+using EduStream.Core.FileSharing;
 using EduStream.Core.Common;
 using EduStream.Core.Factories;
 using EduStream.Core.Logging;
@@ -46,6 +47,7 @@ public sealed class ClientViewModel : ObservableObject
     private CancellationTokenSource? _reconnectCts;
     private volatile bool _userLeaving;
     private volatile bool _sessionEnded;
+    private SessionFileRequestClient? _fileClient;
     // 참가 요청을 보낸 뒤 서버의 참가 승인(SessionJoined)을 기다리는 시도. 승인·거부·끊김·시간 초과 중 먼저 온 결과로 끝난다.
     private enum JoinAckResult { Joined, Rejected, Disconnected, TimedOut }
     private TaskCompletionSource<JoinAckResult>? _pendingJoinAck;
@@ -329,6 +331,9 @@ public sealed class ClientViewModel : ObservableObject
     public ObservableCollection<ChatLine> ChatMessages { get; } = [];
 
     public ObservableCollection<string> DownloadedFiles { get; } = [];
+
+    /// <summary>교수자가 등록한 강의 파일 목록입니다. 항목의 다운로드 버튼으로 골라 받습니다(U08).</summary>
+    public ObservableCollection<SessionFileItem> SessionFiles { get; } = [];
 
     public RelayCommand JoinSessionCommand { get; }
 
@@ -1229,6 +1234,8 @@ public sealed class ClientViewModel : ObservableObject
     {
         var statusClient = new StudentStatusClient(secure.SessionId, secure.Connection, _logSink);
         statusClient.StatusChanged += status => RunOnUiThread(() => ApplyStudentStatus(status));
+        var fileClient = new SessionFileRequestClient(secure.SessionId, secure.Connection, new SessionFileDownloader(), _logSink);
+        fileClient.CatalogChanged += catalog => RunOnUiThread(() => ApplyFileCatalog(catalog));
         secure.FrameReceived += frame =>
         {
             try
@@ -1249,6 +1256,10 @@ public sealed class ClientViewModel : ObservableObject
                     _sessionEnded = true;
                     _reconnectToken = null;
                 }
+                else if (kind is CollaborationMessageKind.FileCatalog or CollaborationMessageKind.FileChunk
+                         or CollaborationMessageKind.Failure)
+                    // 청크는 저장이 따라올 때까지 기다려야 하므로 수신 루프에서 await한다.
+                    return fileClient.HandleFrameAsync(frame);
             }
             catch (CollaborationException ex)
             {
@@ -1257,6 +1268,7 @@ public sealed class ClientViewModel : ObservableObject
             return Task.CompletedTask;
         };
         _statusClient = statusClient;
+        _fileClient = fileClient;
         _permissionNoticeShown = false;
         RunOnUiThread(() => ApplyStudentStatus(StudentStatus.Initial));
     }
@@ -1264,7 +1276,57 @@ public sealed class ClientViewModel : ObservableObject
     private void DetachStudentStatus()
     {
         _statusClient = null;
-        RunOnUiThread(() => ApplyStudentStatus(StudentStatus.Initial));
+        // 진행 중인 다운로드는 임시 파일을 지우고 실패로 끝난다.
+        Interlocked.Exchange(ref _fileClient, null)?.ConnectionClosed();
+        RunOnUiThread(() =>
+        {
+            ApplyStudentStatus(StudentStatus.Initial);
+            SessionFiles.Clear();
+        });
+    }
+
+    /// <summary>목록이 바뀌어도 받는 중인 항목의 진행 표시는 유지하고, 사라진 파일만 내립니다.</summary>
+    private void ApplyFileCatalog(SessionFileCatalogSnapshot catalog)
+    {
+        var current = SessionFiles.ToDictionary(item => (item.File.FileId, item.File.Revision));
+        var next = catalog.Files.Select(file => (file.FileId, file.Revision)).ToHashSet();
+        foreach (var item in SessionFiles.Where(item => !next.Contains((item.File.FileId, item.File.Revision))).ToArray())
+            SessionFiles.Remove(item);
+        foreach (var file in catalog.Files)
+        {
+            if (!current.ContainsKey((file.FileId, file.Revision)))
+                SessionFiles.Add(new SessionFileItem(file, DownloadSessionFileAsync));
+        }
+    }
+
+    private async Task DownloadSessionFileAsync(SessionFileItem item)
+    {
+        var fileClient = _fileClient;
+        if (fileClient is null || item.IsDownloading) return;
+        item.IsDownloading = true;
+        item.Status = "받는 중 0%";
+        // UI 스레드에서 만든 Progress는 보고를 UI 스레드로 돌려준다.
+        var progress = new Progress<DownloadProgress>(report =>
+            item.Status = report.TotalBytes == 0 ? "받는 중" : $"받는 중 {report.ReceivedBytes * 100 / report.TotalBytes}%");
+        try
+        {
+            var receipt = await fileClient.DownloadAsync(item.File.FileId, progress);
+            item.Status = "저장됨 (다운로드 폴더)";
+            DownloadedFiles.Insert(0, Path.GetFileName(receipt.LocalPath));
+            DownloadStatus = $"{item.File.FileName}을(를) 다운로드 폴더에 저장했습니다.";
+        }
+        catch (Exception ex)
+        {
+            var failure = CollaborationErrorCatalog.FromException(ex);
+            item.Status = "실패: " + failure.UserMessage;
+            DownloadStatus = $"{item.File.FileName} 다운로드 실패: {failure.UserMessage}";
+            _logSink.Write($"[FileRoute] 다운로드 실패: {failure.Code}");
+        }
+        finally
+        {
+            item.IsDownloading = false;
+            SyncLogs();
+        }
     }
 
     private void ApplyStudentStatus(StudentStatus status)
