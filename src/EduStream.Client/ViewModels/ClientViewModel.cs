@@ -47,7 +47,13 @@ public sealed class ClientViewModel : ObservableObject
     private CancellationTokenSource? _reconnectCts;
     private volatile bool _userLeaving;
     private volatile bool _sessionEnded;
+<<<<<<< HEAD
     private SessionFileRequestClient? _fileClient;
+=======
+    // 참가 요청을 보낸 뒤 서버의 참가 승인(SessionJoined)을 기다리는 시도. 승인·거부·끊김·시간 초과 중 먼저 온 결과로 끝난다.
+    private enum JoinAckResult { Joined, Rejected, Disconnected, TimedOut }
+    private TaskCompletionSource<JoinAckResult>? _pendingJoinAck;
+>>>>>>> origin/feature/secure-session-channel
     private StudentStatus _studentStatus = StudentStatus.Initial;
     private bool _permissionNoticeShown;
     private string _connectionCode = string.Empty;
@@ -108,7 +114,8 @@ public sealed class ClientViewModel : ObservableObject
         _tcpClient.Disconnected += OnDisconnectedAsync;
         _rdpViewerService.StatusChanged += OnRdpStatusChanged;
         JoinSessionCommand = new RelayCommand(() => _ = JoinSessionAsync(), () => !IsConnected && !IsConnecting);
-        DisconnectCommand = new RelayCommand(() => _ = DisconnectAsync(), () => IsConnected);
+        // 참가 승인 대기·자동 재연결 중에도 사용자가 중단할 수 있어야 한다.
+        DisconnectCommand = new RelayCommand(() => _ = DisconnectAsync(), () => IsConnected || IsConnecting);
         SendChatCommand = new RelayCommand(() => _ = SendChatAsync(), () => IsConnected && !string.IsNullOrWhiteSpace(ChatInput));
         SimulateScreenRenderCommand = new RelayCommand(() => _ = SimulateScreenRenderAsync());
         SimulateFileReceiveCommand = new RelayCommand(() => _ = SimulateFileReceiveAsync());
@@ -172,6 +179,9 @@ public sealed class ClientViewModel : ObservableObject
         get => _connectionCode;
         set => SetProperty(ref _connectionCode, value);
     }
+
+    /// <summary>참가 요청 뒤 서버의 참가 승인을 기다리는 최대 시간입니다. 넘기면 참가 실패로 정리합니다.</summary>
+    public TimeSpan JoinAckTimeout { get; set; } = TimeSpan.FromSeconds(10);
 
     /// <summary>
     /// 방 비밀번호 입력칸을 읽고 비우는 함수입니다. 비밀번호를 ViewModel 속성에 보관하지 않기 위해 View가 제공합니다.
@@ -300,6 +310,7 @@ public sealed class ClientViewModel : ObservableObject
             if (SetProperty(ref _isConnecting, value))
             {
                 JoinSessionCommand.RaiseCanExecuteChanged();
+                DisconnectCommand.RaiseCanExecuteChanged();
             }
         }
     }
@@ -415,25 +426,34 @@ public sealed class ClientViewModel : ObservableObject
                 ApplyJoinError(_sessionClient.CreateJoinError(HostAddress, Port, DescribeSecureJoinFailure(ex.Failure)));
                 return;
             }
+            if (_userLeaving || _disposing)
+            {
+                await secure.DisposeAsync();
+                return;
+            }
             await ReplaceSecureChannelAsync(secure);
             // 교수자는 TCP 참가 직후 보호 채널로 상태를 보내므로, 참가 요청 전에 수신 처리기를 붙인다.
             AttachStudentStatus(secure);
 
-            // TCP 연결 (만약 서버가 꺼져있으면 여기서 catch 블록으로 튕깁니다)
-            await _tcpClient.ConnectAsync(HostAddress, Port);
-
-            // Join 패킷 전송
-            var joinRequest = _sessionClient.CreateJoinRequest(HostAddress, Port, DisplayName, secure.JoinTicket);
-            await _tcpClient.SendAsync(joinRequest);
-
-            _logSink.Write($"세션 참가 요청 전송: {DisplayName} -> {HostAddress}:{Port}");
-            SyncLogs();
-
             StatusMessage = "서버의 세션 참여 승인을 대기하고 있습니다.";
+            // TCP 연결 (만약 서버가 꺼져있으면 여기서 catch 블록으로 튕깁니다)
+            var result = await SendJoinAndAwaitAckAsync(HostAddress, Port, DisplayName, secure.JoinTicket, CancellationToken.None);
+            SyncLogs();
+            if (result == JoinAckResult.Joined || _userLeaving || _disposing) return;
+
+            // 승인 전에 끝났다. 거부 사유는 서버 오류 처리에서 이미 안내했으므로 연결만 정리한다.
+            await AbandonJoinAsync();
+            if (result != JoinAckResult.Rejected)
+            {
+                ApplyJoinError(_sessionClient.CreateJoinError(HostAddress, Port, result == JoinAckResult.TimedOut
+                    ? "서버가 참가 요청에 응답하지 않습니다. 잠시 뒤 다시 참가해 주세요."
+                    : "참가 승인 전에 서버와의 연결이 끊어졌습니다. 다시 참가해 주세요."));
+            }
         }
         catch (Exception)
         {
-            await ReplaceSecureChannelAsync(null);
+            await AbandonJoinAsync();
+            if (_userLeaving || _disposing) return;
             // 💡 서버가 닫혀있을 때 명확하게 에러 메시지 주입
             ApplyJoinError(_sessionClient.CreateJoinError(HostAddress, Port, "서버를 찾을 수 없습니다. 호스트 주소와 포트 혹은 서버 구동 상태를 확인해 주세요."));
         }
@@ -732,6 +752,14 @@ public sealed class ClientViewModel : ObservableObject
     }
     private async Task HandleAckAsync(AckPacket packet)
     {
+        // 참가 승인은 지금 기다리는 참가 요청에 대한 것만 받는다. 시간 초과·취소로 포기한 뒤 늦게 온 승인은 무시한다.
+        if (packet.AckCode == AckCodes.SessionJoined &&
+            !(Volatile.Read(ref _pendingJoinAck)?.TrySetResult(JoinAckResult.Joined) ?? false))
+        {
+            _logSink.Write("대기 중이 아닌 참가 승인 무시");
+            return;
+        }
+
         RunOnUiThread(() =>
         {
             LastServerMessage = packet.Message;
@@ -802,6 +830,7 @@ public sealed class ClientViewModel : ObservableObject
 
         if (!IsConnected)
         {
+            Volatile.Read(ref _pendingJoinAck)?.TrySetResult(JoinAckResult.Rejected);
             await _tcpClient.DisconnectAsync();
             await _sessionClient.DisconnectAsync(packet.Message);
         }
@@ -1002,6 +1031,7 @@ public sealed class ClientViewModel : ObservableObject
 
     private async Task OnDisconnectedAsync(string reason)
     {
+        Volatile.Read(ref _pendingJoinAck)?.TrySetResult(JoinAckResult.Disconnected);
         Interlocked.Increment(ref _frameGeneration);
         await ResetRdpAsync();
         await ReplaceSecureChannelAsync(null);
@@ -1049,10 +1079,16 @@ public sealed class ClientViewModel : ObservableObject
         });
 
         bool rejoined;
+        var currentToken = token;
         try
         {
             rejoined = await ReconnectScheduler.RunAsync(
-                (attempt, cancellationToken) => TryReconnectOnceAsync(target, token, attempt, cancellationToken),
+                async (attempt, cancellationToken) =>
+                {
+                    var (outcome, nextToken) = await TryReconnectOnceAsync(target, currentToken, attempt, cancellationToken);
+                    if (nextToken is not null) currentToken = nextToken;
+                    return outcome;
+                },
                 _reconnectWindow, cancellationToken: cts.Token);
         }
         catch (OperationCanceledException)
@@ -1064,7 +1100,7 @@ public sealed class ClientViewModel : ObservableObject
             Interlocked.CompareExchange(ref _reconnectCts, null, cts);
         }
 
-        if (!rejoined)
+        if (!rejoined && !_userLeaving && !_disposing)
         {
             RunOnUiThread(() =>
             {
@@ -1076,10 +1112,11 @@ public sealed class ClientViewModel : ObservableObject
         }
     }
 
-    private async Task<ReconnectAttemptOutcome> TryReconnectOnceAsync(JoinTarget target, string token, int attempt,
-        CancellationToken cancellationToken)
+    /// <returns>시도 결과와, 서버가 이번 시도 중 새로 발급한 토큰(다음 시도에 쓸 것)입니다.</returns>
+    private async Task<(ReconnectAttemptOutcome Outcome, string? NextToken)> TryReconnectOnceAsync(JoinTarget target,
+        string token, int attempt, CancellationToken cancellationToken)
     {
-        if (_userLeaving || _disposing || _sessionEnded) return ReconnectAttemptOutcome.GiveUp;
+        if (_userLeaving || _disposing || _sessionEnded) return (ReconnectAttemptOutcome.GiveUp, null);
         RunOnUiThread(() => StatusMessage = $"연결이 끊겨 다시 연결하는 중입니다... ({attempt}번째 시도)");
 
         SecureSessionChannel secure;
@@ -1090,30 +1127,78 @@ public sealed class ClientViewModel : ObservableObject
         }
         catch (SecureJoinException ex) when (ex.Failure == SecureJoinFailure.Unreachable)
         {
-            return ReconnectAttemptOutcome.RetryLater;
+            return (ReconnectAttemptOutcome.RetryLater, null);
         }
         catch (SecureJoinException ex)
         {
             _logSink.Write($"[Reconnect] 재연결 거부: {ex.Failure}");
-            return ReconnectAttemptOutcome.GiveUp;
+            return (ReconnectAttemptOutcome.GiveUp, null);
         }
 
-        // 토큰은 이미 소비됐다. 여기서 실패하면 같은 토큰으로 다시 시도할 수 없다.
+        // 토큰은 이미 소비됐다. 서버의 참가 승인을 받기 전에 끝나면 같은 토큰으로는 다시 시도할 수 없다.
+        JoinAckResult result;
         try
         {
             await ReplaceSecureChannelAsync(secure);
             AttachStudentStatus(secure);
-            await _tcpClient.ConnectAsync(target.Host, target.Port);
-            await _tcpClient.SendAsync(_sessionClient.CreateJoinRequest(target.Host, target.Port, target.DisplayName, secure.JoinTicket));
-            _logSink.Write($"[Reconnect] 재참가 요청 전송 ({attempt}번째 시도)");
-            return ReconnectAttemptOutcome.Succeeded;
+            result = await SendJoinAndAwaitAckAsync(target.Host, target.Port, target.DisplayName, secure.JoinTicket, cancellationToken);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            _logSink.Write($"[Reconnect] 재참가 실패: {ex.GetType().Name}");
-            await ReplaceSecureChannelAsync(null);
-            return ReconnectAttemptOutcome.GiveUp;
+            _logSink.Write($"[Reconnect] 재참가 요청 실패: {ex.GetType().Name}");
+            result = JoinAckResult.Disconnected;
         }
+
+        if (result == JoinAckResult.Joined)
+        {
+            _logSink.Write($"[Reconnect] 재참가 승인 ({attempt}번째 시도)");
+            return (ReconnectAttemptOutcome.Succeeded, null);
+        }
+
+        _logSink.Write($"[Reconnect] 재참가 승인 실패: {result}");
+        await AbandonJoinAsync();
+        // 서버가 참가를 처리해 새 토큰을 보낸 뒤 끊긴 경우에만 그 토큰으로 이어서 시도한다.
+        var next = Interlocked.Exchange(ref _reconnectToken, null);
+        return result != JoinAckResult.Rejected && next is not null && next != token
+            ? (ReconnectAttemptOutcome.RetryLater, next)
+            : (ReconnectAttemptOutcome.GiveUp, null);
+    }
+
+    /// <summary>
+    /// TCP로 참가 요청을 보내고 이 요청에 대한 서버의 참가 승인을 기다립니다. 요청 전송은 참가 성공이 아니므로
+    /// 승인(Joined)을 받았을 때만 참가한 것으로 봅니다.
+    /// </summary>
+    private async Task<JoinAckResult> SendJoinAndAwaitAckAsync(string host, int port, string displayName, string joinTicket,
+        CancellationToken cancellationToken)
+    {
+        var pending = new TaskCompletionSource<JoinAckResult>(TaskCreationOptions.RunContinuationsAsynchronously);
+        Interlocked.Exchange(ref _pendingJoinAck, pending)?.TrySetResult(JoinAckResult.Disconnected);
+        try
+        {
+            await _tcpClient.ConnectAsync(host, port);
+            await _tcpClient.SendAsync(_sessionClient.CreateJoinRequest(host, port, displayName, joinTicket));
+            _logSink.Write($"세션 참가 요청 전송: {displayName} -> {host}:{port}");
+
+            // 승인과 시간 초과·취소가 겹쳐도 먼저 기록된 한쪽만 인정한다.
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeout.CancelAfter(JoinAckTimeout);
+            JoinAckResult result;
+            using (timeout.Token.Register(() => pending.TrySetResult(JoinAckResult.TimedOut)))
+                result = await pending.Task;
+            if (result == JoinAckResult.TimedOut) cancellationToken.ThrowIfCancellationRequested();
+            return result;
+        }
+        finally
+        {
+            Interlocked.CompareExchange(ref _pendingJoinAck, null, pending);
+        }
+    }
+
+    /// <summary>승인받지 못한 참가 시도의 TCP 연결과 보호 채널을 닫습니다.</summary>
+    private async Task AbandonJoinAsync()
+    {
+        await _tcpClient.DisconnectAsync();
+        await ReplaceSecureChannelAsync(null);
     }
 
     private void CancelReconnect() => Interlocked.Exchange(ref _reconnectCts, null)?.Cancel();
