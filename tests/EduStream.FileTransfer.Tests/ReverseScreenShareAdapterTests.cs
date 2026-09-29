@@ -379,6 +379,8 @@ public class ReverseScreenShareAdapterTests
         var adapter = new ReverseScreenShareAdapter(reverseSessionManager);
         await adapter.ActivateAdapterAsync();
 
+        adapter.AddDisplayHandler((_, _, _) => Task.CompletedTask);
+
         var sessionId = Guid.NewGuid();
         var studentId = "student-123";
         await adapter.StartReverseSharingAsync(sessionId, studentId);
