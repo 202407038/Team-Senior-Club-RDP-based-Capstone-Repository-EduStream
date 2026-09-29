@@ -2,9 +2,9 @@
 
 갱신: 2026-09-29, 코드 main `ea87cbf` (#63까지, 실행 동작은 #61 기준). 화면 공유 기본 경로는 **WDS 기반 RDP**이며 PNG 버튼은 보조 테스트입니다. 최신 소스와 기존 배포물은 실행 절차가 다르므로 아래에서 구분합니다. 이 문서는 코드/버튼 확인 기준이며 최신 다중 PC 수동 시연 완료 기록은 아닙니다.
 
-## 최신 main 소스 실행 (#58·#59·#61 반영)
+## 최신 실행용 ZIP 및 소스 실행 (#58·#59·#61 반영)
 
-9/15 배포물 `v0.1.0-preview.1`을 받았다고 아래 기능이 자동 갱신되는 것은 아닙니다. 새 배포 전까지는 양쪽 모두 같은 최신 소스를 빌드해서 확인합니다. 실행용 ZIP/설치 파일과 GitHub `Code → Download ZIP` 소스를 혼동하지 않습니다.
+2026-09-30 실행용 ZIP `v0.1.0-preview.2`는 main `013c2d0`의 앱 코드를 포함합니다. 양쪽 모두 이 ZIP을 전체 압축 해제한 뒤 교수자/학생 EXE를 실행하면 아래 2번 이후 절차를 사용할 수 있으며 SDK·빌드 명령은 필요하지 않습니다. [ZIP 실행 안내](./DESKTOP_LAUNCH.md). 아래 1번과 dotnet 명령은 소스 개발용입니다. 9/15 `preview.1`은 자동 갱신되지 않습니다. 배포는 ZIP만 유지하며 GitHub `Code → Download ZIP`은 개발용 소스입니다.
 
 1. Windows x64에 .NET 8 SDK를 준비하고 최신 소스를 별도 폴더에 받습니다. `EduStream.sln` 폴더에서 `dotnet build EduStream.sln` → `dotnet test EduStream.sln --no-build`를 실행합니다. 아래 환경 점검 절차도 참고합니다.
 2. 교수자부터 `dotnet run --project src/EduStream.Server/EduStream.Server.csproj --no-build`로 실행합니다. 같은 Windows 로그인 환경에서는 학생이 먼저 켜져 있으면 교수자 실행이 제한됩니다. 다른 PC 전체에 적용하는 제한은 아닙니다.
@@ -27,7 +27,7 @@
 
 GitHub 메인 README의 **실행용 ZIP 다운로드** → **모두 압축 풀기** → `EduStream` 폴더의 **EduStream 교수자.exe / EduStream 학생.exe**를 더블클릭합니다. 설치나 명령어 입력 없이 실행할 수 있습니다. EXE 옆의 DLL과 하위 폴더를 함께 유지하세요. `Code → Download ZIP`은 실행용이 아닌 개발용 소스입니다.
 
-GitHub 메인 README의 **설치 파일 다운로드**에서 `EduStream-Setup.exe`를 받아 설치하면 바탕화면/시작 메뉴의 **EduStream 교수자 / EduStream 학생**으로 실행할 수 있습니다. [설치·실행 안내](./DESKTOP_LAUNCH.md)를 따르세요. 일반 사용자는 아래 SDK/빌드 명령을 수행하지 않습니다. 아래 1~2절과 `dotnet run` 명령은 개발자가 소스에서 실행하는 경우에만 해당합니다.
+현재 사용자 배포는 GitHub 메인 README의 **실행용 ZIP 다운로드**를 사용합니다. [ZIP 실행 안내](./DESKTOP_LAUNCH.md)를 따르세요. 아래는 구버전의 소스 개발/실행 기록이며 현재 사용자에게 SDK·빌드 명령을 요구하지 않습니다.
 
 ## 1. 준비와 설치
 
