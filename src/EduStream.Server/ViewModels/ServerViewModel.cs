@@ -1,5 +1,7 @@
 using System.Collections.ObjectModel;
 using System.IO;
+using System.Security.Cryptography;
+using System.Security.Cryptography.X509Certificates;
 using System.Windows;
 using EduStream.Core.Network;
 using EduStream.Core.Common;
@@ -42,9 +44,14 @@ public sealed class ServerViewModel : ObservableObject
     private bool _isStatusError;
     private int _participantCount;
     private bool _isScreenSharing;
+    private X509Certificate2? _secureCertificate;
+    private readonly Func<X509Certificate2>? _certificateProvider;
+    private string _connectionCode = "세션을 열면 표시됩니다.";
 
-    public ServerViewModel(IRdpSharingService? rdpSharing = null)
+    /// <param name="certificateProvider">테스트용. 지정하지 않으면 사용자 인증서 저장소의 교수자 인증서를 씁니다.</param>
+    public ServerViewModel(IRdpSharingService? rdpSharing = null, Func<X509Certificate2>? certificateProvider = null)
     {
+        _certificateProvider = certificateProvider;
         var serializer = new PacketSerializer();
         _tcpServer = new TcpServerService(_logSink, serializer);
         _sessionManager = new SessionManager(_logSink, _tcpServer);
@@ -83,6 +90,20 @@ public sealed class ServerViewModel : ObservableObject
         get => _port;
         set => SetProperty(ref _port, value);
     }
+
+    /// <summary>
+    /// 학생이 참가할 때 입력하는 접속 코드(교수자 인증서 지문)입니다. 비밀값이 아니므로 화면에 표시합니다.
+    /// </summary>
+    public string ConnectionCode
+    {
+        get => _connectionCode;
+        private set => SetProperty(ref _connectionCode, value);
+    }
+
+    /// <summary>
+    /// 방 비밀번호 입력칸을 읽고 비우는 함수입니다. 비밀번호를 ViewModel 속성에 보관하지 않기 위해 View가 제공합니다.
+    /// </summary>
+    public Func<string>? RoomPasswordProvider { get; set; }
 
     public string ChatInput
     {
@@ -259,11 +280,15 @@ public sealed class ServerViewModel : ObservableObject
 
         try
         {
-            await _sessionManager.OpenSessionAsync(SessionName, Port);
+            var roomPassword = RoomPasswordProvider?.Invoke() ?? string.Empty;
+            _secureCertificate ??= LoadSecureCertificate();
+            await _sessionManager.OpenSessionAsync(SessionName, Port, roomPassword.AsMemory(), _secureCertificate);
             _heartbeatService.Start();
             IsSessionOpen = true;
+            ConnectionCode = _sessionManager.ConnectionCode ?? "-";
             SessionStatus = $"세션 Open · 포트 {Port}";
-            StatusMessage = $"'{SessionName}' 세션이 시작되었습니다.";
+            StatusMessage = $"'{SessionName}' 세션이 시작되었습니다. 학생에게 호스트 IP, 포트, 접속 코드를 알려 주세요." +
+                            (_sessionManager.IsRoomPasswordProtected ? " 방 비밀번호도 함께 알려 주세요." : string.Empty);
             IsStatusError = false;
             RdpStatus = "WDS 공유 시작 후 학생을 연결해 주세요. 이미 참여한 학생은 RDP 재접속을 눌러 주세요.";
             ChatMessages.Insert(0, ChatLine.System("세션이 열렸습니다."));
@@ -297,6 +322,7 @@ public sealed class ServerViewModel : ObservableObject
                 finally { await _sessionManager.CloseSessionAsync(); }
             }
             IsSessionOpen = false;
+            ConnectionCode = "세션을 열면 표시됩니다.";
             IsScreenSharing = false;
             ParticipantCount = 0;
             SessionStatus = "세션 닫힘";
@@ -574,6 +600,24 @@ public sealed class ServerViewModel : ObservableObject
             LatestScreenStatus = _screenShareService.LatestStatus;
             SyncLogs();
         });
+    }
+
+    /// <summary>
+    /// 저장소 인증서를 쓰면 앱을 다시 켜도 접속 코드가 같습니다. 저장소를 쓸 수 없으면 이번 실행에만 쓰는 인증서로 대체하며,
+    /// 이 경우 접속 코드는 실행할 때마다 바뀝니다.
+    /// </summary>
+    private X509Certificate2 LoadSecureCertificate()
+    {
+        if (_certificateProvider is not null) return _certificateProvider();
+        try
+        {
+            return ProfessorCertificateStore.LoadOrCreate();
+        }
+        catch (Exception ex) when (ex is CryptographicException or UnauthorizedAccessException or PlatformNotSupportedException)
+        {
+            _logSink.Write($"[Secure] 인증서 저장소 사용 불가, 임시 인증서 사용: {ex.GetType().Name}");
+            return ProfessorCertificateStore.CreateEphemeral();
+        }
     }
 
     private void SyncLogs()

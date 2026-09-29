@@ -251,6 +251,13 @@
                                     </StackPanel>
                                 </Grid>
 
+                                <TextBlock Style="{StaticResource FieldLabel}" Margin="0,12,0,6" Text="접속 코드" />
+                                <TextBox Style="{StaticResource DarkTextBox}"
+                                         Text="{Binding ConnectionCode, UpdateSourceTrigger=PropertyChanged}" />
+
+                                <TextBlock Style="{StaticResource FieldLabel}" Margin="0,12,0,6" Text="방 비밀번호 (설정된 경우)" />
+                                <PasswordBox x:Name="RoomPasswordBox" Padding="8" />
+
                                 <Button Style="{StaticResource PrimaryButton}"
                                         Margin="0,14,0,0"
                                         Height="36"
@@ -267,6 +274,20 @@
                                         Height="36"
                                         Content="연결 종료"
                                         Command="{Binding DisconnectCommand}" />
+
+                                <TextBlock Style="{StaticResource FieldLabel}" Margin="0,14,0,6" Text="원격 제어" />
+                                <TextBlock Foreground="{StaticResource BrushTextSecondary}" TextWrapping="Wrap"
+                                           Text="{Binding ControlStatusText}" />
+                                <TextBlock Foreground="{StaticResource BrushTextSecondary}" TextWrapping="Wrap" Margin="0,4,0,0"
+                                           Text="{Binding PermissionSummary}" />
+                                <WrapPanel Margin="0,8,0,0">
+                                    <Button Style="{StaticResource SecondaryButton}" Margin="0,0,8,8" Padding="12,0"
+                                            Content="즉시 중단" Command="{Binding StopControlNowCommand}" />
+                                    <Button Style="{StaticResource GhostButton}" Margin="0,0,8,8" Padding="12,0"
+                                            Content="{Binding ControlToggleLabel}" Command="{Binding ToggleControlPermissionCommand}" />
+                                    <Button Style="{StaticResource GhostButton}" Margin="0,0,8,8" Padding="12,0"
+                                            Content="{Binding ViewingToggleLabel}" Command="{Binding ToggleViewingPermissionCommand}" />
+                                </WrapPanel>
                             </StackPanel>
                         </StackPanel>
                     </TabItem>
