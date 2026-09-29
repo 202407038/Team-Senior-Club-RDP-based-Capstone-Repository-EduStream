@@ -49,7 +49,10 @@ public static class FileTransferUtility
     {
         ArgumentNullException.ThrowIfNull(packet);
 
-        if (string.IsNullOrWhiteSpace(packet.FileName))
+        if (string.IsNullOrWhiteSpace(packet.FileName) ||
+            packet.FileName is "." or ".." ||
+            !string.Equals(Path.GetFileName(packet.FileName), packet.FileName, StringComparison.Ordinal) ||
+            packet.FileName.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0)
         {
             throw new InvalidOperationException(ErrorCodes.InvalidFileName);
         }
@@ -66,9 +69,24 @@ public static class FileTransferUtility
 
         ValidateChunkOrder(packet.ChunkIndex, packet.TotalChunks);
 
+        if (packet.Content is null)
+        {
+            throw new InvalidOperationException(ErrorCodes.InvalidFilePayloadLength);
+        }
+
         if (packet.Content.Length == 0 && packet.FileSize > 0)
         {
             throw new InvalidOperationException(ErrorCodes.EmptyChunkPayload);
+        }
+
+        if (packet.FileSize == 0 && packet.Content.Length != 0)
+        {
+            throw new InvalidOperationException(ErrorCodes.InvalidFilePayloadLength);
+        }
+
+        if (packet.TotalChunks == 1 && packet.Content.LongLength != packet.FileSize)
+        {
+            throw new InvalidOperationException(ErrorCodes.InvalidFilePayloadLength);
         }
 
         if (packet.DataLength != packet.Content.Length)

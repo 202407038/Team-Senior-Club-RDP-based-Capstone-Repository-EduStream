@@ -21,13 +21,14 @@ public sealed class SessionClient
 
     public bool IsConnected => CurrentSession is not null;
 
-    public SessionJoinPacket CreateJoinRequest(string hostAddress, int port, string displayName)
+    public SessionJoinPacket CreateJoinRequest(string hostAddress, int port, string displayName, string? joinTicket = null)
     {
         return PacketFactory.CreateSessionJoin(
             senderId: displayName,
             displayName: displayName,
             targetAddress: hostAddress,
-            targetPort: port);
+            targetPort: port,
+            joinTicket: joinTicket);
     }
 
     public Task<SessionInfo> ApplyJoinAckAsync(AckPacket packet, string hostAddress, int port)
@@ -65,9 +66,10 @@ public sealed class SessionClient
 
     public Task DisconnectAsync(string reason = "사용자 종료")
     {
-        if (CurrentSession is not null)
+        // 사용자 종료와 연결 끊김 처리가 동시에 부를 수 있어 한 번만 읽는다.
+        if (CurrentSession is { } session)
         {
-            _logSink.Write($"세션 연결을 종료했습니다. 대상={CurrentSession.HostAddress}:{CurrentSession.Port}, 사유={reason}");
+            _logSink.Write($"세션 연결을 종료했습니다. 대상={session.HostAddress}:{session.Port}, 사유={reason}");
         }
 
         CurrentSession = null;

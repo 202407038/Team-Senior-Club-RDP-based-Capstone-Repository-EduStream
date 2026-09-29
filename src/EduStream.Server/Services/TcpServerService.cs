@@ -77,14 +77,23 @@ public sealed class TcpServerService
     /// 모든 연결된 클라이언트에게 패킷을 브로드캐스트합니다.
     /// 전송 실패한 클라이언트는 자동 제거됩니다.
     /// </summary>
-    public async Task BroadcastAsync(BasePacket packet)
+    public Task BroadcastAsync(BasePacket packet) => SendToClientsAsync(_clients.Keys.ToArray(), packet);
+
+    /// <summary>
+    /// 지정한 클라이언트들에게만 같은 패킷을 전송합니다. 연결이 이미 없는 ID는 건너뜁니다.
+    /// 전송 실패한 클라이언트는 자동 제거됩니다.
+    /// </summary>
+    public async Task SendToClientsAsync(IReadOnlyCollection<string> clientIds, BasePacket packet)
     {
+        ArgumentNullException.ThrowIfNull(clientIds);
         var data = _serializer.Serialize(packet);
         var frame = BuildFrame(data);
         var failedClients = new List<string>();
 
-        foreach (var (clientId, connection) in _clients)
+        foreach (var clientId in clientIds)
         {
+            if (!_clients.TryGetValue(clientId, out var connection))
+                continue;
             try
             {
                 await connection.SendAsync(frame);
@@ -244,6 +253,7 @@ public sealed class TcpServerService
     {
         private readonly TcpClient _tcpClient;
         private readonly SemaphoreSlim _sendLock = new(1, 1);
+        private int _disposed;
 
         public ClientConnection(TcpClient tcpClient)
         {
@@ -257,6 +267,7 @@ public sealed class TcpServerService
             await _sendLock.WaitAsync();
             try
             {
+                ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
                 var stream = _tcpClient.GetStream();
                 await stream.WriteAsync(frame);
                 await stream.FlushAsync();
@@ -269,7 +280,10 @@ public sealed class TcpServerService
 
         public void Dispose()
         {
-            _sendLock.Dispose();
+            if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
+            // 소켓 종료로 진행 중 송신을 해제한다. 대기자/송신자의 finally가 남은 동안
+            // SemaphoreSlim을 Dispose하면 Release 실패와 영구 대기가 발생한다.
+            // WaitHandle을 만들지 않는 관리 객체이므로 연결과 함께 GC에 맡긴다.
             _tcpClient.Dispose();
         }
     }

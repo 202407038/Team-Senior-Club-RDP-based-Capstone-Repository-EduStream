@@ -1,7 +1,7 @@
 using System.Globalization;
 using System.Windows.Data;
 using System.Windows.Media;
-
+using Color = System.Windows.Media.Color;
 namespace EduStream.Client.Converters;
 
 public sealed class ConnectionStateToBrushConverter : IValueConverter

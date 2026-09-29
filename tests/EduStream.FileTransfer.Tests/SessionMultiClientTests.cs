@@ -161,6 +161,296 @@ public sealed class SessionMultiClientTests
         Assert.Equal(0, rig.SessionManager.ParticipantCount);
     }
 
+    [Fact]
+    public async Task PoisonPacketFromOneParticipant_ShouldNotDropSessionOrOtherParticipants()
+    {
+        // 7월 3주차 2번: 교수자 1명·수강생 2명 통합 실행 중 한 연결에서 서버 예외가 나도
+        // 세션 전체가 끊기지 않고 나머지 참가자가 유지되며 계속 동작해야 한다.
+        await using var rig = await TestRig.OpenAsync();
+
+        var alice = await rig.ConnectAndJoinAsync("Alice");
+        var bob = await rig.ConnectAndJoinAsync("Bob");
+        await WaitUntilAsync(() => rig.SessionManager.ParticipantCount == 2, DefaultWait);
+
+        var sessionId = rig.SessionManager.CurrentSession?.SessionId;
+
+        // 통합 흐름 기준선: 예외 이전에도 채팅이 정상적으로 브로드캐스트되는지 먼저 확인한다.
+        await alice.SendAsync(PacketFactory.CreateChat(
+            senderId: "Alice", sender: "Alice", message: "before-fault", sessionId: sessionId));
+        await WaitUntilAsync(
+            () => rig.ServerLog.Snapshot().Any(entry => entry.Contains("[Chat] 브로드캐스트") && entry.Contains("Alice")),
+            DefaultWait);
+
+        // Alice가 프레이밍/직렬화는 정상이지만 메타데이터가 잘못된 화면 패킷을 보낸다.
+        // 서버 핸들러의 ScreenTransferUtility.ValidatePacketMetadata가 예외를 던지고,
+        // OnPacketReceivedAsync의 try/catch가 이를 흡수해야 한다. (frameIndex<=0 → InvalidFrameDimensions)
+        await alice.SendAsync(PacketFactory.CreateScreenFrame(
+            senderId: "Alice",
+            frameIndex: 0,
+            frameDescription: "poison-frame",
+            width: 1920,
+            height: 1080,
+            encoding: ScreenEncodings.Png,
+            content: new byte[] { 1, 2, 3 },
+            sessionId: sessionId));
+
+        await WaitUntilAsync(
+            () => rig.ServerLog.Snapshot().Any(entry =>
+                entry.Contains("[Packet] 처리 오류") &&
+                entry.Contains(ErrorCodes.InvalidFrameDimensions)),
+            DefaultWait);
+
+        // 예외 이후에도 세션은 열려 있고 두 참가자가 모두 유지되어야 한다.
+        Assert.True(rig.SessionManager.IsSessionOpen);
+        Assert.Equal(2, rig.SessionManager.ParticipantCount);
+        Assert.Contains("Alice", rig.SessionManager.ParticipantNames);
+        Assert.Contains("Bob", rig.SessionManager.ParticipantNames);
+
+        // 나머지 참가자(Bob)의 채팅이 여전히 브로드캐스트되어야 세션이 실제로 살아있다고 볼 수 있다.
+        await bob.SendAsync(PacketFactory.CreateChat(
+            senderId: "Bob", sender: "Bob", message: "after-fault", sessionId: sessionId));
+        await WaitUntilAsync(
+            () => rig.ServerLog.Snapshot().Any(entry => entry.Contains("[Chat] 브로드캐스트") && entry.Contains("Bob")),
+            DefaultWait);
+    }
+
+    [Fact]
+    public async Task AbruptDisconnect_ThenRejoinWithSameName_ShouldEventuallySucceedQuickly()
+    {
+        // 8월 2주차 2번: 네트워크 오류로 소켓이 끊긴 뒤 같은 이름으로 재접속을 시도하면,
+        // 이전 참가자 정보가 남아 거부되지 않고 짧은 시간 안에 재입장할 수 있어야 한다.
+        await using var rig = await TestRig.OpenAsync();
+
+        var alice = await rig.ConnectAndJoinAsync("Alice");
+        await WaitUntilAsync(() => rig.SessionManager.ParticipantCount == 1, DefaultWait);
+
+        alice.Dispose();
+        rig.ForgetClient(alice);
+
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(2);
+        var lastResponse = PacketType.Unknown;
+        while (DateTime.UtcNow < deadline)
+        {
+            var (client, responseType) = await rig.ConnectAndAttemptJoinAsync("Alice");
+            lastResponse = responseType;
+            if (responseType == PacketType.Ack)
+                break;
+
+            client.Dispose();
+            rig.ForgetClient(client);
+            await Task.Delay(50);
+        }
+
+        Assert.Equal(PacketType.Ack, lastResponse);
+        await WaitUntilAsync(() => rig.SessionManager.ParticipantCount == 1, DefaultWait);
+        Assert.Contains("Alice", rig.SessionManager.ParticipantNames);
+    }
+
+    [Fact]
+    public async Task GracefulLeave_ShouldRemoveOnlyThatParticipant_AndKeepOthersFunctional()
+    {
+        // 8월 3주차 2번: SessionLeave로 정상 이탈한 뒤에도 참가자 수/목록이 정확히 갱신되고
+        // 나머지 참가자는 계속 정상 동작해야 한다(abnormal disconnect뿐 아니라 정상 이탈도 검증).
+        await using var rig = await TestRig.OpenAsync();
+
+        var alice = await rig.ConnectAndJoinAsync("Alice");
+        var bob = await rig.ConnectAndJoinAsync("Bob");
+        await WaitUntilAsync(() => rig.SessionManager.ParticipantCount == 2, DefaultWait);
+
+        var sessionId = rig.SessionManager.CurrentSession?.SessionId;
+        var leavePacket = PacketFactory.CreateSessionLeave(
+            senderId: "Alice",
+            displayName: "Alice",
+            reason: "사용자 요청",
+            sessionId: sessionId);
+        var serializer = new PacketSerializer();
+        var leaveAckReceived = new TaskCompletionSource<AckPacket>(TaskCreationOptions.RunContinuationsAsynchronously);
+        alice.PacketReceived += (packetType, payload) =>
+        {
+            if (packetType == PacketType.Ack)
+            {
+                var ack = serializer.Deserialize<AckPacket>(payload);
+                if (ack?.AckCode == AckCodes.SessionLeft &&
+                    ack.CorrelationId == leavePacket.CorrelationId)
+                {
+                    leaveAckReceived.TrySetResult(ack);
+                }
+            }
+            return Task.CompletedTask;
+        };
+
+        await alice.SendAsync(leavePacket);
+
+        var leaveAck = await leaveAckReceived.Task.WaitAsync(DefaultWait);
+        Assert.Equal(AckCodes.SessionLeft, leaveAck.AckCode);
+        Assert.Equal(leavePacket.CorrelationId, leaveAck.CorrelationId);
+        await WaitUntilAsync(() => rig.SessionManager.ParticipantCount == 1, DefaultWait);
+
+        Assert.DoesNotContain("Alice", rig.SessionManager.ParticipantNames);
+        Assert.Contains("Bob", rig.SessionManager.ParticipantNames);
+        Assert.Contains(rig.ServerLog.Snapshot(), e => e.Contains("Alice님이 세션에서 나갔습니다"));
+
+        // 남은 Bob은 계속 정상 동작해야 한다.
+        await bob.SendAsync(PacketFactory.CreateChat(
+            senderId: "Bob", sender: "Bob", message: "after-leave", sessionId: sessionId));
+        await WaitUntilAsync(
+            () => rig.ServerLog.Snapshot().Any(entry => entry.Contains("[Chat] 브로드캐스트") && entry.Contains("Bob")),
+            DefaultWait);
+    }
+
+    [Fact]
+    public async Task LongRunningSession_SurvivesMultipleHeartbeatCycles_SilentClientTimesOutWhileActiveStays()
+    {
+        // 8월 4주차 2번: 짧은 주기로 여러 heartbeat 사이클을 반복해 장시간 세션 운영을 흉내 내고,
+        // 그 중간에 응답 없는 클라이언트만 타임아웃되고 활성 클라이언트와 세션 자체는 유지되는지 검증한다.
+        await using var rig = await TestRig.OpenAsync(
+            heartbeatSendInterval: TimeSpan.FromMilliseconds(100),
+            heartbeatTimeout: TimeSpan.FromMilliseconds(350),
+            heartbeatStaleCheckInterval: TimeSpan.FromMilliseconds(50));
+
+        var active = await rig.ConnectAndJoinAsync("Active");
+        await WaitUntilAsync(() => rig.SessionManager.ParticipantCount == 1, DefaultWait);
+
+        var sessionId = rig.SessionManager.CurrentSession?.SessionId;
+
+        // 활성 클라이언트는 여러 heartbeat 송신 주기 동안 계속 응답한다.
+        using var keepAliveCts = new CancellationTokenSource();
+        var keepAliveTask = Task.Run(async () =>
+        {
+            while (!keepAliveCts.IsCancellationRequested)
+            {
+                try
+                {
+                    await active.SendAsync(PacketFactory.CreateHeartbeat(senderId: "Active", sessionId: sessionId));
+                }
+                catch { }
+                await Task.Delay(80);
+            }
+        });
+
+        // 여러 사이클이 지나는 동안 세션이 유지되는지 먼저 확인한다.
+        await Task.Delay(500);
+        Assert.Equal(1, rig.SessionManager.ParticipantCount);
+
+        // 이후 응답을 전혀 보내지 않는 클라이언트를 추가한다.
+        await rig.ConnectAndJoinAsync("Silent");
+        await WaitUntilAsync(() => rig.SessionManager.ParticipantCount == 2, DefaultWait);
+
+        // Silent는 타임아웃으로 제거되고, Active는 계속 응답 중이므로 세션에 남아 있어야 한다.
+        await WaitUntilAsync(() => rig.SessionManager.ParticipantCount == 1, TimeSpan.FromSeconds(3));
+
+        Assert.Equal(1, rig.SessionManager.ParticipantCount);
+        Assert.Contains("Active", rig.SessionManager.ParticipantNames);
+        Assert.DoesNotContain("Silent", rig.SessionManager.ParticipantNames);
+
+        var timeoutCount = rig.ServerLog.Snapshot().Count(e => e.Contains("[Heartbeat] 타임아웃 disconnect"));
+        Assert.Equal(1, timeoutCount);
+
+        keepAliveCts.Cancel();
+        await keepAliveTask;
+
+        // 여러 사이클을 거친 뒤에도 세션이 실제로 정상 동작하는지 채팅으로 확인한다.
+        await active.SendAsync(PacketFactory.CreateChat(
+            senderId: "Active", sender: "Active", message: "still-alive-after-cycles", sessionId: sessionId));
+        await WaitUntilAsync(
+            () => rig.ServerLog.Snapshot().Any(entry => entry.Contains("[Chat] 브로드캐스트") && entry.Contains("Active")),
+            DefaultWait);
+    }
+
+    [Fact]
+    public async Task NonParticipant_SendingChat_ShouldBeRejectedAndNotBroadcast()
+    {
+        // 9월 3주차 2번: 참가 승인되지 않은 연결의 채팅은 거부되어야 하고, 참여 중인 다른
+        // 학생에게는 전달되지 않아야 한다(기존 코드에 로직은 있었으나 자동 검증이 없었음).
+        await using var rig = await TestRig.OpenAsync();
+
+        var bob = await rig.ConnectAndJoinAsync("Bob");
+        await WaitUntilAsync(() => rig.SessionManager.ParticipantCount == 1, DefaultWait);
+
+        var serializer = new PacketSerializer();
+        var ghostLog = new InMemoryLogSink();
+        var ghost = new TcpClientService(ghostLog, serializer);
+        await ghost.ConnectAsync("127.0.0.1", rig.Port);
+
+        var bobReceivedGhostMessage = false;
+        bob.PacketReceived += (packetType, payload) =>
+        {
+            if (packetType == PacketType.Chat)
+            {
+                var chat = serializer.Deserialize<ChatPacket>(payload);
+                if (chat?.Message == "ghost-message")
+                    bobReceivedGhostMessage = true;
+            }
+            return Task.CompletedTask;
+        };
+
+        var errorReceived = new TaskCompletionSource<ErrorPacket>(TaskCreationOptions.RunContinuationsAsynchronously);
+        ghost.PacketReceived += (packetType, payload) =>
+        {
+            if (packetType == PacketType.Error)
+                errorReceived.TrySetResult(serializer.Deserialize<ErrorPacket>(payload)!);
+            return Task.CompletedTask;
+        };
+
+        await ghost.SendAsync(PacketFactory.CreateChat(
+            senderId: "Ghost", sender: "Ghost", message: "ghost-message",
+            sessionId: rig.SessionManager.CurrentSession?.SessionId));
+
+        var error = await errorReceived.Task.WaitAsync(DefaultWait);
+        Assert.Equal(ErrorCodes.NotParticipant, error.ErrorCode);
+
+        await WaitUntilAsync(
+            () => rig.ServerLog.Snapshot().Any(e => e.Contains("[Chat] 비참가자 차단")),
+            DefaultWait);
+
+        // 서버가 브로드캐스트 로그를 남길 충분한 시간을 준 뒤에도 Bob에게는 도달하지 않아야 한다.
+        await Task.Delay(200);
+        Assert.False(bobReceivedGhostMessage);
+        Assert.Equal(1, rig.SessionManager.ParticipantCount);
+
+        ghost.Dispose();
+    }
+
+    [Fact]
+    public async Task CloseSession_WithMultipleParticipants_ShouldBroadcastTerminationAndClearAll()
+    {
+        // 9월 3주차 2번: 교수자가 세션을 종료하면 남아 있는 모든 참가자에게 종료 알림이
+        // 브로드캐스트되고, 참가자 목록/인원이 전부 정리되어야 한다.
+        await using var rig = await TestRig.OpenAsync();
+
+        var alice = await rig.ConnectAndJoinAsync("Alice");
+        var bob = await rig.ConnectAndJoinAsync("Bob");
+        await WaitUntilAsync(() => rig.SessionManager.ParticipantCount == 2, DefaultWait);
+
+        var serializer = new PacketSerializer();
+        var aliceNotified = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var bobNotified = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        alice.PacketReceived += (packetType, payload) =>
+        {
+            if (packetType == PacketType.Chat &&
+                serializer.Deserialize<ChatPacket>(payload)?.Message.Contains("세션을 종료") == true)
+                aliceNotified.TrySetResult(true);
+            return Task.CompletedTask;
+        };
+        bob.PacketReceived += (packetType, payload) =>
+        {
+            if (packetType == PacketType.Chat &&
+                serializer.Deserialize<ChatPacket>(payload)?.Message.Contains("세션을 종료") == true)
+                bobNotified.TrySetResult(true);
+            return Task.CompletedTask;
+        };
+
+        await rig.SessionManager.CloseSessionAsync();
+
+        await aliceNotified.Task.WaitAsync(DefaultWait);
+        await bobNotified.Task.WaitAsync(DefaultWait);
+
+        Assert.False(rig.SessionManager.IsSessionOpen);
+        Assert.Equal(0, rig.SessionManager.ParticipantCount);
+        Assert.Empty(rig.SessionManager.ParticipantNames);
+        Assert.Contains(rig.ServerLog.Snapshot(), e => e.Contains("[Session] 종료"));
+    }
+
     private static async Task WaitUntilAsync(
         Func<bool> condition,
         TimeSpan timeout,
@@ -261,6 +551,38 @@ public sealed class SessionMultiClientTests
         public void ForgetClient(TcpClientService client)
         {
             _clients.Remove(client);
+        }
+
+        /// <summary>
+        /// 접속 후 join을 시도하고, 서버 응답(Ack 또는 Error)의 타입을 반환합니다.
+        /// 재접속 시나리오처럼 거부 여부를 직접 확인해야 하는 테스트에서 사용합니다.
+        /// </summary>
+        public async Task<(TcpClientService Client, PacketType ResponseType)> ConnectAndAttemptJoinAsync(string displayName)
+        {
+            var serializer = new PacketSerializer();
+            var clientLog = new InMemoryLogSink();
+            var client = new TcpClientService(clientLog, serializer);
+            var responseReceived = new TaskCompletionSource<PacketType>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+            client.PacketReceived += (packetType, _) =>
+            {
+                if (packetType is PacketType.Ack or PacketType.Error)
+                    responseReceived.TrySetResult(packetType);
+                return Task.CompletedTask;
+            };
+
+            await client.ConnectAsync("127.0.0.1", Port);
+
+            var joinPacket = PacketFactory.CreateSessionJoin(
+                senderId: displayName,
+                displayName: displayName,
+                targetAddress: "127.0.0.1",
+                targetPort: Port);
+            await client.SendAsync(joinPacket);
+
+            _clients.Add(client);
+            var responseType = await responseReceived.Task.WaitAsync(TimeSpan.FromSeconds(3));
+            return (client, responseType);
         }
 
         public async ValueTask DisposeAsync()

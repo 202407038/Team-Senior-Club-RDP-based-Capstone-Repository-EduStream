@@ -18,19 +18,19 @@ public partial class MainWindow : Window
         _viewModel = DataContext as ServerViewModel ?? new ServerViewModel();
         DataContext = _viewModel;
 
-        // ChatMessages¿¡ »õ ¸Ş½ÃÁö°¡ Ãß°¡µÉ ¶§ WPF°¡ ·¹ÀÌ¾Æ¿ôÀ» ´Ù ±×¸° µÚ ¸Ç ¾Æ·¡·Î ½ºÅ©·Ñ
+        // ChatMessagesï¿½ï¿½ ï¿½ï¿½ ï¿½Ş½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ß°ï¿½ï¿½ï¿½ ï¿½ï¿½ WPFï¿½ï¿½ ï¿½ï¿½ï¿½Ì¾Æ¿ï¿½ï¿½ï¿½ ï¿½ï¿½ ï¿½×¸ï¿½ ï¿½ï¿½ ï¿½ï¿½ ï¿½Æ·ï¿½ï¿½ï¿½ ï¿½ï¿½Å©ï¿½ï¿½
         ((INotifyCollectionChanged)_viewModel.ChatMessages).CollectionChanged += (s, e) =>
         {
             if (e.Action == NotifyCollectionChangedAction.Add && ChatListBox.Items.Count > 0)
             {
-                // WPF UI ·»´õ¸µÀÌ ¿Ï·áµÈ Á÷ÈÄ(DispatcherPriority.Background) ½ºÅ©·Ñ ½ÇÇà
+                // WPF UI ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½Ï·ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½(DispatcherPriority.Background) ï¿½ï¿½Å©ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½
                 Dispatcher.BeginInvoke(DispatcherPriority.Background, new Action(() =>
                 {
-                    // 1. ListBox ¸¶Áö¸· ¾ÆÀÌÅÛ ½ºÅ©·Ñ
+                    // 1. ListBox ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½Å©ï¿½ï¿½
                     var lastItem = ChatListBox.Items[ChatListBox.Items.Count - 1];
                     ChatListBox.ScrollIntoView(lastItem);
 
-                    // 2. ³»ºÎ ScrollViewer¸¦ Ã£¾Æ °­Á¦·Î ¸Ç ¾Æ·¡ ¹Ù´ÚÀ¸·Î ½ºÅ©·Ñ
+                    // 2. ï¿½ï¿½ï¿½ï¿½ ScrollViewerï¿½ï¿½ Ã£ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ ï¿½Æ·ï¿½ ï¿½Ù´ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½Å©ï¿½ï¿½
                     var scrollViewer = GetScrollViewer(ChatListBox);
                     scrollViewer?.ScrollToBottom();
                 }));
@@ -38,7 +38,7 @@ public partial class MainWindow : Window
         };
     }
 
-    // ListBox ³»ºÎÀÇ ScrollViewer ¿ä¼Ò¸¦ Ã£´Â µµ¿ì¹Ì ¸Ş¼­µå
+    // ListBox ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ScrollViewer ï¿½ï¿½Ò¸ï¿½ Ã£ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½Ş¼ï¿½ï¿½ï¿½
     private static ScrollViewer? GetScrollViewer(DependencyObject depObj)
     {
         if (depObj is ScrollViewer sv) return sv;
@@ -52,8 +52,37 @@ public partial class MainWindow : Window
         return null;
     }
 
-    private void OnLoaded(object sender, RoutedEventArgs e)
+    private bool _closed;
+    private bool _closing;
+
+    private async void OnClosing(object? sender, System.ComponentModel.CancelEventArgs e)
     {
-        _viewModel.AttachRdpSurface(RdpPreviewHost);
+        if (_closed) return;
+        e.Cancel = true;
+        if (_closing) return;
+        _closing = true;
+        IsEnabled = false;
+        try { await _viewModel.ShutdownAsync(); }
+        catch (Exception ex)
+        {
+            MessageBox.Show("ê³µìœ  ì¢…ë£Œë¥¼ í™•ì¸í•´ ì£¼ì„¸ìš”: " + ex.GetType().Name, "EduStream");
+        }
+        finally { _closed = true; Close(); }
+    }
+
+    private void CopyInvitationPassword_Click(object sender, RoutedEventArgs e)
+    {
+        var password = InvitationParticipant.SelectedItem is string participant
+            ? _viewModel.GetInvitationPassword(participant) : null;
+        if (password is null)
+        {
+            MessageBox.Show("í•™ìƒì„ ì„ íƒí•´ ì£¼ì„¸ìš”. ì´ˆëŒ€ê°€ ë§Œë£Œëë‹¤ë©´ í•™ìƒ ì•±ì—ì„œ RDP ì¬ì ‘ì†ì„ ëˆŒëŸ¬ ì£¼ì„¸ìš”.", "EduStream");
+            return;
+        }
+        try { Clipboard.SetText(password); }
+        catch (System.Runtime.InteropServices.ExternalException)
+        {
+            MessageBox.Show("í´ë¦½ë³´ë“œë¥¼ ì‚¬ìš©í•  ìˆ˜ ì—†ìŠµë‹ˆë‹¤. ì ì‹œ í›„ ë‹¤ì‹œ ì‹œë„í•´ ì£¼ì„¸ìš”.", "EduStream");
+        }
     }
 }

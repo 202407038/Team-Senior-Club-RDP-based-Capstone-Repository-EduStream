@@ -9,5 +9,7 @@ public enum FeatureArea
     Session = 1,
     Screen = 2,
     File = 3,
-    Chat = 4
+    Chat = 4,
+    Protocol = 5,
+    Rdp = 6
 }

@@ -6,7 +6,9 @@ using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Threading.Tasks;
 using System.Windows;
-using System.Windows.Forms.Integration;
+using EduStream.Core.Network;
+using EduStream.Core.Collaboration;
+using EduStream.Core.FileSharing;
 using EduStream.Core.Common;
 using EduStream.Core.Logging;
 using EduStream.Core.Models;
@@ -51,7 +53,7 @@ public class ParticipantItem : INotifyPropertyChanged
 
 /// <summary>
 /// 교수자 대시보드의 상태와 명령을 관리합니다.
-/// RDP 테스트 대시보드와 세션 네트워크 흐름을 함께 연결합니다.
+/// WDS 화면 공유와 세션 네트워크 흐름을 함께 연결합니다.
 /// </summary>
 public sealed class ServerViewModel : ObservableObject
 {
@@ -61,17 +63,18 @@ public sealed class ServerViewModel : ObservableObject
     private readonly TcpServerService _tcpServer;
     private readonly HeartbeatService _heartbeatService;
     private readonly ScreenShareService _screenShareService;
-    private readonly RdpHost _rdpHost;
+    private readonly IRdpSharingService _rdpSharing;
+    private bool _isRdpSharing;
+    private bool _isRdpBusy;
+    private bool _shuttingDown;
+    private readonly SemaphoreSlim _rdpLifecycle = new(1, 1);
     private readonly FileDistributor _fileDistributor;
 
     private string _sessionName = "Capstone Live Class";
     private int _port = 5000;
     private string _chatInput = "Announcement: today's lecture note has been uploaded.";
     private string _latestScreenStatus = "Screen sharing has not started yet.";
-    private string _rdpServerAddress = "127.0.0.1";
-    private string _rdpUserName = Environment.UserName;
-    private string _rdpPassword = string.Empty;
-    private string _rdpStatus = "RDP preview is idle.";
+    private string _rdpStatus = "WDS 화면 공유 대기 중";
     private string _selectedFilePath = string.Empty;
     private string _sharedFileName = string.Empty;
     private bool _isFileShared;
@@ -83,15 +86,22 @@ public sealed class ServerViewModel : ObservableObject
     private bool _isStatusError;
     private int _participantCount;
     private bool _isScreenSharing;
+    private X509Certificate2? _secureCertificate;
+    private readonly Func<X509Certificate2>? _certificateProvider;
+    private string _connectionCode = "세션을 열면 표시됩니다.";
 
-    public ServerViewModel(RdpHost? rdpHost = null)
+    /// <param name="certificateProvider">테스트용. 지정하지 않으면 사용자 인증서 저장소의 교수자 인증서를 씁니다.</param>
+    public ServerViewModel(IRdpSharingService? rdpSharing = null, Func<X509Certificate2>? certificateProvider = null)
     {
+        _certificateProvider = certificateProvider;
         var serializer = new PacketSerializer();
         _tcpServer = new TcpServerService(_logSink, serializer);
         _sessionManager = new SessionManager(_logSink, _tcpServer);
         _heartbeatService = new HeartbeatService(_sessionManager, _tcpServer, _logSink);
         _screenShareService = new ScreenShareService(_sessionManager, _logSink);
-        _rdpHost = rdpHost ?? new RdpHost(_logSink);
+        _rdpSharing = rdpSharing ?? new RdpSharingService(_logSink);
+        _sessionManager.RdpInvitationPasswordReady += OnInvitationReady;
+        _sessionManager.RdpInvitationPasswordWithdrawn += OnInvitationWithdrawn;
         _fileDistributor = new FileDistributor(serializer, _logSink);
 
         _sessionManager.ParticipantsChanged += OnParticipantsChanged;
@@ -99,9 +109,9 @@ public sealed class ServerViewModel : ObservableObject
         _screenShareService.StatusChanged += OnScreenShareStatusChanged;
 
         OpenSessionCommand = new RelayCommand(() => _ = OpenSessionAsync(), () => !IsSessionOpen && !IsBusy);
-        CloseSessionCommand = new RelayCommand(() => _ = CloseSessionAsync(), () => IsSessionOpen && !IsBusy);
-        StartScreenShareCommand = new RelayCommand(() => _ = StartScreenShareAsync(), () => IsSessionOpen);
-        StartAutoShareCommand = new RelayCommand(() => _ = StartAutoShareAsync(), () => IsSessionOpen && !IsScreenSharing);
+        CloseSessionCommand = new RelayCommand(() => _ = CloseSessionAsync(), () => IsSessionOpen && !IsBusy && !IsRdpBusy);
+        StartScreenShareCommand = new RelayCommand(() => _ = StartScreenShareAsync(), () => IsSessionOpen && !IsRdpSharing && !IsRdpBusy);
+        StartAutoShareCommand = new RelayCommand(() => _ = StartAutoShareAsync(), () => IsSessionOpen && !IsScreenSharing && !IsRdpSharing && !IsRdpBusy);
         StopAutoShareCommand = new RelayCommand(() => _ = StopAutoShareAsync(), () => IsScreenSharing);
         SendSampleFileCommand = new RelayCommand(() => _ = SendSampleFileAsync(), () => IsSessionOpen);
         SelectFileCommand = new RelayCommand(SelectFile);
@@ -128,6 +138,20 @@ public sealed class ServerViewModel : ObservableObject
         set => SetProperty(ref _port, value);
     }
 
+    /// <summary>
+    /// 학생이 참가할 때 입력하는 접속 코드(교수자 인증서 지문)입니다. 비밀값이 아니므로 화면에 표시합니다.
+    /// </summary>
+    public string ConnectionCode
+    {
+        get => _connectionCode;
+        private set => SetProperty(ref _connectionCode, value);
+    }
+
+    /// <summary>
+    /// 방 비밀번호 입력칸을 읽고 비우는 함수입니다. 비밀번호를 ViewModel 속성에 보관하지 않기 위해 View가 제공합니다.
+    /// </summary>
+    public Func<string>? RoomPasswordProvider { get; set; }
+
     public string ChatInput
     {
         get => _chatInput;
@@ -146,22 +170,31 @@ public sealed class ServerViewModel : ObservableObject
         private set => SetProperty(ref _latestScreenStatus, value);
     }
 
-    public string RdpServerAddress
+    public bool IsRdpSharing
     {
-        get => _rdpServerAddress;
-        set => SetProperty(ref _rdpServerAddress, value);
+        get => _isRdpSharing;
+        private set { SetProperty(ref _isRdpSharing, value); UpdateRdpCommands(); }
     }
 
-    public string RdpUserName
+    public bool IsRdpBusy
     {
-        get => _rdpUserName;
-        set => SetProperty(ref _rdpUserName, value);
+        get => _isRdpBusy;
+        private set
+        {
+            SetProperty(ref _isRdpBusy, value);
+            UpdateRdpCommands();
+            CloseSessionCommand.RaiseCanExecuteChanged();
+        }
     }
 
-    public string RdpPassword
+    public ObservableCollection<string> RdpInvitationParticipants { get; } = [];
+
+    private void UpdateRdpCommands()
     {
-        get => _rdpPassword;
-        set => SetProperty(ref _rdpPassword, value);
+        StartRdpShareCommand.RaiseCanExecuteChanged();
+        StopRdpShareCommand.RaiseCanExecuteChanged();
+        StartScreenShareCommand.RaiseCanExecuteChanged();
+        StartAutoShareCommand.RaiseCanExecuteChanged();
     }
 
     public string RdpStatus
@@ -184,8 +217,9 @@ public sealed class ServerViewModel : ObservableObject
                 StopAutoShareCommand.RaiseCanExecuteChanged();
                 SendSampleFileCommand.RaiseCanExecuteChanged();
                 SendSelectedFileCommand.RaiseCanExecuteChanged();
+                RegisterSelectedFileCommand.RaiseCanExecuteChanged();
                 SendChatCommand.RaiseCanExecuteChanged();
-                StartRdpPreviewCommand.RaiseCanExecuteChanged();
+                UpdateRdpCommands();
             }
         }
     }
@@ -199,6 +233,7 @@ public sealed class ServerViewModel : ObservableObject
             {
                 OpenSessionCommand.RaiseCanExecuteChanged();
                 CloseSessionCommand.RaiseCanExecuteChanged();
+                UpdateRdpCommands();
             }
         }
     }
@@ -262,6 +297,12 @@ public sealed class ServerViewModel : ObservableObject
 
     public ObservableCollection<string> SharedFiles { get; } = [];
 
+    /// <summary>학생이 골라 받을 수 있게 등록한 강의 파일 목록입니다(U08).</summary>
+    public ObservableCollection<RegisteredFileItem> RegisteredFiles { get; } = [];
+
+    /// <summary>선택한 파일을 강의 파일 목록에 등록합니다. 본문은 학생이 요청할 때만 보냅니다.</summary>
+    public RelayCommand RegisterSelectedFileCommand { get; }
+
     public ObservableCollection<ChatLine> ChatMessages { get; } = [];
 
     public ObservableCollection<ParticipantItem> Participants { get; } = [];
@@ -291,6 +332,7 @@ public sealed class ServerViewModel : ObservableObject
             if (SetProperty(ref _selectedFilePath, value))
             {
                 SendSelectedFileCommand.RaiseCanExecuteChanged();
+                RegisterSelectedFileCommand.RaiseCanExecuteChanged();
             }
         }
     }
@@ -301,14 +343,6 @@ public sealed class ServerViewModel : ObservableObject
         private set => SetProperty(ref _fileShareStatus, value);
     }
 
-    public void AttachRdpSurface(WindowsFormsHost hostSurface)
-    {
-        _rdpHost.AttachHost(hostSurface);
-        StartRdpPreviewCommand.RaiseCanExecuteChanged();
-        StopRdpPreviewCommand.RaiseCanExecuteChanged();
-        SyncLogs();
-    }
-
     private async Task OpenSessionAsync()
     {
         IsBusy = true;
@@ -316,15 +350,18 @@ public sealed class ServerViewModel : ObservableObject
 
         try
         {
-            await _sessionManager.OpenSessionAsync(SessionName, Port);
+            var roomPassword = RoomPasswordProvider?.Invoke() ?? string.Empty;
+            _secureCertificate ??= LoadSecureCertificate();
+            await _sessionManager.OpenSessionAsync(SessionName, Port, roomPassword.AsMemory(), _secureCertificate);
             _heartbeatService.Start();
             IsSessionOpen = true;
+            ConnectionCode = _sessionManager.ConnectionCode ?? "-";
+            if (_sessionManager.FileTransfers is { } fileTransfers) fileTransfers.FileStored += OnStudentFileStored;
             SessionStatus = $"세션 Open · 포트 {Port}";
-            StatusMessage = $"'{SessionName}' 세션이 시작되었습니다.";
+            StatusMessage = $"'{SessionName}' 세션이 시작되었습니다. 학생에게 호스트 IP, 포트, 접속 코드를 알려 주세요." +
+                            (_sessionManager.IsRoomPasswordProtected ? " 방 비밀번호도 함께 알려 주세요." : string.Empty);
             IsStatusError = false;
-            RdpStatus = _rdpHost.IsAttached
-                ? "RDP 미리보기 준비됨. 자격 증명을 입력하고 연결을 시작하세요."
-                : "RDP 미리보기 호스트가 아직 연결되지 않았습니다.";
+            RdpStatus = "WDS 공유 시작 후 학생을 연결해 주세요. 이미 참여한 학생은 RDP 재접속을 눌러 주세요.";
             ChatMessages.Insert(0, ChatLine.System("세션이 열렸습니다."));
             SyncLogs();
         }
@@ -349,20 +386,31 @@ public sealed class ServerViewModel : ObservableObject
         try
         {
             _heartbeatService.Stop();
-            await _rdpHost.StopHostAsync();
-            await _screenShareService.StopContinuousBroadcastAsync();
-            await _sessionManager.CloseSessionAsync();
+            try { await StopRdpShareCoreAsync(); }
+            finally
+            {
+                try { await _screenShareService.StopContinuousBroadcastAsync(); }
+                finally { await _sessionManager.CloseSessionAsync(); }
+            }
             IsSessionOpen = false;
+            ConnectionCode = "세션을 열면 표시됩니다.";
+            RegisteredFiles.Clear();
             IsScreenSharing = false;
             ParticipantCount = 0;
             Participants.Clear();
             SessionStatus = "세션 닫힘";
             LatestScreenStatus = "화면 공유가 중지되었습니다.";
-            RdpStatus = "RDP 미리보기가 중지되었습니다.";
+            RdpStatus = "WDS 화면 공유가 중지되었습니다.";
             StatusMessage = "세션이 종료되었습니다.";
             IsStatusError = false;
             ChatMessages.Insert(0, ChatLine.System("세션이 닫혔습니다."));
             SyncLogs();
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = $"세션 종료 확인 필요: {ex.GetType().Name}";
+            IsStatusError = true;
+            IsSessionOpen = _sessionManager.CurrentSession is not null;
         }
         finally
         {
@@ -473,19 +521,22 @@ public sealed class ServerViewModel : ObservableObject
 
         try
         {
-            var packets = await _fileDistributor.BuildFilePacketsAsync(
-                filePath,
-                senderId: "Server",
-                sessionId: _sessionManager.CurrentSession?.SessionId,
-                chunkSize: FileTransferRules.MinChunkSize);
-
-            FileShareStatus = $"{label} 전송 중: {Path.GetFileName(filePath)} / {packets.Count} chunks";
+            var sessionId = _sessionManager.CurrentSession?.SessionId;
+            FilePacket? firstPacket = null;
+            var sentChunks = 0;
+            FileShareStatus = $"{label} 전송 준비 중: {Path.GetFileName(filePath)}";
             IsStatusError = false;
             SyncLogs();
 
-            foreach (var packet in packets)
+            await foreach (var packet in _fileDistributor.StreamFilePacketsAsync(
+                filePath, "Server", sessionId, FileTransferRules.MinChunkSize))
             {
+                if (!IsSessionOpen || _sessionManager.CurrentSession?.SessionId != sessionId)
+                    throw new InvalidOperationException("파일 전송 중 강의 세션이 변경되었습니다.");
+                firstPacket ??= packet;
                 await _sessionManager.BroadcastPacketAsync(packet);
+                sentChunks++;
+                FileShareStatus = $"{label} 전송 중: {packet.FileName} / {sentChunks}/{packet.TotalChunks} chunks";
             }
 
             var firstPacket = packets[0];
@@ -541,27 +592,136 @@ public sealed class ServerViewModel : ObservableObject
         SyncLogs();
     }
 
-    private async Task StartRdpPreviewAsync()
+    public async Task StartRdpShareAsync()
     {
+        if (!IsSessionOpen || IsBusy || IsRdpBusy || IsRdpSharing || _shuttingDown) return;
+        IsRdpBusy = true;
+        await _rdpLifecycle.WaitAsync();
         try
         {
-            await _rdpHost.StartHostAsync(RdpServerAddress, RdpUserName, RdpPassword);
-            RdpStatus = $"RDP 연결 시작: {RdpServerAddress}";
+            var sessionId = _sessionManager.CurrentSession!.SessionId;
+            await StopAutoShareAsync();
+            var sharingId = await _rdpSharing.StartAsync(sessionId);
+            _sessionManager.AttachRdpSharing(_rdpSharing, sharingId);
+            IsRdpSharing = true;
+            RdpStatus = "WDS 공유 중 · 보기 전용 · 최대 학생 2명. 학생 앱에서 초대를 요청해 주세요.";
         }
         catch (Exception ex)
         {
-            RdpStatus = $"RDP 시작 실패: {ex.Message}";
-            _logSink.Write(RdpStatus);
+            RdpStatus = $"WDS 시작 실패: {ex.GetType().Name}. Windows WDS 지원 환경을 확인해 주세요.";
         }
+        finally { _rdpLifecycle.Release(); IsRdpBusy = false; SyncLogs(); }
+    }
 
+    public async Task StopRdpShareAsync()
+    {
+        if (IsRdpBusy || IsBusy) return;
+        IsRdpBusy = true;
+        try { await StopRdpShareCoreAsync(); }
+        catch (Exception ex) { RdpStatus = $"WDS 종료 확인 필요: {ex.GetType().Name}"; }
+        finally { IsRdpBusy = false; SyncLogs(); }
+    }
+
+    private async Task StopRdpShareCoreAsync()
+    {
+        await _rdpLifecycle.WaitAsync();
+        try
+        {
+            // 초대 발급을 먼저 막고, 회수 알림 전송에 실패하더라도 네이티브 공유를 닫는다.
+            var inputRevoke = RemoteInputRevokeStatus.Failed;
+            try { inputRevoke = await _sessionManager.DetachRdpSharingAsync(); }
+            finally
+            {
+                await _rdpSharing.StopAsync();
+                IsRdpSharing = false;
+                RdpInvitationParticipants.Clear();
+                // 승인 회수와 실제 입력 차단 확인은 별개이므로, 확인되지 않았으면 완료로 표시하지 않는다.
+                RdpStatus = inputRevoke switch
+                {
+                    RemoteInputRevokeStatus.Confirmed => "WDS 화면 공유 중지됨",
+                    RemoteInputRevokeStatus.Pending => "WDS 화면 공유 중지됨 · 원격 입력 차단 확인 대기 중",
+                    _ => "WDS 화면 공유 중지됨 · 원격 입력 차단 확인 실패(재시도 대기)"
+                };
+            }
+        }
+        finally { _rdpLifecycle.Release(); }
+    }
+
+    private void OnInvitationReady(RdpInvitationHandoff handoff) => RunOnUi(() =>
+    {
+        // 예약된 이벤트보다 회수/재발급이 먼저 끝났다면 오래된 항목을 표시하지 않는다.
+        if (_sessionManager.TryGetPendingInvitationHandoff(handoff.ParticipantId)?.InvitationId != handoff.InvitationId) return;
+        if (!RdpInvitationParticipants.Contains(handoff.ParticipantId))
+            RdpInvitationParticipants.Add(handoff.ParticipantId);
+    });
+
+    private void OnInvitationWithdrawn(string participantId) => RunOnUi(() =>
+    {
+        if (_sessionManager.TryGetPendingInvitationHandoff(participantId) is null)
+            RdpInvitationParticipants.Remove(participantId);
+    });
+
+    public string? GetInvitationPassword(string participantId)
+    {
+        var handoff = _sessionManager.TryGetPendingInvitationHandoff(participantId);
+        return IsRdpSharing && handoff?.ExpiresAt > DateTimeOffset.UtcNow ? handoff.Password : null;
+    }
+
+    private async Task RegisterSelectedFileAsync()
+    {
+        var path = SelectedFilePath;
+        try
+        {
+            var file = await _sessionManager.RegisterFileAsync(path);
+            RegisteredFiles.Add(new RegisteredFileItem(file, UnregisterFile));
+            FileShareStatus = $"강의 파일 목록에 등록했습니다: {file.FileName}. 학생이 목록에서 골라 받을 수 있습니다.";
+        }
+        catch (Exception ex)
+        {
+            // 로컬 경로가 담긴 예외 메시지는 화면에 그대로 보여 주지 않는다.
+            FileShareStatus = "파일을 등록하지 못했습니다: " + CollaborationErrorCatalog.FromException(ex).UserMessage;
+            _logSink.Write($"[FileRoute] 등록 실패: {ex.GetType().Name}");
+        }
         SyncLogs();
     }
 
-    private async Task StopRdpPreviewAsync()
+    private void UnregisterFile(RegisteredFileItem item)
     {
-        await _rdpHost.StopHostAsync();
-        RdpStatus = "RDP 미리보기가 중지되었습니다.";
+        try
+        {
+            _sessionManager.UnregisterFile(item.File.FileId);
+            FileShareStatus = $"목록에서 내렸습니다: {item.File.FileName}. 이미 받은 학생의 파일은 그대로 남습니다.";
+        }
+        catch (InvalidOperationException)
+        {
+            FileShareStatus = "세션이 닫혀 있어 목록을 바꿀 수 없습니다.";
+        }
+        RegisteredFiles.Remove(item);
         SyncLogs();
+    }
+
+    private void OnStudentFileStored(ParticipantConnection student, FileStoredNotice notice) => RunOnUi(() =>
+    {
+        var name = _sessionManager.Participants.TryResolve(student.ConnectionId)?.DisplayName ?? "학생";
+        var file = RegisteredFiles.FirstOrDefault(item => item.File.FileId == notice.FileId)?.File.FileName ?? "파일";
+        FileShareStatus = $"{name}님이 {file} 저장을 완료했습니다.";
+        SyncLogs();
+    });
+
+    private static void RunOnUi(Action action)
+    {
+        var dispatcher = System.Windows.Application.Current?.Dispatcher;
+        if (dispatcher is null || dispatcher.CheckAccess()) action();
+        else dispatcher.BeginInvoke(action);
+    }
+
+    public async Task ShutdownAsync()
+    {
+        if (_shuttingDown) return;
+        _shuttingDown = true;
+        _heartbeatService.Stop();
+        try { await CloseSessionAsync(); }
+        finally { await _rdpSharing.DisposeAsync(); }
     }
 
     private void OnParticipantsChanged()

@@ -15,6 +15,8 @@ public sealed class FeatureOperationResult
 
     public string Message { get; init; } = string.Empty;
 
+    public string DisplayMessage { get; init; } = string.Empty;
+
     public bool IsRecoverable { get; init; }
 
     public int? ProgressPercent { get; init; }
@@ -31,6 +33,13 @@ public sealed class FeatureOperationResult
 
     public bool IsTerminal => State is OperationState.Succeeded or OperationState.Failed or OperationState.Stopped;
 
+    public bool CanRetry => State == OperationState.Failed && IsRecoverable;
+
+    public bool CanTransitionTo(OperationState nextState)
+    {
+        return OperationStateTransitionPolicy.CanTransition(State, nextState, CanRetry);
+    }
+
     public static FeatureOperationResult FromAck(FeatureArea feature, AckPacket packet)
     {
         ArgumentNullException.ThrowIfNull(packet);
@@ -43,6 +52,7 @@ public sealed class FeatureOperationResult
             State = OperationState.Succeeded,
             Code = packet.AckCode,
             Message = packet.Message,
+            DisplayMessage = packet.Message,
             SessionId = packet.SessionId,
             CorrelationId = packet.CorrelationId,
             OccurredAt = packet.CreatedAt
@@ -54,6 +64,7 @@ public sealed class FeatureOperationResult
         ArgumentNullException.ThrowIfNull(packet);
         ValidateFeature(feature);
         PacketContractUtility.ValidateErrorCode(packet.ErrorCode);
+        var errorInfo = FeatureErrorCatalog.Resolve(packet.ErrorCode);
 
         return new FeatureOperationResult
         {
@@ -61,6 +72,7 @@ public sealed class FeatureOperationResult
             State = OperationState.Failed,
             Code = packet.ErrorCode,
             Message = packet.Message,
+            DisplayMessage = errorInfo.UserMessage,
             IsRecoverable = packet.IsRecoverable,
             SessionId = packet.SessionId,
             CorrelationId = packet.CorrelationId,
@@ -92,12 +104,23 @@ public sealed class FeatureOperationResult
             throw new ArgumentOutOfRangeException(nameof(progressPercent), "진행률은 0에서 100 사이여야 합니다.");
         }
 
+        if (state == OperationState.Succeeded && progressPercent is not null and not 100)
+        {
+            throw new ArgumentException("완료 상태의 진행률은 100이어야 합니다.", nameof(progressPercent));
+        }
+
+        if (state == OperationState.Idle && progressPercent is > 0)
+        {
+            throw new ArgumentException("대기 상태의 진행률은 0이어야 합니다.", nameof(progressPercent));
+        }
+
         return new FeatureOperationResult
         {
             Feature = feature,
             State = state,
             Code = code ?? string.Empty,
             Message = message,
+            DisplayMessage = message,
             IsRecoverable = isRecoverable,
             ProgressPercent = progressPercent,
             SessionId = sessionId,

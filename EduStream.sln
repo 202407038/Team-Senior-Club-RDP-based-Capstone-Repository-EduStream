@@ -15,6 +15,8 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{5ACB3D6F
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "EduStream.FileTransfer.Tests", "tests\EduStream.FileTransfer.Tests\EduStream.FileTransfer.Tests.csproj", "{3B78994A-CC6A-405B-B2F8-74CCBF28DB0A}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "EduStream.ContractTestDoubles", "tools\EduStream.ContractTestDoubles\EduStream.ContractTestDoubles.csproj", "{BF2428E9-217F-47CF-A8FA-3F7908206B71}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -25,6 +27,18 @@ Global
 		Release|x86 = Release|x86
 	EndGlobalSection
 	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{BF2428E9-217F-47CF-A8FA-3F7908206B71}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{BF2428E9-217F-47CF-A8FA-3F7908206B71}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{BF2428E9-217F-47CF-A8FA-3F7908206B71}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{BF2428E9-217F-47CF-A8FA-3F7908206B71}.Debug|x64.Build.0 = Debug|Any CPU
+		{BF2428E9-217F-47CF-A8FA-3F7908206B71}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{BF2428E9-217F-47CF-A8FA-3F7908206B71}.Debug|x86.Build.0 = Debug|Any CPU
+		{BF2428E9-217F-47CF-A8FA-3F7908206B71}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{BF2428E9-217F-47CF-A8FA-3F7908206B71}.Release|Any CPU.Build.0 = Release|Any CPU
+		{BF2428E9-217F-47CF-A8FA-3F7908206B71}.Release|x64.ActiveCfg = Release|Any CPU
+		{BF2428E9-217F-47CF-A8FA-3F7908206B71}.Release|x64.Build.0 = Release|Any CPU
+		{BF2428E9-217F-47CF-A8FA-3F7908206B71}.Release|x86.ActiveCfg = Release|Any CPU
+		{BF2428E9-217F-47CF-A8FA-3F7908206B71}.Release|x86.Build.0 = Release|Any CPU
 		{EB6C7F94-6C99-4DD1-96D7-B8E83B13AA48}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
 		{EB6C7F94-6C99-4DD1-96D7-B8E83B13AA48}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{EB6C7F94-6C99-4DD1-96D7-B8E83B13AA48}.Debug|x64.ActiveCfg = Debug|Any CPU
@@ -78,6 +92,7 @@ Global
 		HideSolutionNode = FALSE
 	EndGlobalSection
 	GlobalSection(NestedProjects) = preSolution
+		{BF2428E9-217F-47CF-A8FA-3F7908206B71} = {5ACB3D6F-BC96-4F09-849C-346AA56CC818}
 		{EB6C7F94-6C99-4DD1-96D7-B8E83B13AA48} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
 		{900A61E7-7840-4E07-AC16-B7D809EEFD22} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
 		{79C58F99-6AEF-49F4-BD4B-13F5077CF029} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}

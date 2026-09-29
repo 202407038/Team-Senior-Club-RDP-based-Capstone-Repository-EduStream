@@ -13,14 +13,16 @@ public static class PacketFactory
         string senderId,
         string displayName,
         string targetAddress,
-        int targetPort)
+        int targetPort,
+        string? joinTicket = null)
     {
         return new SessionJoinPacket
         {
             SenderId = senderId,
             DisplayName = displayName,
             TargetAddress = targetAddress,
-            TargetPort = targetPort
+            TargetPort = targetPort,
+            JoinTicket = joinTicket
         };
     }
 
@@ -173,6 +175,64 @@ public static class PacketFactory
             Encoding = encoding,
             Content = content,
             DataLength = content.Length
+        };
+    }
+
+    public static RdpInvitationRequestPacket CreateRdpInvitationRequest(
+        string senderId,
+        Guid sessionId,
+        string participantId,
+        Guid connectionId)
+    {
+        return new RdpInvitationRequestPacket
+        {
+            SessionId = sessionId,
+            SenderId = senderId,
+            ParticipantId = participantId,
+            ConnectionId = connectionId
+        };
+    }
+
+    public static RdpInvitationPacket CreateRdpInvitation(
+        string senderId,
+        Guid sessionId,
+        string participantId,
+        Guid sharingId,
+        Guid invitationId,
+        Guid connectionId,
+        string connectionString,
+        DateTimeOffset expiresAt)
+    {
+        return new RdpInvitationPacket
+        {
+            SessionId = sessionId,
+            SenderId = senderId,
+            ParticipantId = participantId,
+            SharingId = sharingId,
+            InvitationId = invitationId,
+            ConnectionId = connectionId,
+            ConnectionString = connectionString,
+            ExpiresAt = expiresAt,
+            DataLength = GetTextPayloadLength(connectionString)
+        };
+    }
+
+    public static RdpInvitationRevokedPacket CreateRdpInvitationRevoked(
+        string senderId,
+        Guid sessionId,
+        string participantId,
+        Guid invitationId,
+        Guid connectionId,
+        RdpFailureReason reason)
+    {
+        return new RdpInvitationRevokedPacket
+        {
+            SessionId = sessionId,
+            SenderId = senderId,
+            ParticipantId = participantId,
+            InvitationId = invitationId,
+            ConnectionId = connectionId,
+            Reason = reason
         };
     }
 

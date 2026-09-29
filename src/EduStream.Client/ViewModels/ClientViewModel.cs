@@ -3,10 +3,13 @@ using System.IO;
 using System.Text.Json;
 using System.Windows;
 using EduStream.Client.Services;
+using EduStream.Core.Collaboration;
+using EduStream.Core.FileSharing;
 using EduStream.Core.Common;
 using EduStream.Core.Factories;
 using EduStream.Core.Logging;
 using EduStream.Core.Models;
+using EduStream.Core.Network;
 using EduStream.Core.Protocols;
 using EduStream.Core.Serialization;
 using EduStream.Core.Utils;
@@ -29,7 +32,45 @@ public sealed class ClientViewModel : ObservableObject
     private readonly FileReceiver _fileReceiver;
     private readonly TcpClientService _tcpClient;
     private readonly IPacketSerializer _serializer = new PacketSerializer();
+    private readonly IRdpViewerService _rdpViewerService;
+    private SecureSessionChannel? _secureChannel;
+    private StudentStatusClient? _statusClient;
+    // 자동 재연결(U03): 마지막 참가 정보와 교수자가 준 일회용 토큰. 비밀번호는 보관하지 않는다.
+    private sealed record JoinTarget(string Host, int Port, string Code, string DisplayName);
+    private JoinTarget? _lastJoin;
+    private string? _reconnectToken;
+    private TimeSpan _reconnectWindow = ReconnectRules.DefaultWindow;
+    private CancellationTokenSource? _reconnectCts;
+    private volatile bool _userLeaving;
+    private volatile bool _sessionEnded;
+    private SessionFileRequestClient? _fileClient;
+    // 참가 요청을 보낸 뒤 서버의 참가 승인(SessionJoined)을 기다리는 시도. 승인·거부·끊김·시간 초과 중 먼저 온 결과로 끝난다.
+    private enum JoinAckResult { Joined, Rejected, Disconnected, TimedOut }
+    private TaskCompletionSource<JoinAckResult>? _pendingJoinAck;
+    private StudentStatus _studentStatus = StudentStatus.Initial;
+    private bool _permissionNoticeShown;
+    private string _connectionCode = string.Empty;
+    private RdpInvitationPacket? _activeRdpInvitation;
+    // 초대(TCP)와 비밀번호(보호 채널)는 도착 순서가 정해져 있지 않아, 둘이 같은 초대로 짝지어질 때까지 보관한다.
+    private readonly object _rdpAutoConnectLock = new();
+    private RdpInvitationSecretNotice? _pendingRdpSecret;
+    // 비밀번호를 비우는 것과 별개로, 현재 요청에서 이미 시작한 초대는 실패한 경우에도 자동 재실행하지 않는다.
+    private readonly HashSet<(Guid Session, Guid Connection, Guid Invitation)> _startedRdpAutoConnections = new();
+    private Guid _rdpSessionId;
+    private string _rdpParticipant = string.Empty;
+    private bool _isRdpActive;
+    private readonly System.Windows.Threading.DispatcherTimer _freshnessTimer;
+    private bool _disposing;
+    private int _frameGeneration;
+    public bool IsRdpActive { get => _isRdpActive; private set => SetProperty(ref _isRdpActive, value); }
+    private Guid _currentRdpConnectionId;
+    private string _rdpStatusText = "RDP 대기 중";
 
+    public string RdpStatusText
+    {
+        get => _rdpStatusText;
+        private set => SetProperty(ref _rdpStatusText, value);
+    }
     private string _hostAddress = "127.0.0.1";
     private ImageSource? _displaySource;
     private bool _hasRemoteFrame;
@@ -59,8 +100,9 @@ public sealed class ClientViewModel : ObservableObject
     private bool _isStatusError;
     private string _statusMessage = string.Empty;
 
-    public ClientViewModel()
+    public ClientViewModel(IRdpViewerService? rdpViewerService = null)
     {
+        _rdpViewerService = rdpViewerService ?? new RdpViewerService();
         _sessionClient = new SessionClient(_logSink);
         _screenRenderer = new ScreenRenderer();
         _fileReceiver = new FileReceiver();
@@ -68,9 +110,10 @@ public sealed class ClientViewModel : ObservableObject
 
         _tcpClient.PacketReceived += OnPacketReceivedAsync;
         _tcpClient.Disconnected += OnDisconnectedAsync;
-
+        _rdpViewerService.StatusChanged += OnRdpStatusChanged;
         JoinSessionCommand = new RelayCommand(() => _ = JoinSessionAsync(), () => !IsConnected && !IsConnecting);
-        DisconnectCommand = new RelayCommand(() => _ = DisconnectAsync(), () => IsConnected);
+        // 참가 승인 대기·자동 재연결 중에도 사용자가 중단할 수 있어야 한다.
+        DisconnectCommand = new RelayCommand(() => _ = DisconnectAsync(), () => IsConnected || IsConnecting);
         SendChatCommand = new RelayCommand(() => _ = SendChatAsync(), () => IsConnected && !string.IsNullOrWhiteSpace(ChatInput));
         StopRemoteControlCommand = new RelayCommand(() => AllowRemoteControl = false, () => AllowRemoteControl);
         SimulateScreenRenderCommand = new RelayCommand(() => _ = SimulateScreenRenderAsync());
@@ -114,6 +157,21 @@ public sealed class ClientViewModel : ObservableObject
         get => _port;
         set => SetProperty(ref _port, value);
     }
+
+    /// <summary>교수자 화면의 접속 코드(XXXX-XXXX-XXXX)입니다. 연결한 PC가 그 교수자인지 확인하는 데 씁니다.</summary>
+    public string ConnectionCode
+    {
+        get => _connectionCode;
+        set => SetProperty(ref _connectionCode, value);
+    }
+
+    /// <summary>참가 요청 뒤 서버의 참가 승인을 기다리는 최대 시간입니다. 넘기면 참가 실패로 정리합니다.</summary>
+    public TimeSpan JoinAckTimeout { get; set; } = TimeSpan.FromSeconds(10);
+
+    /// <summary>
+    /// 방 비밀번호 입력칸을 읽고 비우는 함수입니다. 비밀번호를 ViewModel 속성에 보관하지 않기 위해 View가 제공합니다.
+    /// </summary>
+    public Func<string>? RoomPasswordProvider { get; set; }
 
     public string DisplayName
     {
@@ -250,6 +308,7 @@ public sealed class ClientViewModel : ObservableObject
             if (SetProperty(ref _isConnecting, value))
             {
                 JoinSessionCommand.RaiseCanExecuteChanged();
+                DisconnectCommand.RaiseCanExecuteChanged();
             }
         }
     }
@@ -273,6 +332,9 @@ public sealed class ClientViewModel : ObservableObject
     public ObservableCollection<ChatLine> ChatMessages { get; } = [];
 
     public ObservableCollection<string> DownloadedFiles { get; } = [];
+
+    /// <summary>교수자가 등록한 강의 파일 목록입니다. 항목의 다운로드 버튼으로 골라 받습니다(U08).</summary>
+    public ObservableCollection<SessionFileItem> SessionFiles { get; } = [];
 
     public RelayCommand JoinSessionCommand { get; }
 
@@ -299,6 +361,12 @@ public sealed class ClientViewModel : ObservableObject
             return;
         }
 
+        if (!EduStream.Core.Network.ConnectionCode.TryNormalize(ConnectionCode, out _))
+        {
+            ApplyJoinError(_sessionClient.CreateJoinError(HostAddress, Port, "교수자 화면의 접속 코드(XXXX-XXXX-XXXX)를 입력해 주세요."));
+            return;
+        }
+
         try
         {
             // 💡 연결 시도 시 에러 상태 초기화 및 로딩 가동
@@ -310,20 +378,55 @@ public sealed class ClientViewModel : ObservableObject
             _logSink.Write($"서버 연결 시도: {HostAddress}:{Port}");
             SyncLogs();
 
-            // TCP 연결 (만약 서버가 꺼져있으면 여기서 catch 블록으로 튕깁니다)
-            await _tcpClient.ConnectAsync(HostAddress, Port);
+            // 새 참가는 이전 세션의 재연결 상태를 이어받지 않는다.
+            CancelReconnect();
+            _reconnectToken = null;
+            _userLeaving = false;
+            _sessionEnded = false;
+            _lastJoin = new JoinTarget(HostAddress, Port, ConnectionCode, DisplayName);
 
-            // Join 패킷 전송
-            var joinRequest = _sessionClient.CreateJoinRequest(HostAddress, Port, DisplayName);
-            await _tcpClient.SendAsync(joinRequest);
-
-            _logSink.Write($"세션 참가 요청 전송: {DisplayName} -> {HostAddress}:{Port}");
-            SyncLogs();
+            // 접속 코드로 교수자 PC를 확인한 보호 채널에서만 방 비밀번호를 보내고 참가 티켓을 받는다.
+            StatusMessage = "교수자 PC를 확인하는 중입니다...";
+            var roomPassword = RoomPasswordProvider?.Invoke() ?? string.Empty;
+            SecureSessionChannel secure;
+            try
+            {
+                secure = await SecureRoomJoinClient.AuthenticateAsync(
+                    HostAddress, Port, ConnectionCode, DisplayName, roomPassword.AsMemory(), _logSink);
+            }
+            catch (SecureJoinException ex)
+            {
+                ApplyJoinError(_sessionClient.CreateJoinError(HostAddress, Port, DescribeSecureJoinFailure(ex.Failure)));
+                return;
+            }
+            if (_userLeaving || _disposing)
+            {
+                await secure.DisposeAsync();
+                return;
+            }
+            await ReplaceSecureChannelAsync(secure);
+            // 교수자는 TCP 참가 직후 보호 채널로 상태를 보내므로, 참가 요청 전에 수신 처리기를 붙인다.
+            AttachStudentStatus(secure);
 
             StatusMessage = "서버의 세션 참여 승인을 대기하고 있습니다.";
+            // TCP 연결 (만약 서버가 꺼져있으면 여기서 catch 블록으로 튕깁니다)
+            var result = await SendJoinAndAwaitAckAsync(HostAddress, Port, DisplayName, secure.JoinTicket, CancellationToken.None);
+            SyncLogs();
+            if (result == JoinAckResult.Joined || _userLeaving || _disposing) return;
+
+            // 승인 전에 끝났다. 거부 사유는 서버 오류 처리에서 이미 안내했으므로 연결만 정리한다.
+            await AbandonJoinAsync();
+            if (result != JoinAckResult.Rejected)
+            {
+                ApplyJoinError(_sessionClient.CreateJoinError(HostAddress, Port, result == JoinAckResult.TimedOut
+                    ? "서버가 참가 요청에 응답하지 않습니다. 잠시 뒤 다시 참가해 주세요."
+                    : "참가 승인 전에 서버와의 연결이 끊어졌습니다. 다시 참가해 주세요."));
+            }
         }
         catch (Exception)
         {
+            await AbandonJoinAsync();
+            if (_userLeaving || _disposing) return;
             // 💡 서버가 닫혀있을 때 명확하게 에러 메시지 주입
             ApplyJoinError(_sessionClient.CreateJoinError(HostAddress, Port, "서버를 찾을 수 없습니다. 호스트 주소와 포트 혹은 서버 구동 상태를 확인해 주세요."));
         }
@@ -392,6 +495,12 @@ public sealed class ClientViewModel : ObservableObject
 
     private async Task DisconnectAsync()
     {
+        // 사용자가 직접 나간 경우는 자동 재연결하지 않는다.
+        _userLeaving = true;
+        CancelReconnect();
+        _reconnectToken = null;
+        Interlocked.Increment(ref _frameGeneration);
+        await ResetRdpAsync();
         try
         {
             // Leave 패킷 전송
@@ -401,6 +510,7 @@ public sealed class ClientViewModel : ObservableObject
         catch { }
 
         await _tcpClient.DisconnectAsync();
+        await ReplaceSecureChannelAsync(null);
         await _sessionClient.DisconnectAsync("사용자 요청으로 연결 종료");
 
         RunOnUiThread(() =>
@@ -523,11 +633,182 @@ public sealed class ClientViewModel : ObservableObject
             default:
                 _logSink.Write($"알 수 없는 패킷 타입 수신: {packetType}");
                 break;
+            case PacketType.RdpInvitation:
+                var rdpInvitation = JsonSerializer.Deserialize<RdpInvitationPacket>(payload);
+                if (rdpInvitation is not null)
+                {
+                    await HandleRdpInvitationAsync(rdpInvitation);
+                }
+                break;
+
+            case PacketType.RdpInvitationRevoked:
+                var rdpRevoked = JsonSerializer.Deserialize<RdpInvitationRevokedPacket>(payload);
+                if (rdpRevoked is not null)
+                {
+                    await HandleRdpInvitationRevokedAsync(rdpRevoked);
+                }
+                break;
+        }
+    }
+    private async Task SendRdpInvitationRequestAsync()
+    {
+        try
+        {
+            await ResetRdpAsync();
+            if (_disposing || !IsConnected || _sessionClient.CurrentSession is null)
+                throw new InvalidOperationException("강의 세션에 먼저 참여해 주세요.");
+            lock (_rdpAutoConnectLock)
+            {
+                _currentRdpConnectionId = Guid.NewGuid();
+                _rdpSessionId = _sessionClient.CurrentSession.SessionId;
+                _rdpParticipant = DisplayName;
+            }
+            var requestPacket = PacketFactory.CreateRdpInvitationRequest(
+                _rdpParticipant, _rdpSessionId, _rdpParticipant, _currentRdpConnectionId);
+            await _tcpClient.SendAsync(requestPacket);
+            _logSink.Write("[RDP] 초대 요청 전송");
+        }
+        catch (Exception ex)
+        {
+            _logSink.Write($"[RDP] 초대 요청 실패: {ex.Message}");
+            RunOnUiThread(() => RdpStatusText = $"RDP 초대 요청 실패: {ex.Message}");
         }
     }
 
+    private async Task HandleRdpInvitationAsync(RdpInvitationPacket invitation)
+    {
+        try
+        {
+            lock (_rdpAutoConnectLock)
+            {
+                RdpInvitationContract.Validate(invitation, _rdpSessionId, _rdpParticipant,
+                    _currentRdpConnectionId, DateTimeOffset.UtcNow);
+                if (_disposing || !IsConnected || _startedRdpAutoConnections.Contains(
+                    (_rdpSessionId, invitation.ConnectionId, invitation.InvitationId))) return;
+                _activeRdpInvitation = invitation;
+            }
+            // 보호 채널이 있으면 비밀번호가 그쪽으로 오므로 입력을 요구하지 않는다.
+            RunOnUiThread(() => RdpStatusText = _secureChannel is not null
+                ? "초대 수신: 교수자 화면 연결 정보를 확인하는 중입니다."
+                : "초대 수신: 설정 탭에서 별도로 전달받은 비밀번호를 입력해 주세요.");
+            TryStartRdpAutoConnect();
+        }
+        catch (ArgumentException) { _logSink.Write("[RDP] 유효하지 않거나 이전 연결의 초대 무시"); }
+        await Task.CompletedTask;
+    }
+
+    /// <summary>보호 채널로 받은 초대 비밀번호입니다. 지금 기다리는 초대 요청(연결 ID)에 대한 것만 보관합니다.</summary>
+    private void OnRdpInvitationSecret(RdpInvitationSecretNotice secret)
+    {
+        lock (_rdpAutoConnectLock)
+        {
+            if (_disposing || !IsConnected || secret.SessionId != _rdpSessionId ||
+                secret.ConnectionId != _currentRdpConnectionId)
+            {
+                _logSink.Write("[RDP] 현재 초대 요청과 맞지 않는 초대 비밀번호 무시");
+                return;
+            }
+            if (_startedRdpAutoConnections.Contains((secret.SessionId, secret.ConnectionId, secret.InvitationId))) return;
+            _pendingRdpSecret = secret;
+        }
+        TryStartRdpAutoConnect();
+    }
+
+    /// <summary>
+    /// 초대와 비밀번호가 같은 초대(InvitationId·ConnectionId)로 짝지어지면 한 번만 자동 연결합니다.
+    /// 참가 직후·공유 재시작·재참가 모두 초대 재요청을 거치므로 이 경로로 화면이 자동 복귀합니다.
+    /// </summary>
+    private void TryStartRdpAutoConnect()
+    {
+        RdpInvitationSecretNotice secret;
+        RdpInvitationPacket matchedInvitation;
+        bool expired;
+        lock (_rdpAutoConnectLock)
+        {
+            if (_disposing || !IsConnected ||
+                _activeRdpInvitation is not { } invitation || _pendingRdpSecret is not { } pending ||
+                pending.SessionId != _rdpSessionId || invitation.SessionId != pending.SessionId ||
+                pending.ConnectionId != _currentRdpConnectionId ||
+                pending.InvitationId != invitation.InvitationId || pending.ConnectionId != invitation.ConnectionId)
+                return;
+            secret = pending;
+            matchedInvitation = invitation;
+            _pendingRdpSecret = null;
+            expired = secret.ExpiresAt <= DateTimeOffset.UtcNow || invitation.ExpiresAt <= DateTimeOffset.UtcNow;
+            // 접속 완료를 기다리기 전에 예약해야 동시에 도착한 알림도 한 번만 뷰어를 호출한다.
+            if (!expired && !_startedRdpAutoConnections.Add(
+                (secret.SessionId, secret.ConnectionId, secret.InvitationId))) return;
+        }
+
+        if (expired)
+        {
+            _logSink.Write("[RDP] 만료된 초대 비밀번호로 자동 연결하지 않음");
+            RunOnUiThread(() => RdpStatusText = "RDP 초대가 만료되었습니다. 다시 요청해 주세요.");
+            return;
+        }
+        _logSink.Write("[RDP] 보호 채널로 받은 초대로 자동 연결 시작");
+        RunOnUiThread(() => RdpStatusText = "교수자 화면에 자동으로 연결하는 중입니다.");
+        _ = ConnectRdpInvitationAsync(matchedInvitation, secret.Password);
+    }
+
+    public Task ConnectRdpWithPasswordAsync(string password)
+    {
+        RdpInvitationPacket? invitation;
+        lock (_rdpAutoConnectLock) invitation = _activeRdpInvitation;
+        return ConnectRdpInvitationAsync(invitation, password);
+    }
+
+    private async Task ConnectRdpInvitationAsync(RdpInvitationPacket? invitation, string password)
+    {
+        try
+        {
+            lock (_rdpAutoConnectLock)
+            {
+                if (invitation is null) throw new InvalidOperationException("유효한 초대를 먼저 받아 주세요.");
+                // 짝지은 초대의 스냅샷을 검증한다. 이후 새 초대가 도착해도 이전 비밀번호와 섞지 않는다.
+                RdpInvitationContract.Validate(invitation, _rdpSessionId, _rdpParticipant,
+                    _currentRdpConnectionId, DateTimeOffset.UtcNow);
+                if (!IsConnected || _disposing) throw new InvalidOperationException("강의 연결이 종료됐습니다.");
+            }
+            await _rdpViewerService.ConnectAsync(invitation, password);
+        }
+        catch (Exception ex) { RunOnUiThread(() => RdpStatusText = $"RDP 연결 실패: {ex.Message}"); }
+    }
+
+    private async Task HandleRdpInvitationRevokedAsync(RdpInvitationRevokedPacket revoked)
+    {
+        if (_activeRdpInvitation is null || !RdpInvitationContract.AppliesTo(revoked, _activeRdpInvitation)) return;
+        await ResetRdpAsync();
+        RunOnUiThread(() =>
+        {
+            RdpStatusText = $"RDP 연결 종료됨: {revoked.Reason}";
+            _logSink.Write($"[RDP] 초대 폐기: {revoked.Reason}");
+            SyncLogs();
+        });
+    }
+
+    private void OnRdpStatusChanged(RdpConnectionStatus status)
+    {
+        RunOnUiThread(() =>
+        {
+            if (_disposing || status.ConnectionId != _currentRdpConnectionId || status.SessionId != _rdpSessionId ||
+                status.ParticipantId != _rdpParticipant) return;
+            IsRdpActive = status.State is RdpConnectionState.Connecting or RdpConnectionState.Reconnecting or RdpConnectionState.Connected;
+            RdpStatusText = $"RDP: {status.State}" + (status.Failure != RdpFailureReason.None ? $" ({status.Failure})" : "");
+            _logSink.Write($"[RDP] 상태 변경: {status.State}");
+            SyncLogs();
+        });
+    }
     private async Task HandleAckAsync(AckPacket packet)
     {
+        // 참가 승인은 지금 기다리는 참가 요청에 대한 것만 받는다. 시간 초과·취소로 포기한 뒤 늦게 온 승인은 무시한다.
+        if (packet.AckCode == AckCodes.SessionJoined &&
+            !(Volatile.Read(ref _pendingJoinAck)?.TrySetResult(JoinAckResult.Joined) ?? false))
+        {
+            _logSink.Write("대기 중이 아닌 참가 승인 무시");
+            return;
+        }
+
         RunOnUiThread(() =>
         {
             LastServerMessage = packet.Message;
@@ -548,6 +829,7 @@ public sealed class ClientViewModel : ObservableObject
                 LastErrorMessage = "오류 없음";
                 ChatStatus = "채팅 가능";
                 ChatMessages.Insert(0, ChatLine.System($"{DisplayName} 님이 세션에 참가했습니다."));
+                _ = SendRdpInvitationRequestAsync();
             }
             else if (packet.AckCode == AckCodes.SessionLeft)
             {
@@ -560,6 +842,13 @@ public sealed class ClientViewModel : ObservableObject
                 SessionSummary = "아직 참가한 세션이 없습니다.";
                 LastSuccessMessage = "세션 이탈 처리 완료";
                 ChatStatus = "채팅 대기 중";
+            }
+            else if (packet.AckCode == AckCodes.RdpSharingStarted)
+            {
+                // U03: 공유 재시작 시 학생 조작 없이 새 연결 ID로 초대를 다시 요청한다. 이미 받은 초대/연결은 건드리지 않는다.
+                if (IsConnected && !_disposing && _activeRdpInvitation is null && !IsRdpActive &&
+                    packet.SessionId == _sessionClient.CurrentSession?.SessionId)
+                    _ = SendRdpInvitationRequestAsync();
             }
 
             _logSink.Write($"서버 응답 수신: {packet.AckCode} - {packet.Message}");
@@ -590,6 +879,7 @@ public sealed class ClientViewModel : ObservableObject
 
         if (!IsConnected)
         {
+            Volatile.Read(ref _pendingJoinAck)?.TrySetResult(JoinAckResult.Rejected);
             await _tcpClient.DisconnectAsync();
             await _sessionClient.DisconnectAsync(packet.Message);
         }
@@ -709,7 +999,7 @@ public sealed class ClientViewModel : ObservableObject
                         LastServerMessage = "파일을 수신 중입니다.";
 
                         // 진행 중 status 반영
-                        UpdateStatus($"파일 수신 중: {result.ProgressPercent}% ({packet.FileName})", StatusPriority.Progress);
+                        UpdateStatus($"파일 수신 중: {result.ProgressPercent}% ({packet.FileName})", StatusPriority.Progress, source: "file");
 
                         _logSink.Write($"파일 청크 수신 중: transfer={packet.TransferId}, progress={result.ReceivedChunkCount}/{result.TotalChunks}");
                         SyncLogs();
@@ -741,7 +1031,7 @@ public sealed class ClientViewModel : ObservableObject
                 FileTransferDetail = $"{BuildFileTransferDetail(packet, result)} / 저장 위치 {path}";
 
                 // 수신 완료 메시지 확정
-                UpdateStatus($"파일 수신 완료: {Path.GetFileName(path)} (100%)", StatusPriority.Success);
+                UpdateStatus($"파일 수신 완료: {Path.GetFileName(path)} (100%)", StatusPriority.Success, source: "file");
 
                 _logSink.Write($"파일 저장 완료: {path}");
                 SyncLogs();
@@ -757,7 +1047,7 @@ public sealed class ClientViewModel : ObservableObject
                 FileTransferDetail = $"{packet.FileName} 저장 실패";
                 LastErrorMessage = $"FILE_RECEIVE_FAILED: {ex.Message}";
 
-                UpdateStatus($"파일 저장 실패: {ex.Message}", StatusPriority.Error, isError: true);
+                UpdateStatus($"파일 저장 실패: {ex.Message}", StatusPriority.Error, isError: true, source: "file");
 
                 _logSink.Write($"파일 저장 실패: {ex.Message}");
                 SyncLogs();
@@ -775,12 +1065,18 @@ public sealed class ClientViewModel : ObservableObject
         return $"{packet.FileName} / 청크 {packet.ChunkIndex + 1} of {packet.TotalChunks}";
     }
 
-    private Task OnDisconnectedAsync(string reason)
+    private async Task OnDisconnectedAsync(string reason)
     {
+        Volatile.Read(ref _pendingJoinAck)?.TrySetResult(JoinAckResult.Disconnected);
+        Interlocked.Increment(ref _frameGeneration);
+        await ResetRdpAsync();
+        await ReplaceSecureChannelAsync(null);
+        var wasJoined = false;
         RunOnUiThread(() =>
         {
             if (IsConnected)
             {
+                wasJoined = true;
                 IsConnected = false;
                 IsConnecting = false;
                 HasRemoteFrame = false;
@@ -798,8 +1094,338 @@ public sealed class ClientViewModel : ObservableObject
             }
         });
 
-        return Task.CompletedTask;
+        if (wasJoined && !_userLeaving && !_disposing && !_sessionEnded &&
+            Interlocked.Exchange(ref _reconnectToken, null) is { } token && _lastJoin is { } target)
+            _ = RunReconnectAsync(target, token);
     }
+
+    /// <summary>
+    /// 비정상 끊김 뒤 교수자가 준 토큰으로 비밀번호 재입력 없이 다시 참가합니다. 토큰은 한 번만 쓸 수 있어,
+    /// 교수자 PC에 닿지 않았을 때만 같은 토큰으로 다시 시도하고 거부되면 그만둡니다.
+    /// </summary>
+    private async Task RunReconnectAsync(JoinTarget target, string token)
+    {
+        var cts = new CancellationTokenSource();
+        Interlocked.Exchange(ref _reconnectCts, cts)?.Cancel();
+        RunOnUiThread(() =>
+        {
+            IsConnecting = true;
+            ConnectionState = "재연결 중...";
+            ChatMessages.Insert(0, ChatLine.System("연결이 끊겨 자동으로 다시 연결합니다."));
+        });
+
+        bool rejoined;
+        var currentToken = token;
+        try
+        {
+            rejoined = await ReconnectScheduler.RunAsync(
+                async (attempt, cancellationToken) =>
+                {
+                    var (outcome, nextToken) = await TryReconnectOnceAsync(target, currentToken, attempt, cancellationToken);
+                    if (nextToken is not null) currentToken = nextToken;
+                    return outcome;
+                },
+                _reconnectWindow, cancellationToken: cts.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+        finally
+        {
+            Interlocked.CompareExchange(ref _reconnectCts, null, cts);
+        }
+
+        if (!rejoined && !_userLeaving && !_disposing)
+        {
+            RunOnUiThread(() =>
+            {
+                IsConnecting = false;
+                ConnectionState = "연결 끊김";
+                UpdateStatus("자동 재연결에 실패했습니다. 참가 정보를 확인하고 다시 참가해 주세요.", StatusPriority.Error, isError: true);
+                SyncLogs();
+            });
+        }
+    }
+
+    /// <returns>시도 결과와, 서버가 이번 시도 중 새로 발급한 토큰(다음 시도에 쓸 것)입니다.</returns>
+    private async Task<(ReconnectAttemptOutcome Outcome, string? NextToken)> TryReconnectOnceAsync(JoinTarget target,
+        string token, int attempt, CancellationToken cancellationToken)
+    {
+        if (_userLeaving || _disposing || _sessionEnded) return (ReconnectAttemptOutcome.GiveUp, null);
+        RunOnUiThread(() => StatusMessage = $"연결이 끊겨 다시 연결하는 중입니다... ({attempt}번째 시도)");
+
+        SecureSessionChannel secure;
+        try
+        {
+            secure = await SecureRoomJoinClient.AuthenticateAsync(target.Host, target.Port, target.Code, target.DisplayName,
+                ReadOnlyMemory<char>.Empty, _logSink, cancellationToken: cancellationToken, reconnectToken: token);
+        }
+        catch (SecureJoinException ex) when (ex.Failure == SecureJoinFailure.Unreachable)
+        {
+            return (ReconnectAttemptOutcome.RetryLater, null);
+        }
+        catch (SecureJoinException ex)
+        {
+            _logSink.Write($"[Reconnect] 재연결 거부: {ex.Failure}");
+            return (ReconnectAttemptOutcome.GiveUp, null);
+        }
+
+        // 토큰은 이미 소비됐다. 서버의 참가 승인을 받기 전에 끝나면 같은 토큰으로는 다시 시도할 수 없다.
+        JoinAckResult result;
+        try
+        {
+            await ReplaceSecureChannelAsync(secure);
+            AttachStudentStatus(secure);
+            result = await SendJoinAndAwaitAckAsync(target.Host, target.Port, target.DisplayName, secure.JoinTicket, cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logSink.Write($"[Reconnect] 재참가 요청 실패: {ex.GetType().Name}");
+            result = JoinAckResult.Disconnected;
+        }
+
+        if (result == JoinAckResult.Joined)
+        {
+            _logSink.Write($"[Reconnect] 재참가 승인 ({attempt}번째 시도)");
+            return (ReconnectAttemptOutcome.Succeeded, null);
+        }
+
+        _logSink.Write($"[Reconnect] 재참가 승인 실패: {result}");
+        await AbandonJoinAsync();
+        // 서버가 참가를 처리해 새 토큰을 보낸 뒤 끊긴 경우에만 그 토큰으로 이어서 시도한다.
+        var next = Interlocked.Exchange(ref _reconnectToken, null);
+        return result != JoinAckResult.Rejected && next is not null && next != token
+            ? (ReconnectAttemptOutcome.RetryLater, next)
+            : (ReconnectAttemptOutcome.GiveUp, null);
+    }
+
+    /// <summary>
+    /// TCP로 참가 요청을 보내고 이 요청에 대한 서버의 참가 승인을 기다립니다. 요청 전송은 참가 성공이 아니므로
+    /// 승인(Joined)을 받았을 때만 참가한 것으로 봅니다.
+    /// </summary>
+    private async Task<JoinAckResult> SendJoinAndAwaitAckAsync(string host, int port, string displayName, string joinTicket,
+        CancellationToken cancellationToken)
+    {
+        var pending = new TaskCompletionSource<JoinAckResult>(TaskCreationOptions.RunContinuationsAsynchronously);
+        Interlocked.Exchange(ref _pendingJoinAck, pending)?.TrySetResult(JoinAckResult.Disconnected);
+        try
+        {
+            await _tcpClient.ConnectAsync(host, port);
+            await _tcpClient.SendAsync(_sessionClient.CreateJoinRequest(host, port, displayName, joinTicket));
+            _logSink.Write($"세션 참가 요청 전송: {displayName} -> {host}:{port}");
+
+            // 승인과 시간 초과·취소가 겹쳐도 먼저 기록된 한쪽만 인정한다.
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeout.CancelAfter(JoinAckTimeout);
+            JoinAckResult result;
+            using (timeout.Token.Register(() => pending.TrySetResult(JoinAckResult.TimedOut)))
+                result = await pending.Task;
+            if (result == JoinAckResult.TimedOut) cancellationToken.ThrowIfCancellationRequested();
+            return result;
+        }
+        finally
+        {
+            Interlocked.CompareExchange(ref _pendingJoinAck, null, pending);
+        }
+    }
+
+    /// <summary>승인받지 못한 참가 시도의 TCP 연결과 보호 채널을 닫습니다.</summary>
+    private async Task AbandonJoinAsync()
+    {
+        await _tcpClient.DisconnectAsync();
+        await ReplaceSecureChannelAsync(null);
+    }
+
+    private void CancelReconnect() => Interlocked.Exchange(ref _reconnectCts, null)?.Cancel();
+
+    private async Task ResetRdpAsync()
+    {
+        lock (_rdpAutoConnectLock)
+        {
+            _pendingRdpSecret = null;
+            _startedRdpAutoConnections.Clear();
+            _currentRdpConnectionId = Guid.Empty;
+            _activeRdpInvitation = null;
+            _rdpSessionId = Guid.Empty;
+            _rdpParticipant = string.Empty;
+        }
+        RunOnUiThread(() => { IsRdpActive = false; RdpStatusText = "RDP 대기 중"; });
+        await _rdpViewerService.DisconnectAsync();
+    }
+
+    public async Task ShutdownAsync()
+    {
+        if (_disposing) return;
+        _disposing = true;
+        _freshnessTimer.Stop();
+        await DisconnectAsync();
+        await _rdpViewerService.DisposeAsync();
+    }
+
+    /// <summary>보호 채널은 참가 연결과 수명을 같이한다. 새 참가·퇴장·끊김 때 이전 채널을 닫는다.</summary>
+    private async Task ReplaceSecureChannelAsync(SecureSessionChannel? next)
+    {
+        var previous = Interlocked.Exchange(ref _secureChannel, next);
+        if (previous is not null && !ReferenceEquals(previous, next))
+        {
+            if (next is null) DetachStudentStatus();
+            await previous.DisposeAsync();
+        }
+    }
+
+    private void AttachStudentStatus(SecureSessionChannel secure)
+    {
+        var statusClient = new StudentStatusClient(secure.SessionId, secure.Connection, _logSink);
+        statusClient.StatusChanged += status => RunOnUiThread(() => ApplyStudentStatus(status));
+        var fileClient = new SessionFileRequestClient(secure.SessionId, secure.Connection, new SessionFileDownloader(), _logSink);
+        fileClient.CatalogChanged += catalog => RunOnUiThread(() => ApplyFileCatalog(catalog));
+        secure.FrameReceived += frame =>
+        {
+            try
+            {
+                var kind = CollaborationFrameInspector.PeekKind(frame);
+                if (StudentStatusClient.Handles(kind))
+                    statusClient.HandleFrame(frame);
+                else if (kind == CollaborationMessageKind.ReconnectGrant)
+                {
+                    var grant = CollaborationMessageCodec.Decode<ReconnectGrantNotice>(frame, out _);
+                    _reconnectToken = grant.Token;
+                    _reconnectWindow = TimeSpan.FromSeconds(grant.WindowSeconds);
+                }
+                else if (kind == CollaborationMessageKind.SessionEnded)
+                {
+                    // 교수자가 세션을 끝냈으므로 이후 끊김은 자동 재연결 대상이 아니다.
+                    CollaborationMessageCodec.Decode<SessionEndedNotice>(frame, out _);
+                    _sessionEnded = true;
+                    _reconnectToken = null;
+                }
+                else if (kind == CollaborationMessageKind.RdpInvitationSecret)
+                {
+                    var secret = CollaborationMessageCodec.Decode<RdpInvitationSecretNotice>(frame, out _);
+                    if (secret.SessionId == secure.SessionId) OnRdpInvitationSecret(secret);
+                }
+                else if (kind is CollaborationMessageKind.FileCatalog or CollaborationMessageKind.FileChunk
+                         or CollaborationMessageKind.Failure)
+                    // 청크는 저장이 따라올 때까지 기다려야 하므로 수신 루프에서 await한다.
+                    return fileClient.HandleFrameAsync(frame);
+            }
+            catch (CollaborationException ex)
+            {
+                _logSink.Write($"[Secure] 잘못된 메시지 무시: 사유={ex.Code}");
+            }
+            return Task.CompletedTask;
+        };
+        _statusClient = statusClient;
+        _fileClient = fileClient;
+        _permissionNoticeShown = false;
+        RunOnUiThread(() => ApplyStudentStatus(StudentStatus.Initial));
+    }
+
+    private void DetachStudentStatus()
+    {
+        _statusClient = null;
+        // 진행 중인 다운로드는 임시 파일을 지우고 실패로 끝난다.
+        Interlocked.Exchange(ref _fileClient, null)?.ConnectionClosed();
+        RunOnUiThread(() =>
+        {
+            ApplyStudentStatus(StudentStatus.Initial);
+            SessionFiles.Clear();
+        });
+    }
+
+    /// <summary>목록이 바뀌어도 받는 중인 항목의 진행 표시는 유지하고, 사라진 파일만 내립니다.</summary>
+    private void ApplyFileCatalog(SessionFileCatalogSnapshot catalog)
+    {
+        var current = SessionFiles.ToDictionary(item => (item.File.FileId, item.File.Revision));
+        var next = catalog.Files.Select(file => (file.FileId, file.Revision)).ToHashSet();
+        foreach (var item in SessionFiles.Where(item => !next.Contains((item.File.FileId, item.File.Revision))).ToArray())
+            SessionFiles.Remove(item);
+        foreach (var file in catalog.Files)
+        {
+            if (!current.ContainsKey((file.FileId, file.Revision)))
+                SessionFiles.Add(new SessionFileItem(file, DownloadSessionFileAsync));
+        }
+    }
+
+    private async Task DownloadSessionFileAsync(SessionFileItem item)
+    {
+        var fileClient = _fileClient;
+        if (fileClient is null || item.IsDownloading) return;
+        item.IsDownloading = true;
+        item.Status = "받는 중 0%";
+        // UI 스레드에서 만든 Progress는 보고를 UI 스레드로 돌려준다.
+        var progress = new Progress<DownloadProgress>(report =>
+            item.Status = report.TotalBytes == 0 ? "받는 중" : $"받는 중 {report.ReceivedBytes * 100 / report.TotalBytes}%");
+        try
+        {
+            var receipt = await fileClient.DownloadAsync(item.File.FileId, progress);
+            item.Status = "저장됨 (다운로드 폴더)";
+            DownloadedFiles.Insert(0, Path.GetFileName(receipt.LocalPath));
+            DownloadStatus = $"{item.File.FileName}을(를) 다운로드 폴더에 저장했습니다.";
+        }
+        catch (Exception ex)
+        {
+            var failure = CollaborationErrorCatalog.FromException(ex);
+            item.Status = "실패: " + failure.UserMessage;
+            DownloadStatus = $"{item.File.FileName} 다운로드 실패: {failure.UserMessage}";
+            _logSink.Write($"[FileRoute] 다운로드 실패: {failure.Code}");
+        }
+        finally
+        {
+            item.IsDownloading = false;
+            SyncLogs();
+        }
+    }
+
+    private void ApplyStudentStatus(StudentStatus status)
+    {
+        var wasUnderControl = _studentStatus.UnderControl;
+        _studentStatus = status;
+        OnPropertyChanged(nameof(PermissionSummary));
+        OnPropertyChanged(nameof(ControlStatusText));
+        OnPropertyChanged(nameof(IsUnderControl));
+        OnPropertyChanged(nameof(ControlToggleLabel));
+        OnPropertyChanged(nameof(ViewingToggleLabel));
+        ToggleControlPermissionCommand.RaiseCanExecuteChanged();
+        ToggleViewingPermissionCommand.RaiseCanExecuteChanged();
+        StopControlNowCommand.RaiseCanExecuteChanged();
+
+        if (_statusClient is null) return;
+        if (!_permissionNoticeShown && status.AllowControl)
+        {
+            // U07: 제어 허용이 기본 ON이라는 사실을 참가 시 알린다.
+            _permissionNoticeShown = true;
+            ChatMessages.Insert(0, ChatLine.System("교수자 원격 제어 허용이 켜져 있습니다. 접속 상태 옆에서 언제든 끌 수 있습니다."));
+        }
+        if (wasUnderControl != status.UnderControl)
+            ChatMessages.Insert(0, ChatLine.System(status.UnderControl ? "교수자가 원격 제어를 시작했습니다." : "원격 제어가 끝났습니다."));
+    }
+
+    private async Task ChangePermissionsAsync(bool allowViewing, bool allowControl)
+    {
+        var statusClient = _statusClient;
+        if (statusClient is null) return;
+        try
+        {
+            await statusClient.SetPermissionsAsync(allowViewing, allowControl);
+        }
+        catch (Exception ex)
+        {
+            _logSink.Write($"[Status] 허용 변경 전송 실패: {ex.GetType().Name}");
+            RunOnUiThread(() => UpdateStatus("허용 상태를 바꾸지 못했습니다. 연결 상태를 확인해 주세요.", StatusPriority.Error, isError: true));
+        }
+    }
+
+    private static string DescribeSecureJoinFailure(SecureJoinFailure failure) => failure switch
+    {
+        SecureJoinFailure.InvalidCode => "접속 코드 형식이 올바르지 않습니다. 교수자 화면의 코드를 다시 확인해 주세요.",
+        SecureJoinFailure.CodeMismatch => "접속 코드가 이 PC와 맞지 않습니다. 호스트 주소와 접속 코드를 다시 확인해 주세요.",
+        SecureJoinFailure.PasswordRejected => "방 비밀번호가 올바르지 않습니다.",
+        SecureJoinFailure.LockedOut => "비밀번호를 여러 번 틀려 잠시 참가할 수 없습니다. 1분 뒤 다시 시도해 주세요.",
+        SecureJoinFailure.VersionMismatch => "교수자 앱과 버전이 맞지 않습니다. 같은 버전의 앱을 사용해 주세요.",
+        _ => "교수자 PC에 연결하지 못했습니다. 호스트 주소와 포트, 교수자 세션 상태를 확인해 주세요."
+    };
 
     private void ApplyJoinError(ErrorPacket error)
     {
@@ -840,22 +1466,26 @@ public sealed class ClientViewModel : ObservableObject
     }
 
     private StatusPriority _currentStatusPriority = StatusPriority.Idle;
+    private string? _statusSource;
 
     /// <summary>
     /// 우선순위에 따라 시스템 상태 메시지를 안전하게 갱신합니다.
     /// </summary>
-    private void UpdateStatus(string message, StatusPriority priority, bool isError = false)
+    private void UpdateStatus(string message, StatusPriority priority, bool isError = false, string? source = null)
     {
         RunOnUiThread(() =>
         {
             // 현재 표기 중인 상태보다 낮거나 같은 우선순위의 단순 정보는 덮어쓰지 않음
             // (단, 같은 우선순위의 Error나 Progress, Success는 최신 내용으로 갱신)
-            if (priority < _currentStatusPriority)
+            // 같은 파일 흐름의 진행→완료, 실패→재시도 전이는 우선순위 하락이어도 반영한다.
+            // 연결 끊김 등 다른 기능의 높은 우선순위 오류는 파일 완료로 덮지 않는다.
+            if (priority < _currentStatusPriority && !(source is not null && source == _statusSource))
             {
                 return;
             }
 
             _currentStatusPriority = priority;
+            _statusSource = source;
             IsStatusError = isError;
             StatusMessage = message;
         });
