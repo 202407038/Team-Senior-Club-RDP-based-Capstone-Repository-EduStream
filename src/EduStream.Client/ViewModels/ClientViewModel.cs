@@ -22,6 +22,7 @@ namespace EduStream.Client.ViewModels;
 /// </summary>
 public sealed class ClientViewModel : ObservableObject
 {
+    private bool _allowRemoteControl = true;
     private readonly InMemoryLogSink _logSink = new();
     private readonly SessionClient _sessionClient;
     private readonly ScreenRenderer _screenRenderer;
@@ -71,6 +72,7 @@ public sealed class ClientViewModel : ObservableObject
         JoinSessionCommand = new RelayCommand(() => _ = JoinSessionAsync(), () => !IsConnected && !IsConnecting);
         DisconnectCommand = new RelayCommand(() => _ = DisconnectAsync(), () => IsConnected);
         SendChatCommand = new RelayCommand(() => _ = SendChatAsync(), () => IsConnected && !string.IsNullOrWhiteSpace(ChatInput));
+        StopRemoteControlCommand = new RelayCommand(() => AllowRemoteControl = false, () => AllowRemoteControl);
         SimulateScreenRenderCommand = new RelayCommand(() => _ = SimulateScreenRenderAsync());
         SimulateFileReceiveCommand = new RelayCommand(() => _ = SimulateFileReceiveAsync());
 
@@ -191,6 +193,19 @@ public sealed class ClientViewModel : ObservableObject
         }
     }
 
+    public bool AllowRemoteControl
+    {
+        get => _allowRemoteControl;
+        set
+        {
+            if (SetProperty(ref _allowRemoteControl, value))
+            {
+                StopRemoteControlCommand.RaiseCanExecuteChanged();
+            }
+        }
+    }
+
+    public RelayCommand StopRemoteControlCommand { get; }
     public bool IsConnected
     {
         get => _isConnected;
@@ -264,6 +279,7 @@ public sealed class ClientViewModel : ObservableObject
     public RelayCommand DisconnectCommand { get; }
 
     public RelayCommand SendChatCommand { get; }
+
 
     public RelayCommand SimulateScreenRenderCommand { get; }
 
