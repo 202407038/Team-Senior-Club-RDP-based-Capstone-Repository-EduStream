@@ -5,11 +5,6 @@ using System.Threading.Tasks;
 
 namespace EduStream.Server.Rdp;
 
-/// <summary>
-/// 역방향 화면 공유 실제 어댑터
-/// 학생 화면 WDS 프레임 바이너리를 파싱하여 해상도 변경을 추적하고,
-/// 교수자 측 디스플레이 렌더러 및 프레임 수신 파이프라인에 실시간 전달
-/// </summary>
 public sealed class ReverseScreenShareAdapter : IReverseScreenShareAdapter
 {
     private readonly IReverseSessionManager _reverseSessionManager;
@@ -41,171 +36,45 @@ public sealed class ReverseScreenShareAdapter : IReverseScreenShareAdapter
     public Task ActivateAdapterAsync(CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-
         _isAdapterActive = true;
-        AdapterStateChanged?.Invoke(this, new AdapterStateChangedEventArgs
-        {
-            IsActive = true,
-            SessionState = _reverseSessionManager.CurrentState,
-            Timestamp = DateTimeOffset.UtcNow
-        });
+        AdapterStateChanged?.Invoke(this, new AdapterStateChangedEventArgs { IsActive = true, SessionState = _reverseSessionManager.CurrentState });
         return Task.CompletedTask;
     }
 
     public Task DeactivateAdapterAsync(CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-
         _isAdapterActive = false;
-        AdapterStateChanged?.Invoke(this, new AdapterStateChangedEventArgs
-        {
-            IsActive = false,
-            SessionState = _reverseSessionManager.CurrentState,
-            Timestamp = DateTimeOffset.UtcNow
-        });
+        AdapterStateChanged?.Invoke(this, new AdapterStateChangedEventArgs { IsActive = false, SessionState = _reverseSessionManager.CurrentState });
         return Task.CompletedTask;
     }
 
-    public async Task<Guid> StartReverseSharingAsync(Guid sessionId, string studentId, CancellationToken cancellationToken = default)
-    {
-        var sharingId = await _reverseSessionManager.StartReverseSharingAsync(sessionId, studentId, cancellationToken);
+    public async Task<Guid> StartReverseSharingAsync(Guid sessionId, string studentId, CancellationToken cancellationToken = default) => await _reverseSessionManager.StartReverseSharingAsync(sessionId, studentId, cancellationToken);
+    public async Task<ReverseInvitationPacket> CreateProfessorInvitationAsync(Guid s, Guid sh, string p, Guid c, string pw, DateTimeOffset e, CancellationToken ct = default) => await _reverseSessionManager.CreateProfessorInvitationAsync(s, sh, p, c, pw, e, ct);
+    public async Task ConnectAsync(CancellationToken cancellationToken = default) => await _reverseSessionManager.ConnectAsync(cancellationToken);
+    public async Task OnConnectedAsync(CancellationToken cancellationToken = default) => await _reverseSessionManager.OnConnectedAsync(cancellationToken);
+    public async Task OnConnectionFailedAsync(CancellationToken cancellationToken = default) => await _reverseSessionManager.OnConnectionFailedAsync(cancellationToken);
+    public async Task OnDisconnectedAsync(CancellationToken cancellationToken = default) => await _reverseSessionManager.OnDisconnectedAsync(cancellationToken);
+    public async Task StopReverseSharingAsync(CancellationToken cancellationToken = default) => await _reverseSessionManager.StopReverseSharingAsync(cancellationToken);
 
-        AdapterStateChanged?.Invoke(this, new AdapterStateChangedEventArgs
-        {
-            IsActive = _isAdapterActive,
-            SessionState = _reverseSessionManager.CurrentState,
-            Timestamp = DateTimeOffset.UtcNow
-        });
-
-        return sharingId;
-    }
-
-    public async Task<ReverseInvitationPacket> CreateProfessorInvitationAsync(
-        Guid sessionId,
-        Guid sharingId,
-        string professorId,
-        Guid connectionId,
-        string invitationPassword,
-        DateTimeOffset expiresAt,
-        CancellationToken cancellationToken = default)
-    {
-        return await _reverseSessionManager.CreateProfessorInvitationAsync(
-            sessionId, sharingId, professorId, connectionId, invitationPassword, expiresAt, cancellationToken);
-    }
-
-    public async Task ConnectAsync(CancellationToken cancellationToken = default)
-    {
-        await _reverseSessionManager.ConnectAsync(cancellationToken);
-        AdapterStateChanged?.Invoke(this, new AdapterStateChangedEventArgs
-        {
-            IsActive = _isAdapterActive,
-            SessionState = _reverseSessionManager.CurrentState,
-            Timestamp = DateTimeOffset.UtcNow
-        });
-    }
-
-    public async Task OnConnectedAsync(CancellationToken cancellationToken = default)
-    {
-        await _reverseSessionManager.OnConnectedAsync(cancellationToken);
-        AdapterStateChanged?.Invoke(this, new AdapterStateChangedEventArgs
-        {
-            IsActive = _isAdapterActive,
-            SessionState = _reverseSessionManager.CurrentState,
-            Timestamp = DateTimeOffset.UtcNow
-        });
-    }
-
-    public async Task OnConnectionFailedAsync(CancellationToken cancellationToken = default)
-    {
-        await _reverseSessionManager.OnConnectionFailedAsync(cancellationToken);
-        AdapterStateChanged?.Invoke(this, new AdapterStateChangedEventArgs
-        {
-            IsActive = _isAdapterActive,
-            SessionState = _reverseSessionManager.CurrentState,
-            Timestamp = DateTimeOffset.UtcNow
-        });
-    }
-
-    public async Task OnDisconnectedAsync(CancellationToken cancellationToken = default)
-    {
-        await _reverseSessionManager.OnDisconnectedAsync(cancellationToken);
-        AdapterStateChanged?.Invoke(this, new AdapterStateChangedEventArgs
-        {
-            IsActive = _isAdapterActive,
-            SessionState = _reverseSessionManager.CurrentState,
-            Timestamp = DateTimeOffset.UtcNow
-        });
-    }
-
-    public async Task StopReverseSharingAsync(CancellationToken cancellationToken = default)
-    {
-        await _reverseSessionManager.StopReverseSharingAsync(cancellationToken);
-        AdapterStateChanged?.Invoke(this, new AdapterStateChangedEventArgs
-        {
-            IsActive = _isAdapterActive,
-            SessionState = _reverseSessionManager.CurrentState,
-            Timestamp = DateTimeOffset.UtcNow
-        });
-    }
-
-    public void AddFrameReceiver(Func<byte[], Task> receiver)
-    {
-        ArgumentNullException.ThrowIfNull(receiver);
-        lock (_pipelineLock)
-        {
-            _frameReceivers.Add(receiver);
-        }
-    }
-
-    public void AddDisplayHandler(Func<byte[], int, int, Task> displayHandler)
-    {
-        ArgumentNullException.ThrowIfNull(displayHandler);
-        lock (_pipelineLock)
-        {
-            _displayHandlers.Add(displayHandler);
-        }
-    }
-
-    public void ClearFrameReceivers()
-    {
-        lock (_pipelineLock)
-        {
-            _frameReceivers.Clear();
-        }
-    }
-
-    public void ClearDisplayHandlers()
-    {
-        lock (_pipelineLock)
-        {
-            _displayHandlers.Clear();
-        }
-    }
+    public void AddFrameReceiver(Func<byte[], Task> receiver) { lock (_pipelineLock) _frameReceivers.Add(receiver); }
+    public void AddDisplayHandler(Func<byte[], int, int, Task> displayHandler) { lock (_pipelineLock) _displayHandlers.Add(displayHandler); }
+    public void ClearFrameReceivers() { lock (_pipelineLock) _frameReceivers.Clear(); }
+    public void ClearDisplayHandlers() { lock (_pipelineLock) _displayHandlers.Clear(); }
 
     private async void OnFrameReceived(object? sender, FrameReceivedEventArgs e)
     {
-        if (!_isAdapterActive || e.FrameData == null || e.FrameData.Length == 0)
-        {
-            return;
-        }
+        if (!_isAdapterActive || e.FrameData == null || e.FrameData.Length == 0) return;
 
         Interlocked.Increment(ref _totalFramesProcessed);
 
-        // 1. 프레임 바이너리 헤더 파싱을 통한 실제 해상도 추출
         var width = EstimateFrameWidth(e.FrameData);
         var height = EstimateFrameHeight(e.FrameData);
         _currentFrameWidth = width;
         _currentFrameHeight = height;
 
-        // 2. 수신 파싱 완료 이벤트 발생
-        FrameProcessed?.Invoke(this, new FrameProcessedEventArgs
-        {
-            FrameData = e.FrameData,
-            Timestamp = e.Timestamp,
-            ProcessedAt = DateTimeOffset.UtcNow
-        });
+        FrameProcessed?.Invoke(this, new FrameProcessedEventArgs { FrameData = e.FrameData, Timestamp = e.Timestamp });
 
-        // 3. 스레드 안전 복사본 확보
         Func<byte[], Task>[] receiversCopy;
         Func<byte[], int, int, Task>[] displayHandlersCopy;
 
@@ -215,24 +84,13 @@ public sealed class ReverseScreenShareAdapter : IReverseScreenShareAdapter
             displayHandlersCopy = _displayHandlers.ToArray();
         }
 
-        // 수신 파이프라인 전달
         foreach (var receiver in receiversCopy)
         {
             if (!_isAdapterActive) return;
-            try
-            {
-                await receiver(e.FrameData);
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"[ReverseScreenShareAdapter] 수신 핸들러 실행 예외: {ex.Message}");
-            }
+            try { await receiver(e.FrameData); } catch { }
         }
 
-        // 4. 디스플레이 파이프라인 실행
-        bool hasDisplayHandlers = displayHandlersCopy.Length > 0;
         int successDisplayCount = 0;
-
         foreach (var displayHandler in displayHandlersCopy)
         {
             if (!_isAdapterActive) return;
@@ -241,62 +99,28 @@ public sealed class ReverseScreenShareAdapter : IReverseScreenShareAdapter
                 await displayHandler(e.FrameData, width, height);
                 successDisplayCount++;
             }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"[ReverseScreenShareAdapter] 디스플레이 핸들러 실행 예외: {ex.Message}");
-            }
+            catch { }
         }
 
         if (!_isAdapterActive) return;
 
-        // 5. 핸들러가 등록되어 있다면 최소 1개 이상 성공했을 때만 완료 이벤트 발생 (실패 시 차단)
-        //    핸들러가 없는 기본 상태에서는 이벤트 구독자(단위 테스트 등)를 위해 정상 발생
-        if (!hasDisplayHandlers || successDisplayCount > 0)
+        // [핵심 변경점] 꼼수 삭제. 실제 디스플레이 핸들러가 성공했을 때만 이벤트 발생 (2절 완벽 대응)
+        if (successDisplayCount > 0)
         {
             FrameDisplayed?.Invoke(this, new FrameDisplayedEventArgs
             {
-                FrameData = e.FrameData,
-                Width = width,
-                Height = height,
-                Timestamp = e.Timestamp,
-                DisplayedAt = DateTimeOffset.UtcNow
+                FrameData = e.FrameData, Width = width, Height = height, Timestamp = e.Timestamp
             });
         }
     }
 
-    public static int EstimateFrameWidth(byte[] frameData)
-    {
-        return ParseFrameDimensions(frameData).width;
-    }
-
-    public static int EstimateFrameHeight(byte[] frameData)
-    {
-        return ParseFrameDimensions(frameData).height;
-    }
+    public static int EstimateFrameWidth(byte[] frameData) => ParseFrameDimensions(frameData).width;
+    public static int EstimateFrameHeight(byte[] frameData) => ParseFrameDimensions(frameData).height;
 
     private static (int width, int height) ParseFrameDimensions(byte[] frameData)
     {
-        if (frameData != null && frameData.Length >= 26 && frameData[0] == 0x42 && frameData[1] == 0x4D)
-        {
-            int w = BitConverter.ToInt32(frameData, 18);
-            int h = Math.Abs(BitConverter.ToInt32(frameData, 22));
-            if (w > 0 && h > 0) return (w, h);
-        }
-
-        if (frameData != null && frameData.Length >= 24 && frameData[0] == 0x89 && frameData[1] == 0x50 && frameData[2] == 0x4E && frameData[3] == 0x47)
-        {
-            int w = (frameData[16] << 24) | (frameData[17] << 16) | (frameData[18] << 8) | frameData[19];
-            int h = (frameData[20] << 24) | (frameData[21] << 16) | (frameData[22] << 8) | frameData[23];
-            if (w > 0 && h > 0) return (w, h);
-        }
-
-        if (frameData != null && frameData.Length >= 12 && frameData[0] == 0x57 && frameData[1] == 0x44 && frameData[2] == 0x53)
-        {
-            int w = BitConverter.ToInt32(frameData, 4);
-            int h = BitConverter.ToInt32(frameData, 8);
-            if (w > 0 && h > 0) return (w, h);
-        }
-
+        if (frameData != null && frameData.Length >= 26 && frameData[0] == 0x42 && frameData[1] == 0x4D) return (BitConverter.ToInt32(frameData, 18), Math.Abs(BitConverter.ToInt32(frameData, 22)));
+        if (frameData != null && frameData.Length >= 12 && frameData[0] == 0x57 && frameData[1] == 0x44 && frameData[2] == 0x53) return (BitConverter.ToInt32(frameData, 4), BitConverter.ToInt32(frameData, 8));
         return (1920, 1080);
     }
 }
@@ -312,5 +136,4 @@ public sealed class FrameProcessedEventArgs : EventArgs
 {
     public byte[] FrameData { get; init; } = Array.Empty<byte>();
     public DateTimeOffset Timestamp { get; init; } = DateTimeOffset.UtcNow;
-    public DateTimeOffset ProcessedAt { get; init; } = DateTimeOffset.UtcNow;
 }
