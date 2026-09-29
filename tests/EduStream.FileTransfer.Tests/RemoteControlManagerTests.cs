@@ -7,7 +7,15 @@ namespace EduStream.FileTransfer.Tests;
 
 public class RemoteControlManagerTests
 {
-    private readonly RemoteControlManager _manager = new();
+    private RemoteControlManager _manager = null!;
+    private MockNativeInputPipeline _mockPipeline = null!;
+
+    public RemoteControlManagerTests()
+    {
+        _manager = new RemoteControlManager();
+        _mockPipeline = new MockNativeInputPipeline();
+        _manager.ConnectNativeEngineAsync(_mockPipeline).GetAwaiter().GetResult();
+    }
 
     [Fact]
     public void CurrentControlLevel_기본값_ViewOnly()

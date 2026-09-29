@@ -133,6 +133,8 @@ public class RemoteControlManagerGateIntegrationTests
     {
         // Arrange
         var manager = new RemoteControlManager();
+        var mockPipeline = new MockNativeInputPipeline();
+        await manager.ConnectNativeEngineAsync(mockPipeline);
         var participantId = "test-participant";
         await manager.SetControlLevelAsync(ControlLevel.KeyboardAndMouse);
         await manager.GrantControlAsync(participantId);

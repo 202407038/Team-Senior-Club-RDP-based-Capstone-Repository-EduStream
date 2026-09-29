@@ -99,7 +99,7 @@ public sealed class RemoteControlManager : IRemoteControlManager, IRemoteInputGa
             return false;
 
         if (!_isNativeEngineConnected || !_nativeInputPipeline.IsConnected)
-            return true;
+            return false;
 
         try
         {
@@ -118,7 +118,7 @@ public sealed class RemoteControlManager : IRemoteControlManager, IRemoteInputGa
             return false;
 
         if (!_isNativeEngineConnected || !_nativeInputPipeline.IsConnected)
-            return true;
+            return false;
 
         try
         {
@@ -137,7 +137,7 @@ public sealed class RemoteControlManager : IRemoteControlManager, IRemoteInputGa
             return false;
 
         if (!_isNativeEngineConnected || !_nativeInputPipeline.IsConnected)
-            return true;
+            return false;
 
         try
         {
@@ -156,7 +156,7 @@ public sealed class RemoteControlManager : IRemoteControlManager, IRemoteInputGa
             return false;
 
         if (!_isNativeEngineConnected || !_nativeInputPipeline.IsConnected)
-            return true;
+            return false;
 
         try
         {
