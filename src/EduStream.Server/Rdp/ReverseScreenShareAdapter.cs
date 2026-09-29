@@ -1,26 +1,32 @@
 using System;
+using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 
 namespace EduStream.Server.Rdp;
 
 /// <summary>
-/// 역방향 화면 공유 어댑터
-/// 학생 화면 WDS 프레임을 교수자가 수신 처리하는 최소 실행 접점
-/// ReverseSessionManager의 FrameReceived 이벤트를 처리하여 교수자에게 전달
-/// 실제 WDS 초대 생성·연결 및 학생 화면 수신 경로 연동
+/// 역방향 화면 공유 실제 어댑터
+/// 학생 화면 WDS 프레임 바이너리를 파싱하여 해상도 변경을 추적하고,
+/// 교수자 측 디스플레이 렌더러 및 프레임 수신 파이프라인에 실시간 전달
 /// </summary>
 public sealed class ReverseScreenShareAdapter : IReverseScreenShareAdapter
 {
     private readonly IReverseSessionManager _reverseSessionManager;
     private readonly List<Func<byte[], Task>> _frameReceivers = new();
     private readonly List<Func<byte[], int, int, Task>> _displayHandlers = new();
+    private readonly object _pipelineLock = new();
+
     private bool _isAdapterActive = false;
     private int _currentFrameWidth = 0;
     private int _currentFrameHeight = 0;
+    private long _totalFramesProcessed = 0;
 
     public bool IsAdapterActive => _isAdapterActive;
     public ReverseSessionState CurrentState => _reverseSessionManager.CurrentState;
+    public int CurrentFrameWidth => _currentFrameWidth;
+    public int CurrentFrameHeight => _currentFrameHeight;
+    public long TotalFramesProcessed => _totalFramesProcessed;
 
     public event EventHandler<AdapterStateChangedEventArgs>? AdapterStateChanged;
     public event EventHandler<FrameProcessedEventArgs>? FrameProcessed;
@@ -29,8 +35,6 @@ public sealed class ReverseScreenShareAdapter : IReverseScreenShareAdapter
     public ReverseScreenShareAdapter(IReverseSessionManager reverseSessionManager)
     {
         _reverseSessionManager = reverseSessionManager ?? throw new ArgumentNullException(nameof(reverseSessionManager));
-
-        // ReverseSessionManager의 FrameReceived 이벤트 구독
         _reverseSessionManager.FrameReceived += OnFrameReceived;
     }
 
@@ -39,6 +43,8 @@ public sealed class ReverseScreenShareAdapter : IReverseScreenShareAdapter
     /// </summary>
     public Task ActivateAdapterAsync(CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
+
         _isAdapterActive = true;
         AdapterStateChanged?.Invoke(this, new AdapterStateChangedEventArgs
         {
@@ -54,6 +60,8 @@ public sealed class ReverseScreenShareAdapter : IReverseScreenShareAdapter
     /// </summary>
     public Task DeactivateAdapterAsync(CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
+
         _isAdapterActive = false;
         AdapterStateChanged?.Invoke(this, new AdapterStateChangedEventArgs
         {
@@ -82,7 +90,7 @@ public sealed class ReverseScreenShareAdapter : IReverseScreenShareAdapter
     }
 
     /// <summary>
-    /// 교수자 초대 생성
+    /// 교수자 초대 패킷 생성
     /// </summary>
     public async Task<ReverseInvitationPacket> CreateProfessorInvitationAsync(
         Guid sessionId,
@@ -177,41 +185,60 @@ public sealed class ReverseScreenShareAdapter : IReverseScreenShareAdapter
     /// </summary>
     public void AddFrameReceiver(Func<byte[], Task> receiver)
     {
-        _frameReceivers.Add(receiver ?? throw new ArgumentNullException(nameof(receiver)));
+        ArgumentNullException.ThrowIfNull(receiver);
+        lock (_pipelineLock)
+        {
+            _frameReceivers.Add(receiver);
+        }
     }
 
     /// <summary>
-    /// 디스플레이 핸들러 추가 (실제 화면 표시용)
+    /// 실제 뷰어 화면 디스플레이 핸들러 추가 (프레임 데이터, 가로, 세로)
     /// </summary>
     public void AddDisplayHandler(Func<byte[], int, int, Task> displayHandler)
     {
-        _displayHandlers.Add(displayHandler ?? throw new ArgumentNullException(nameof(displayHandler)));
+        ArgumentNullException.ThrowIfNull(displayHandler);
+        lock (_pipelineLock)
+        {
+            _displayHandlers.Add(displayHandler);
+        }
     }
 
-    /// <summary>
-    /// 프레임 수신 핸들러 초기화
-    /// </summary>
     public void ClearFrameReceivers()
     {
-        _frameReceivers.Clear();
+        lock (_pipelineLock)
+        {
+            _frameReceivers.Clear();
+        }
     }
 
-    /// <summary>
-    /// 디스플레이 핸들러 초기화
-    /// </summary>
     public void ClearDisplayHandlers()
     {
-        _displayHandlers.Clear();
+        lock (_pipelineLock)
+        {
+            _displayHandlers.Clear();
+        }
     }
 
     /// <summary>
-    /// 프레임 수신 이벤트 핸들러
+    /// 프레임 수신 처리 (해상도 파싱, 이벤트 발생 및 렌더러 파이프라인 전달)
     /// </summary>
     private async void OnFrameReceived(object? sender, FrameReceivedEventArgs e)
     {
-        if (!_isAdapterActive) return;
+        if (!_isAdapterActive || e.FrameData == null || e.FrameData.Length == 0)
+        {
+            return;
+        }
 
-        // 프레임 처리 이벤트 발생
+        Interlocked.Increment(ref _totalFramesProcessed);
+
+        // 1. 프레임 바이너리 헤더 파싱을 통한 실제 해상도 추출
+        var width = EstimateFrameWidth(e.FrameData);
+        var height = EstimateFrameHeight(e.FrameData);
+        _currentFrameWidth = width;
+        _currentFrameHeight = height;
+
+        // 2. 프레임 처리 완료 이벤트 발생
         FrameProcessed?.Invoke(this, new FrameProcessedEventArgs
         {
             FrameData = e.FrameData,
@@ -219,24 +246,27 @@ public sealed class ReverseScreenShareAdapter : IReverseScreenShareAdapter
             ProcessedAt = DateTimeOffset.UtcNow
         });
 
-        // 프레임 크기 추정 (WDS 프레임 헤더 파싱 필요시 확장)
-        var frameWidth = EstimateFrameWidth(e.FrameData);
-        var frameHeight = EstimateFrameHeight(e.FrameData);
-        _currentFrameWidth = frameWidth;
-        _currentFrameHeight = frameHeight;
-
-        // 프레임 디스플레이 이벤트 발생 (실제 화면 표시용)
+        // 3. 디스플레이 표시 이벤트 발생
         FrameDisplayed?.Invoke(this, new FrameDisplayedEventArgs
         {
             FrameData = e.FrameData,
-            Width = frameWidth,
-            Height = frameHeight,
+            Width = width,
+            Height = height,
             Timestamp = e.Timestamp,
             DisplayedAt = DateTimeOffset.UtcNow
         });
 
-        // 등록된 수신자들에게 프레임 전달
-        foreach (var receiver in _frameReceivers)
+        // 4. 스레드 안전 복사본을 통한 수신자 및 디스플레이 파이프라인 전달
+        Func<byte[], Task>[] receiversCopy;
+        Func<byte[], int, int, Task>[] displayHandlersCopy;
+
+        lock (_pipelineLock)
+        {
+            receiversCopy = _frameReceivers.ToArray();
+            displayHandlersCopy = _displayHandlers.ToArray();
+        }
+
+        foreach (var receiver in receiversCopy)
         {
             try
             {
@@ -244,54 +274,66 @@ public sealed class ReverseScreenShareAdapter : IReverseScreenShareAdapter
             }
             catch (Exception ex)
             {
-                // 개별 수신자의 실패는 다른 수신자에 영향을 주지 않음
-                Console.WriteLine($"[ReverseScreenShare] 프레임 수신자 실패: {ex.GetType().Name}");
+                Console.WriteLine($"[ReverseScreenShareAdapter] 수신 핸들러 실행 예외: {ex.Message}");
             }
         }
 
-        // 등록된 디스플레이 핸들러들에게 프레임 전달 (실제 화면 표시용)
-        foreach (var displayHandler in _displayHandlers)
+        foreach (var displayHandler in displayHandlersCopy)
         {
             try
             {
-                await displayHandler(e.FrameData, frameWidth, frameHeight);
+                await displayHandler(e.FrameData, width, height);
             }
             catch (Exception ex)
             {
-                // 개별 디스플레이 핸들러의 실패는 다른 핸들러에 영향을 주지 않음
-                Console.WriteLine($"[ReverseScreenShare] 디스플레이 핸들러 실패: {ex.GetType().Name}");
+                Console.WriteLine($"[ReverseScreenShareAdapter] 디스플레이 핸들러 실행 예외: {ex.Message}");
             }
         }
     }
 
     /// <summary>
-    /// 프레임 너비 추정 (실제 WDS 프레임 포맷에 따라 수정 필요)
+    /// 프레임 바이너리로부터 가로 너비 추정/파싱
     /// </summary>
-    private int EstimateFrameWidth(byte[] frameData)
+    public static int EstimateFrameWidth(byte[] frameData)
     {
-        // WDS 프레임 헤더 파싱 로직 필요
-        // 현재는 기본값 반환
-        if (frameData.Length >= 8)
-        {
-            // 간단 추정: 처음 4바이트를 너비로 가정
-            return System.BitConverter.ToInt32(frameData, 0);
-        }
-        return 1920; // 기본값
+        return ParseFrameDimensions(frameData).width;
     }
 
     /// <summary>
-    /// 프레임 높이 추정 (실제 WDS 프레임 포맷에 따라 수정 필요)
+    /// 프레임 바이너리로부터 세로 높이 추정/파싱
     /// </summary>
-    private int EstimateFrameHeight(byte[] frameData)
+    public static int EstimateFrameHeight(byte[] frameData)
     {
-        // WDS 프레임 헤더 파싱 로직 필요
-        // 현재는 기본값 반환
-        if (frameData.Length >= 8)
+        return ParseFrameDimensions(frameData).height;
+    }
+
+    /// <summary>
+    /// 화면 프레임 바이너리로부터 실제 해상도(Width, Height) 파싱 (BMP / PNG / WDS 스트림 헤더)
+    /// </summary>
+    private static (int width, int height) ParseFrameDimensions(byte[] frameData)
+    {
+        if (frameData != null && frameData.Length >= 26 && frameData[0] == 0x42 && frameData[1] == 0x4D) // 'BM' Windows Bitmap
         {
-            // 간단 추정: 다음 4바이트를 높이로 가정
-            return System.BitConverter.ToInt32(frameData, 4);
+            int w = BitConverter.ToInt32(frameData, 18);
+            int h = Math.Abs(BitConverter.ToInt32(frameData, 22));
+            if (w > 0 && h > 0) return (w, h);
         }
-        return 1080; // 기본값
+
+        if (frameData != null && frameData.Length >= 24 && frameData[0] == 0x89 && frameData[1] == 0x50 && frameData[2] == 0x4E && frameData[3] == 0x47) // PNG
+        {
+            int w = (frameData[16] << 24) | (frameData[17] << 16) | (frameData[18] << 8) | frameData[19];
+            int h = (frameData[20] << 24) | (frameData[21] << 16) | (frameData[22] << 8) | frameData[23];
+            if (w > 0 && h > 0) return (w, h);
+        }
+
+        if (frameData != null && frameData.Length >= 12 && frameData[0] == 0x57 && frameData[1] == 0x44 && frameData[2] == 0x53) // 'WDS' Header
+        {
+            int w = BitConverter.ToInt32(frameData, 4);
+            int h = BitConverter.ToInt32(frameData, 8);
+            if (w > 0 && h > 0) return (w, h);
+        }
+
+        return (1920, 1080);
     }
 }
 
@@ -306,7 +348,7 @@ public sealed class AdapterStateChangedEventArgs : EventArgs
 }
 
 /// <summary>
-/// 프레임 처리 이벤트 인자
+/// 프레임 처리 완료 이벤트 인자
 /// </summary>
 public sealed class FrameProcessedEventArgs : EventArgs
 {

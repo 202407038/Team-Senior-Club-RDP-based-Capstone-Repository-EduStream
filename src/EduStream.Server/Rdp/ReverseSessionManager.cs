@@ -6,30 +6,44 @@ using System.Threading.Tasks;
 namespace EduStream.Server.Rdp;
 
 /// <summary>
-/// 학생→교수자 역방향 WDS 세션 관리자 프로토타입 구현
-/// EduStream.Core에 의존하지 않고 Server 내부에서 독립 동작
+/// 학생 -> 교수자 역방향 WDS 세션 관리자 구현
+/// 스레드 세이프한 상태 전이(State Lock) 및 프레임 수신 이벤트 지원
 /// </summary>
 public sealed class ReverseSessionManager : IReverseSessionManager
 {
+    private readonly object _stateLock = new();
     private readonly ConcurrentDictionary<Guid, ReverseInvitationPacket> _invitations = new();
     private Guid _reverseSharingId = Guid.Empty;
     private string _hostStudentId = string.Empty;
     private ReverseSessionState _state = ReverseSessionState.Inactive;
 
-    public bool IsReverseSharingActive => _state != ReverseSessionState.Inactive;
-    public ReverseSessionState CurrentState => _state;
+    public bool IsReverseSharingActive
+    {
+        get { lock (_stateLock) return _state != ReverseSessionState.Inactive; }
+    }
+
+    public ReverseSessionState CurrentState
+    {
+        get { lock (_stateLock) return _state; }
+    }
+
     public event EventHandler<FrameReceivedEventArgs>? FrameReceived;
 
     public Task<Guid> StartReverseSharingAsync(Guid sessionId, string studentId, CancellationToken cancellationToken = default)
     {
-        if (_state != ReverseSessionState.Inactive)
-            throw new InvalidOperationException("역방향 공유가 이미 활성화되어 있습니다.");
+        cancellationToken.ThrowIfCancellationRequested();
 
-        _reverseSharingId = Guid.NewGuid();
-        _hostStudentId = studentId;
-        _state = ReverseSessionState.Hosting;
+        lock (_stateLock)
+        {
+            if (_state != ReverseSessionState.Inactive)
+                throw new InvalidOperationException("역방향 공유가 이미 활성화되어 있습니다.");
 
-        return Task.FromResult(_reverseSharingId);
+            _reverseSharingId = Guid.NewGuid();
+            _hostStudentId = studentId;
+            _state = ReverseSessionState.Hosting;
+
+            return Task.FromResult(_reverseSharingId);
+        }
     }
 
     public Task<ReverseInvitationPacket> CreateProfessorInvitationAsync(
@@ -41,66 +55,92 @@ public sealed class ReverseSessionManager : IReverseSessionManager
         DateTimeOffset expiresAt,
         CancellationToken cancellationToken = default)
     {
-        if (_state != ReverseSessionState.Hosting)
-            throw new InvalidOperationException("역방향 공유가 호스팅 상태가 아닙니다.");
+        cancellationToken.ThrowIfCancellationRequested();
 
-        if (_reverseSharingId != sharingId)
-            throw new InvalidOperationException("공유 ID가 일치하지 않습니다.");
-
-        var invitationId = Guid.NewGuid();
-        var connectionString = $"rdp://reverse/{invitationId}/{invitationPassword}";
-
-        var invitation = new ReverseInvitationPacket
+        lock (_stateLock)
         {
-            SessionId = sessionId,
-            SharingId = sharingId,
-            ProfessorId = professorId,
-            ConnectionId = connectionId,
-            ConnectionString = connectionString,
-            ExpiresAt = expiresAt,
-            HostStudentId = _hostStudentId
-        };
+            if (_state != ReverseSessionState.Hosting)
+                throw new InvalidOperationException("역방향 공유가 호스팅 상태가 아닙니다.");
 
-        _invitations[invitationId] = invitation;
-        _state = ReverseSessionState.Hosting;
+            if (_reverseSharingId != sharingId)
+                throw new InvalidOperationException("공유 ID가 일치하지 않습니다.");
 
-        return Task.FromResult(invitation);
+            var invitationId = Guid.NewGuid();
+            var connectionString = $"rdp://reverse/{invitationId}/{invitationPassword}";
+
+            var invitation = new ReverseInvitationPacket
+            {
+                SessionId = sessionId,
+                SharingId = sharingId,
+                ProfessorId = professorId,
+                ConnectionId = connectionId,
+                ConnectionString = connectionString,
+                ExpiresAt = expiresAt,
+                HostStudentId = _hostStudentId
+            };
+
+            _invitations[invitationId] = invitation;
+            return Task.FromResult(invitation);
+        }
     }
 
     public Task ConnectAsync(CancellationToken cancellationToken = default)
     {
-        if (_state != ReverseSessionState.Hosting)
-            throw new InvalidOperationException("호스팅 상태에서만 연결할 수 있습니다.");
+        cancellationToken.ThrowIfCancellationRequested();
 
-        _state = ReverseSessionState.Connecting;
+        lock (_stateLock)
+        {
+            if (_state != ReverseSessionState.Hosting)
+                throw new InvalidOperationException("호스팅 상태에서만 연결할 수 있습니다.");
+
+            _state = ReverseSessionState.Connecting;
+        }
         return Task.CompletedTask;
     }
 
     public Task OnConnectedAsync(CancellationToken cancellationToken = default)
     {
-        if (_state != ReverseSessionState.Connecting)
-            throw new InvalidOperationException("연결 중 상태에서만 연결 성공 처리할 수 있습니다.");
+        cancellationToken.ThrowIfCancellationRequested();
 
-        _state = ReverseSessionState.Connected;
+        lock (_stateLock)
+        {
+            if (_state != ReverseSessionState.Connecting)
+                throw new InvalidOperationException("연결 중 상태에서만 연결 성공 처리할 수 있습니다.");
+
+            _state = ReverseSessionState.Connected;
+        }
         return Task.CompletedTask;
     }
 
     public Task OnConnectionFailedAsync(CancellationToken cancellationToken = default)
     {
-        _state = ReverseSessionState.Failed;
+        cancellationToken.ThrowIfCancellationRequested();
+
+        lock (_stateLock)
+        {
+            _state = ReverseSessionState.Failed;
+        }
         return Task.CompletedTask;
     }
 
     public Task OnDisconnectedAsync(CancellationToken cancellationToken = default)
     {
-        _state = ReverseSessionState.Disconnected;
+        cancellationToken.ThrowIfCancellationRequested();
+
+        lock (_stateLock)
+        {
+            _state = ReverseSessionState.Disconnected;
+        }
         return Task.CompletedTask;
     }
 
     public void ReceiveFrame(byte[] frameData)
     {
-        if (_state != ReverseSessionState.Connected && _state != ReverseSessionState.ControlGranted)
-            return;
+        lock (_stateLock)
+        {
+            if (_state != ReverseSessionState.Connected && _state != ReverseSessionState.ControlGranted)
+                return;
+        }
 
         FrameReceived?.Invoke(this, new FrameReceivedEventArgs
         {
@@ -111,10 +151,15 @@ public sealed class ReverseSessionManager : IReverseSessionManager
 
     public Task StopReverseSharingAsync(CancellationToken cancellationToken = default)
     {
-        _invitations.Clear();
-        _reverseSharingId = Guid.Empty;
-        _hostStudentId = string.Empty;
-        _state = ReverseSessionState.Inactive;
+        cancellationToken.ThrowIfCancellationRequested();
+
+        lock (_stateLock)
+        {
+            _invitations.Clear();
+            _reverseSharingId = Guid.Empty;
+            _hostStudentId = string.Empty;
+            _state = ReverseSessionState.Inactive;
+        }
 
         return Task.CompletedTask;
     }
