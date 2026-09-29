@@ -1171,6 +1171,15 @@ public sealed class SessionManager
 
         RdpInvitationPasswordReady?.Invoke(handoff);
 
+        // 비밀번호는 평문 TCP가 아니라 요청한 학생의 보호 채널로만 보낸다(U03 수동 입력 제거).
+        // 보호 채널 없이 연 세션은 기존처럼 교수자 화면의 별도 전달 경로만 남는다.
+        if (_secureConnections.TryGetValue(clientId, out var secure))
+        {
+            var secret = new RdpInvitationSecretNotice(sessionAtRequest.SessionId, invitation.InvitationId,
+                request.ConnectionId, invitationPassword, expiresAt);
+            await SendSecureAsync(secure, CollaborationMessageCodec.Encode(Guid.NewGuid(), secret), clientId);
+        }
+
         // 요청한 학생에게만 개별 전송한다 — 브로드캐스트 금지.
         await _tcpServer.SendToClientAsync(clientId, invitation);
         _logSink.Write($"[Rdp] 초대 발급: participant={participantId}, connectionId={request.ConnectionId}");

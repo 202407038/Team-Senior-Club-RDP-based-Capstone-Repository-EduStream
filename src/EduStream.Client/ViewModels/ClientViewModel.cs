@@ -55,6 +55,11 @@ public sealed class ClientViewModel : ObservableObject
     private bool _permissionNoticeShown;
     private string _connectionCode = string.Empty;
     private RdpInvitationPacket? _activeRdpInvitation;
+    // 초대(TCP)와 비밀번호(보호 채널)는 도착 순서가 정해져 있지 않아, 둘이 같은 초대로 짝지어질 때까지 보관한다.
+    private readonly object _rdpAutoConnectLock = new();
+    private RdpInvitationSecretNotice? _pendingRdpSecret;
+    // 비밀번호를 비우는 것과 별개로, 현재 요청에서 이미 시작한 초대는 실패한 경우에도 자동 재실행하지 않는다.
+    private readonly HashSet<(Guid Session, Guid Connection, Guid Invitation)> _startedRdpAutoConnections = new();
     private Guid _rdpSessionId;
     private string _rdpParticipant = string.Empty;
     private bool _isRdpActive;
@@ -681,9 +686,12 @@ public sealed class ClientViewModel : ObservableObject
             await ResetRdpAsync();
             if (_disposing || !IsConnected || _sessionClient.CurrentSession is null)
                 throw new InvalidOperationException("강의 세션에 먼저 참여해 주세요.");
-            _currentRdpConnectionId = Guid.NewGuid();
-            _rdpSessionId = _sessionClient.CurrentSession.SessionId;
-            _rdpParticipant = DisplayName;
+            lock (_rdpAutoConnectLock)
+            {
+                _currentRdpConnectionId = Guid.NewGuid();
+                _rdpSessionId = _sessionClient.CurrentSession.SessionId;
+                _rdpParticipant = DisplayName;
+            }
             var requestPacket = PacketFactory.CreateRdpInvitationRequest(
                 _rdpParticipant, _rdpSessionId, _rdpParticipant, _currentRdpConnectionId);
             await _tcpClient.SendAsync(requestPacket);
@@ -700,24 +708,97 @@ public sealed class ClientViewModel : ObservableObject
     {
         try
         {
-            RdpInvitationContract.Validate(invitation, _rdpSessionId, _rdpParticipant,
-                _currentRdpConnectionId, DateTimeOffset.UtcNow);
-            if (_disposing || !IsConnected) return;
-            _activeRdpInvitation = invitation;
-            RunOnUiThread(() => RdpStatusText = "초대 수신: 설정 탭에서 별도로 전달받은 비밀번호를 입력해 주세요.");
+            lock (_rdpAutoConnectLock)
+            {
+                RdpInvitationContract.Validate(invitation, _rdpSessionId, _rdpParticipant,
+                    _currentRdpConnectionId, DateTimeOffset.UtcNow);
+                if (_disposing || !IsConnected || _startedRdpAutoConnections.Contains(
+                    (_rdpSessionId, invitation.ConnectionId, invitation.InvitationId))) return;
+                _activeRdpInvitation = invitation;
+            }
+            // 보호 채널이 있으면 비밀번호가 그쪽으로 오므로 입력을 요구하지 않는다.
+            RunOnUiThread(() => RdpStatusText = _secureChannel is not null
+                ? "초대 수신: 교수자 화면 연결 정보를 확인하는 중입니다."
+                : "초대 수신: 설정 탭에서 별도로 전달받은 비밀번호를 입력해 주세요.");
+            TryStartRdpAutoConnect();
         }
         catch (ArgumentException) { _logSink.Write("[RDP] 유효하지 않거나 이전 연결의 초대 무시"); }
         await Task.CompletedTask;
     }
 
-    public async Task ConnectRdpWithPasswordAsync(string password)
+    /// <summary>보호 채널로 받은 초대 비밀번호입니다. 지금 기다리는 초대 요청(연결 ID)에 대한 것만 보관합니다.</summary>
+    private void OnRdpInvitationSecret(RdpInvitationSecretNotice secret)
+    {
+        lock (_rdpAutoConnectLock)
+        {
+            if (_disposing || !IsConnected || secret.SessionId != _rdpSessionId ||
+                secret.ConnectionId != _currentRdpConnectionId)
+            {
+                _logSink.Write("[RDP] 현재 초대 요청과 맞지 않는 초대 비밀번호 무시");
+                return;
+            }
+            if (_startedRdpAutoConnections.Contains((secret.SessionId, secret.ConnectionId, secret.InvitationId))) return;
+            _pendingRdpSecret = secret;
+        }
+        TryStartRdpAutoConnect();
+    }
+
+    /// <summary>
+    /// 초대와 비밀번호가 같은 초대(InvitationId·ConnectionId)로 짝지어지면 한 번만 자동 연결합니다.
+    /// 참가 직후·공유 재시작·재참가 모두 초대 재요청을 거치므로 이 경로로 화면이 자동 복귀합니다.
+    /// </summary>
+    private void TryStartRdpAutoConnect()
+    {
+        RdpInvitationSecretNotice secret;
+        RdpInvitationPacket matchedInvitation;
+        bool expired;
+        lock (_rdpAutoConnectLock)
+        {
+            if (_disposing || !IsConnected ||
+                _activeRdpInvitation is not { } invitation || _pendingRdpSecret is not { } pending ||
+                pending.SessionId != _rdpSessionId || invitation.SessionId != pending.SessionId ||
+                pending.ConnectionId != _currentRdpConnectionId ||
+                pending.InvitationId != invitation.InvitationId || pending.ConnectionId != invitation.ConnectionId)
+                return;
+            secret = pending;
+            matchedInvitation = invitation;
+            _pendingRdpSecret = null;
+            expired = secret.ExpiresAt <= DateTimeOffset.UtcNow || invitation.ExpiresAt <= DateTimeOffset.UtcNow;
+            // 접속 완료를 기다리기 전에 예약해야 동시에 도착한 알림도 한 번만 뷰어를 호출한다.
+            if (!expired && !_startedRdpAutoConnections.Add(
+                (secret.SessionId, secret.ConnectionId, secret.InvitationId))) return;
+        }
+
+        if (expired)
+        {
+            _logSink.Write("[RDP] 만료된 초대 비밀번호로 자동 연결하지 않음");
+            RunOnUiThread(() => RdpStatusText = "RDP 초대가 만료되었습니다. 다시 요청해 주세요.");
+            return;
+        }
+        _logSink.Write("[RDP] 보호 채널로 받은 초대로 자동 연결 시작");
+        RunOnUiThread(() => RdpStatusText = "교수자 화면에 자동으로 연결하는 중입니다.");
+        _ = ConnectRdpInvitationAsync(matchedInvitation, secret.Password);
+    }
+
+    public Task ConnectRdpWithPasswordAsync(string password)
+    {
+        RdpInvitationPacket? invitation;
+        lock (_rdpAutoConnectLock) invitation = _activeRdpInvitation;
+        return ConnectRdpInvitationAsync(invitation, password);
+    }
+
+    private async Task ConnectRdpInvitationAsync(RdpInvitationPacket? invitation, string password)
     {
         try
         {
-            var invitation = _activeRdpInvitation ?? throw new InvalidOperationException("유효한 초대를 먼저 받아 주세요.");
-            RdpInvitationContract.Validate(invitation, _rdpSessionId, _rdpParticipant,
-                _currentRdpConnectionId, DateTimeOffset.UtcNow);
-            if (!IsConnected || _disposing) throw new InvalidOperationException("강의 연결이 종료됐습니다.");
+            lock (_rdpAutoConnectLock)
+            {
+                if (invitation is null) throw new InvalidOperationException("유효한 초대를 먼저 받아 주세요.");
+                // 짝지은 초대의 스냅샷을 검증한다. 이후 새 초대가 도착해도 이전 비밀번호와 섞지 않는다.
+                RdpInvitationContract.Validate(invitation, _rdpSessionId, _rdpParticipant,
+                    _currentRdpConnectionId, DateTimeOffset.UtcNow);
+                if (!IsConnected || _disposing) throw new InvalidOperationException("강의 연결이 종료됐습니다.");
+            }
             await _rdpViewerService.ConnectAsync(invitation, password);
         }
         catch (Exception ex) { RunOnUiThread(() => RdpStatusText = $"RDP 연결 실패: {ex.Message}"); }
@@ -1202,10 +1283,15 @@ public sealed class ClientViewModel : ObservableObject
 
     private async Task ResetRdpAsync()
     {
-        _currentRdpConnectionId = Guid.Empty;
-        _activeRdpInvitation = null;
-        _rdpSessionId = Guid.Empty;
-        _rdpParticipant = string.Empty;
+        lock (_rdpAutoConnectLock)
+        {
+            _pendingRdpSecret = null;
+            _startedRdpAutoConnections.Clear();
+            _currentRdpConnectionId = Guid.Empty;
+            _activeRdpInvitation = null;
+            _rdpSessionId = Guid.Empty;
+            _rdpParticipant = string.Empty;
+        }
         RunOnUiThread(() => { IsRdpActive = false; RdpStatusText = "RDP 대기 중"; });
         await _rdpViewerService.DisconnectAsync();
     }
@@ -1255,6 +1341,11 @@ public sealed class ClientViewModel : ObservableObject
                     CollaborationMessageCodec.Decode<SessionEndedNotice>(frame, out _);
                     _sessionEnded = true;
                     _reconnectToken = null;
+                }
+                else if (kind == CollaborationMessageKind.RdpInvitationSecret)
+                {
+                    var secret = CollaborationMessageCodec.Decode<RdpInvitationSecretNotice>(frame, out _);
+                    if (secret.SessionId == secure.SessionId) OnRdpInvitationSecret(secret);
                 }
                 else if (kind is CollaborationMessageKind.FileCatalog or CollaborationMessageKind.FileChunk
                          or CollaborationMessageKind.Failure)
