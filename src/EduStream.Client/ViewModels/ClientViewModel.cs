@@ -664,6 +664,13 @@ public sealed class ClientViewModel : ObservableObject
                 LastSuccessMessage = "세션 이탈 처리 완료";
                 ChatStatus = "채팅 대기 중";
             }
+            else if (packet.AckCode == AckCodes.RdpSharingStarted)
+            {
+                // U03: 공유 재시작 시 학생 조작 없이 새 연결 ID로 초대를 다시 요청한다. 이미 받은 초대/연결은 건드리지 않는다.
+                if (IsConnected && !_disposing && _activeRdpInvitation is null && !IsRdpActive &&
+                    packet.SessionId == _sessionClient.CurrentSession?.SessionId)
+                    _ = SendRdpInvitationRequestAsync();
+            }
 
             _logSink.Write($"서버 응답 수신: {packet.AckCode} - {packet.Message}");
             SyncLogs();
