@@ -18,7 +18,29 @@ public interface INativeInputPipeline
     /// 대상 PC에 입력 허용(Inject) 적용
     /// </summary>
     Task InjectInputAsync(string targetId, CancellationToken cancellationToken = default);
+    /// <summary>
+    /// 마우스 이동 입력 주입
+    /// </summary>
+    Task InjectMouseMoveAsync(string targetId, int x, int y, CancellationToken cancellationToken = default)
+        => InjectInputAsync(targetId, cancellationToken);
 
+    /// <summary>
+    /// 마우스 클릭 입력 주입
+    /// </summary>
+    Task InjectMouseClickAsync(string targetId, MouseButton button, bool isPressed, CancellationToken cancellationToken = default)
+        => InjectInputAsync(targetId, cancellationToken);
+
+    /// <summary>
+    /// 마우스 휠 입력 주입
+    /// </summary>
+    Task InjectMouseWheelAsync(string targetId, int delta, CancellationToken cancellationToken = default)
+        => InjectInputAsync(targetId, cancellationToken);
+
+    /// <summary>
+    /// 키보드 입력 주입
+    /// </summary>
+    Task InjectKeyboardInputAsync(string targetId, int keyCode, bool isPressed, CancellationToken cancellationToken = default)
+        => InjectInputAsync(targetId, cancellationToken);
     /// <summary>
     /// 대상 PC 입력 차단(Block) 적용
     /// </summary>

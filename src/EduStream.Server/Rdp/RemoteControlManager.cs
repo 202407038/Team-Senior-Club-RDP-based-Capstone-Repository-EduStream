@@ -98,11 +98,18 @@ public sealed class RemoteControlManager : IRemoteControlManager, IRemoteInputGa
         if (!CanProcessInput(participantId, allowMouse: true))
             return false;
 
-        if (_isNativeEngineConnected)
+        if (!_isNativeEngineConnected || !_nativeInputPipeline.IsConnected)
+            return true;
+
+        try
         {
-            _ = _nativeInputPipeline.InjectInputAsync(participantId);
+            _nativeInputPipeline.InjectMouseMoveAsync(participantId, x, y).GetAwaiter().GetResult();
+            return true;
         }
-        return true;
+         catch
+        {
+            return false;
+        }
     }
 
     public bool ProcessMouseClick(string participantId, MouseButton button, bool isPressed)
@@ -110,11 +117,18 @@ public sealed class RemoteControlManager : IRemoteControlManager, IRemoteInputGa
         if (!CanProcessInput(participantId, allowMouse: true))
             return false;
 
-        if (_isNativeEngineConnected)
+        if (!_isNativeEngineConnected || !_nativeInputPipeline.IsConnected)
+            return true;
+
+        try
         {
-            _ = _nativeInputPipeline.InjectInputAsync(participantId);
+            _nativeInputPipeline.InjectMouseClickAsync(participantId, button, isPressed).GetAwaiter().GetResult();
+            return true;
         }
-        return true;
+        catch
+        {
+            return false;
+        }
     }
 
     public bool ProcessMouseWheel(string participantId, int delta)
@@ -122,11 +136,18 @@ public sealed class RemoteControlManager : IRemoteControlManager, IRemoteInputGa
         if (!CanProcessInput(participantId, allowMouse: true))
             return false;
 
-        if (_isNativeEngineConnected)
+        if (!_isNativeEngineConnected || !_nativeInputPipeline.IsConnected)
+            return true;
+
+        try
         {
-            _ = _nativeInputPipeline.InjectInputAsync(participantId);
+            _nativeInputPipeline.InjectMouseWheelAsync(participantId, delta).GetAwaiter().GetResult();
+            return true;
         }
-        return true;
+        catch
+        {
+            return false;
+        }
     }
 
     public bool ProcessKeyboardInput(string participantId, int keyCode, bool isPressed)
@@ -134,11 +155,18 @@ public sealed class RemoteControlManager : IRemoteControlManager, IRemoteInputGa
         if (!CanProcessInput(participantId, allowKeyboard: true))
             return false;
 
-        if (_isNativeEngineConnected)
+        if (!_isNativeEngineConnected || !_nativeInputPipeline.IsConnected)
+            return true;
+
+        try
         {
-            _ = _nativeInputPipeline.InjectInputAsync(participantId);
+            _nativeInputPipeline.InjectKeyboardInputAsync(participantId, keyCode, isPressed).GetAwaiter().GetResult();
+            return true;
         }
-        return true;
+        catch
+        {
+            return false;
+        }
     }
 
     private bool CanProcessInput(string participantId, bool allowMouse = false, bool allowKeyboard = false)
