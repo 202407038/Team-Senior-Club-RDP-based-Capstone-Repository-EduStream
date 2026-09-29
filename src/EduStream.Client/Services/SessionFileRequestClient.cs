@@ -10,8 +10,8 @@ namespace EduStream.Client.Services;
 /// 받은 청크는 요청 ID별 작은 버퍼로 나눠 4번 저장기(<see cref="ISessionFileDownloader"/>)에 순서대로 넘깁니다.
 /// </summary>
 /// <remarks>
-/// 현재 단계에서는 보호 채널 계약이 없어 이 클래스를 ClientViewModel에 연결하지 않았습니다.
-/// 채널이 확정되면 수신 프레임을 <see cref="HandleFrameAsync"/>로, 연결 종료를 <see cref="ConnectionClosed"/>로 넘깁니다.
+/// #59부터 ClientViewModel의 인증된 보호 채널에 연결됩니다.
+/// 수신 프레임을 <see cref="HandleFrameAsync"/>로, 연결 종료를 <see cref="ConnectionClosed"/>로 넘깁니다.
 /// </remarks>
 public sealed class SessionFileRequestClient
 {
