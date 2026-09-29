@@ -47,13 +47,10 @@ public sealed class ClientViewModel : ObservableObject
     private CancellationTokenSource? _reconnectCts;
     private volatile bool _userLeaving;
     private volatile bool _sessionEnded;
-<<<<<<< HEAD
     private SessionFileRequestClient? _fileClient;
-=======
     // 참가 요청을 보낸 뒤 서버의 참가 승인(SessionJoined)을 기다리는 시도. 승인·거부·끊김·시간 초과 중 먼저 온 결과로 끝난다.
     private enum JoinAckResult { Joined, Rejected, Disconnected, TimedOut }
     private TaskCompletionSource<JoinAckResult>? _pendingJoinAck;
->>>>>>> origin/feature/secure-session-channel
     private StudentStatus _studentStatus = StudentStatus.Initial;
     private bool _permissionNoticeShown;
     private string _connectionCode = string.Empty;
