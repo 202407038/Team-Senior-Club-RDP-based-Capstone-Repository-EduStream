@@ -21,20 +21,15 @@ public sealed class ServerRdpIntegrationTests
     private static Task Invoke(ServerViewModel vm, string method, params object[] args) =>
         (Task)typeof(ServerViewModel).GetMethod(method, BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(vm, args)!;
 
-    private static int FreePort()
-    {
-        var listener = new TcpListener(IPAddress.Loopback, 0);
-        listener.Start();
-        var port = ((IPEndPoint)listener.LocalEndpoint).Port;
-        listener.Stop();
-        return port;
-    }
+    // 테스트가 사용자 인증서 저장소에 교수자 인증서를 만들지 않게 한다.
+    private static ServerViewModel CreateViewModel(IRdpSharingService? service = null) =>
+        new(service, ProfessorCertificateStore.CreateEphemeral) { Port = TestPortAllocator.GetFreePortPair() };
 
     [Fact]
     public async Task StartFailure_ShouldNotAdvertiseSharing_AndAllowRetry()
     {
         var service = new FakeSharing { FailStart = true };
-        var vm = new ServerViewModel(service) { Port = FreePort() };
+        var vm = CreateViewModel(service);
         try
         {
             await Invoke(vm, "OpenSessionAsync");
@@ -60,7 +55,7 @@ public sealed class ServerRdpIntegrationTests
         var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var service = new FakeSharing { BeforeStart = async () => { entered.SetResult(); await release.Task; } };
-        var vm = new ServerViewModel(service) { Port = FreePort() };
+        var vm = CreateViewModel(service);
         await Invoke(vm, "OpenSessionAsync");
         var start = vm.StartRdpShareAsync();
         await entered.Task.WaitAsync(Wait);
@@ -78,7 +73,7 @@ public sealed class ServerRdpIntegrationTests
     [InlineData(8 * 1024 * 1024)]
     public async Task ProfessorUiFlow_TwoNativeViewers_FileChat_StopAndRestart(int fileSize)
     {
-        var vm = new ServerViewModel { Port = FreePort() };
+        var vm = CreateViewModel();
         await using var first = await RdpViewerIntegrationTests.ViewerRig.Create();
         await using var second = await RdpViewerIntegrationTests.ViewerRig.Create();
         var serializer = new PacketSerializer();
@@ -96,8 +91,13 @@ public sealed class ServerRdpIntegrationTests
             await vm.StartRdpShareAsync();
             Assert.True(vm.IsRdpSharing);
             var session = Guid.Empty;
+            // 보호 채널은 참가 연결과 수명을 같이하므로 테스트 끝까지 참조를 유지한다.
+            var secureChannels = new List<SecureSessionChannel>();
             async Task<TcpClientService> Join(string name)
             {
+                var secure = await SecureRoomJoinClient.AuthenticateAsync("127.0.0.1", vm.Port, vm.ConnectionCode, name,
+                    ReadOnlyMemory<char>.Empty, new InMemoryLogSink(), Wait);
+                secureChannels.Add(secure);
                 var client = new TcpClientService(new InMemoryLogSink(), serializer);
                 clients.Add(client);
                 var ack = new TaskCompletionSource<Guid>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -122,7 +122,7 @@ public sealed class ServerRdpIntegrationTests
                     else if (type == PacketType.Screen) Interlocked.Increment(ref pngCount);
                 };
                 await client.ConnectAsync("127.0.0.1", vm.Port);
-                await client.SendAsync(PacketFactory.CreateSessionJoin(name, name, "127.0.0.1", vm.Port));
+                await client.SendAsync(PacketFactory.CreateSessionJoin(name, name, "127.0.0.1", vm.Port, secure.JoinTicket));
                 session = await ack.Task.WaitAsync(Wait);
                 return client;
             }

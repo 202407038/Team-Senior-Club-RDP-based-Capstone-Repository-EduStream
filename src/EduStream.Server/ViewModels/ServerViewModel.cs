@@ -1,7 +1,11 @@
 using System.Collections.ObjectModel;
 using System.IO;
+using System.Security.Cryptography;
+using System.Security.Cryptography.X509Certificates;
 using System.Windows;
 using EduStream.Core.Network;
+using EduStream.Core.Collaboration;
+using EduStream.Core.FileSharing;
 using EduStream.Core.Common;
 using EduStream.Core.Logging;
 using EduStream.Core.Models;
@@ -42,9 +46,14 @@ public sealed class ServerViewModel : ObservableObject
     private bool _isStatusError;
     private int _participantCount;
     private bool _isScreenSharing;
+    private X509Certificate2? _secureCertificate;
+    private readonly Func<X509Certificate2>? _certificateProvider;
+    private string _connectionCode = "세션을 열면 표시됩니다.";
 
-    public ServerViewModel(IRdpSharingService? rdpSharing = null)
+    /// <param name="certificateProvider">테스트용. 지정하지 않으면 사용자 인증서 저장소의 교수자 인증서를 씁니다.</param>
+    public ServerViewModel(IRdpSharingService? rdpSharing = null, Func<X509Certificate2>? certificateProvider = null)
     {
+        _certificateProvider = certificateProvider;
         var serializer = new PacketSerializer();
         _tcpServer = new TcpServerService(_logSink, serializer);
         _sessionManager = new SessionManager(_logSink, _tcpServer);
@@ -67,6 +76,7 @@ public sealed class ServerViewModel : ObservableObject
         SendSampleFileCommand = new RelayCommand(() => _ = SendSampleFileAsync(), () => IsSessionOpen);
         SelectFileCommand = new RelayCommand(SelectFile);
         SendSelectedFileCommand = new RelayCommand(() => _ = SendSelectedFileAsync(), () => IsSessionOpen && File.Exists(SelectedFilePath));
+        RegisterSelectedFileCommand = new RelayCommand(() => _ = RegisterSelectedFileAsync(), () => IsSessionOpen && File.Exists(SelectedFilePath));
         SendChatCommand = new RelayCommand(() => _ = SendChatAsync(), () => IsSessionOpen && !string.IsNullOrWhiteSpace(ChatInput));
         StartRdpShareCommand = new RelayCommand(() => _ = StartRdpShareAsync(), () => IsSessionOpen && !IsBusy && !IsRdpBusy && !IsRdpSharing);
         StopRdpShareCommand = new RelayCommand(() => _ = StopRdpShareAsync(), () => IsRdpSharing && !IsBusy && !IsRdpBusy);
@@ -83,6 +93,20 @@ public sealed class ServerViewModel : ObservableObject
         get => _port;
         set => SetProperty(ref _port, value);
     }
+
+    /// <summary>
+    /// 학생이 참가할 때 입력하는 접속 코드(교수자 인증서 지문)입니다. 비밀값이 아니므로 화면에 표시합니다.
+    /// </summary>
+    public string ConnectionCode
+    {
+        get => _connectionCode;
+        private set => SetProperty(ref _connectionCode, value);
+    }
+
+    /// <summary>
+    /// 방 비밀번호 입력칸을 읽고 비우는 함수입니다. 비밀번호를 ViewModel 속성에 보관하지 않기 위해 View가 제공합니다.
+    /// </summary>
+    public Func<string>? RoomPasswordProvider { get; set; }
 
     public string ChatInput
     {
@@ -149,6 +173,7 @@ public sealed class ServerViewModel : ObservableObject
                 StopAutoShareCommand.RaiseCanExecuteChanged();
                 SendSampleFileCommand.RaiseCanExecuteChanged();
                 SendSelectedFileCommand.RaiseCanExecuteChanged();
+                RegisterSelectedFileCommand.RaiseCanExecuteChanged();
                 SendChatCommand.RaiseCanExecuteChanged();
                 UpdateRdpCommands();
             }
@@ -210,6 +235,12 @@ public sealed class ServerViewModel : ObservableObject
 
     public ObservableCollection<string> SharedFiles { get; } = [];
 
+    /// <summary>학생이 골라 받을 수 있게 등록한 강의 파일 목록입니다(U08).</summary>
+    public ObservableCollection<RegisteredFileItem> RegisteredFiles { get; } = [];
+
+    /// <summary>선택한 파일을 강의 파일 목록에 등록합니다. 본문은 학생이 요청할 때만 보냅니다.</summary>
+    public RelayCommand RegisterSelectedFileCommand { get; }
+
     public ObservableCollection<ChatLine> ChatMessages { get; } = [];
 
     public RelayCommand OpenSessionCommand { get; }
@@ -242,6 +273,7 @@ public sealed class ServerViewModel : ObservableObject
             if (SetProperty(ref _selectedFilePath, value))
             {
                 SendSelectedFileCommand.RaiseCanExecuteChanged();
+                RegisterSelectedFileCommand.RaiseCanExecuteChanged();
             }
         }
     }
@@ -259,11 +291,16 @@ public sealed class ServerViewModel : ObservableObject
 
         try
         {
-            await _sessionManager.OpenSessionAsync(SessionName, Port);
+            var roomPassword = RoomPasswordProvider?.Invoke() ?? string.Empty;
+            _secureCertificate ??= LoadSecureCertificate();
+            await _sessionManager.OpenSessionAsync(SessionName, Port, roomPassword.AsMemory(), _secureCertificate);
             _heartbeatService.Start();
             IsSessionOpen = true;
+            ConnectionCode = _sessionManager.ConnectionCode ?? "-";
+            if (_sessionManager.FileTransfers is { } fileTransfers) fileTransfers.FileStored += OnStudentFileStored;
             SessionStatus = $"세션 Open · 포트 {Port}";
-            StatusMessage = $"'{SessionName}' 세션이 시작되었습니다.";
+            StatusMessage = $"'{SessionName}' 세션이 시작되었습니다. 학생에게 호스트 IP, 포트, 접속 코드를 알려 주세요." +
+                            (_sessionManager.IsRoomPasswordProtected ? " 방 비밀번호도 함께 알려 주세요." : string.Empty);
             IsStatusError = false;
             RdpStatus = "WDS 공유 시작 후 학생을 연결해 주세요. 이미 참여한 학생은 RDP 재접속을 눌러 주세요.";
             ChatMessages.Insert(0, ChatLine.System("세션이 열렸습니다."));
@@ -297,6 +334,8 @@ public sealed class ServerViewModel : ObservableObject
                 finally { await _sessionManager.CloseSessionAsync(); }
             }
             IsSessionOpen = false;
+            ConnectionCode = "세션을 열면 표시됩니다.";
+            RegisteredFiles.Clear();
             IsScreenSharing = false;
             ParticipantCount = 0;
             SessionStatus = "세션 닫힘";
@@ -522,6 +561,47 @@ public sealed class ServerViewModel : ObservableObject
         return IsRdpSharing && handoff?.ExpiresAt > DateTimeOffset.UtcNow ? handoff.Password : null;
     }
 
+    private async Task RegisterSelectedFileAsync()
+    {
+        var path = SelectedFilePath;
+        try
+        {
+            var file = await _sessionManager.RegisterFileAsync(path);
+            RegisteredFiles.Add(new RegisteredFileItem(file, UnregisterFile));
+            FileShareStatus = $"강의 파일 목록에 등록했습니다: {file.FileName}. 학생이 목록에서 골라 받을 수 있습니다.";
+        }
+        catch (Exception ex)
+        {
+            // 로컬 경로가 담긴 예외 메시지는 화면에 그대로 보여 주지 않는다.
+            FileShareStatus = "파일을 등록하지 못했습니다: " + CollaborationErrorCatalog.FromException(ex).UserMessage;
+            _logSink.Write($"[FileRoute] 등록 실패: {ex.GetType().Name}");
+        }
+        SyncLogs();
+    }
+
+    private void UnregisterFile(RegisteredFileItem item)
+    {
+        try
+        {
+            _sessionManager.UnregisterFile(item.File.FileId);
+            FileShareStatus = $"목록에서 내렸습니다: {item.File.FileName}. 이미 받은 학생의 파일은 그대로 남습니다.";
+        }
+        catch (InvalidOperationException)
+        {
+            FileShareStatus = "세션이 닫혀 있어 목록을 바꿀 수 없습니다.";
+        }
+        RegisteredFiles.Remove(item);
+        SyncLogs();
+    }
+
+    private void OnStudentFileStored(ParticipantConnection student, FileStoredNotice notice) => RunOnUi(() =>
+    {
+        var name = _sessionManager.Participants.TryResolve(student.ConnectionId)?.DisplayName ?? "학생";
+        var file = RegisteredFiles.FirstOrDefault(item => item.File.FileId == notice.FileId)?.File.FileName ?? "파일";
+        FileShareStatus = $"{name}님이 {file} 저장을 완료했습니다.";
+        SyncLogs();
+    });
+
     private static void RunOnUi(Action action)
     {
         var dispatcher = System.Windows.Application.Current?.Dispatcher;
@@ -574,6 +654,24 @@ public sealed class ServerViewModel : ObservableObject
             LatestScreenStatus = _screenShareService.LatestStatus;
             SyncLogs();
         });
+    }
+
+    /// <summary>
+    /// 저장소 인증서를 쓰면 앱을 다시 켜도 접속 코드가 같습니다. 저장소를 쓸 수 없으면 이번 실행에만 쓰는 인증서로 대체하며,
+    /// 이 경우 접속 코드는 실행할 때마다 바뀝니다.
+    /// </summary>
+    private X509Certificate2 LoadSecureCertificate()
+    {
+        if (_certificateProvider is not null) return _certificateProvider();
+        try
+        {
+            return ProfessorCertificateStore.LoadOrCreate();
+        }
+        catch (Exception ex) when (ex is CryptographicException or UnauthorizedAccessException or PlatformNotSupportedException)
+        {
+            _logSink.Write($"[Secure] 인증서 저장소 사용 불가, 임시 인증서 사용: {ex.GetType().Name}");
+            return ProfessorCertificateStore.CreateEphemeral();
+        }
     }
 
     private void SyncLogs()

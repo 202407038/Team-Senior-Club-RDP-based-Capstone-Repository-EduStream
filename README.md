@@ -2,21 +2,15 @@
 
 ## ZIP을 풀고 바로 실행하기
 
-### [실행용 ZIP 다운로드 · EduStream-Portable-win-x64.zip](https://github.com/202407038/Team-Senior-Club-RDP-based-Capstone-Repository-EduStream/releases/download/v0.1.0-preview.1/EduStream-Portable-win-x64.zip)
+### [실행용 ZIP 다운로드 · EduStream-Portable-win-x64.zip](https://github.com/202407038/Team-Senior-Club-RDP-based-Capstone-Repository-EduStream/releases/download/v0.1.0-preview.2/EduStream-Portable-win-x64.zip)
 
 **다운로드 → 모두 압축 풀기 → EduStream 폴더 → `EduStream 교수자.exe` 또는 `EduStream 학생.exe` 더블클릭**
 
 설치나 명령어 입력 없이 실행할 수 있으며 .NET 실행 환경이 포함되어 있습니다. ZIP 안에서 바로 실행하지 말고 전체 압축을 풀어주세요. EXE 옆의 DLL과 하위 폴더도 필요하므로, 이동할 때는 폴더 전체를 옮깁니다. [실행 안내](docs/work/DESKTOP_LAUNCH.md)
 
-## 설치형을 원하는 경우
+배포는 **실행용 ZIP만** 제공합니다. 현재 버전은 **v0.1.0-preview.2 (2026-09-30)**이며 실행 코드는 main `013c2d0` 기준입니다. 이후 문서 전용 갱신은 앱 코드 변경과 구분합니다. 코드 서명은 미적용이며 다중 PC RDP 실사용 인수는 진행 중입니다. [배포 정보](https://github.com/202407038/Team-Senior-Club-RDP-based-Capstone-Repository-EduStream/releases/tag/v0.1.0-preview.2)
 
-### [Windows 설치 파일 다운로드 · EduStream-Setup.exe](https://github.com/202407038/Team-Senior-Club-RDP-based-Capstone-Repository-EduStream/releases/download/v0.1.0-preview.1/EduStream-Setup.exe)
-
-**다운로드 → 설치 파일 더블클릭 → 학생용/교수자용 선택 → 설치 → 바탕화면 아이콘 실행**
-
-일반 사용자는 PowerShell, 빌드 명령, 별도 .NET 설치가 필요하지 않습니다. [설치·실행 안내](docs/work/DESKTOP_LAUNCH.md)를 확인하세요.
-
-현재 배포는 **Windows x64 시험판**입니다. 코드 서명은 미적용이며 다중 PC RDP 실사용 인수는 진행 중입니다. [배포 정보](https://github.com/202407038/Team-Senior-Club-RDP-based-Capstone-Repository-EduStream/releases/tag/v0.1.0-preview.1)
+방 비밀번호·보호 참가 인증, RDP 초대 비밀 자동 전달, 세션 파일 등록·선택 다운로드가 포함됩니다. 신규 UI·학생 화면 역방향 공유·원격 입력·판서는 완료 기능이 아닙니다. 학생의 최초 참가에는 교수자 주소/포트/접속 코드와 설정된 방 비밀번호가 필요하며, RDP 초대 비밀번호는 정상 흐름에서 자동 전달합니다.
 
 **위 실행용 ZIP과 `Code → Download ZIP`은 다릅니다.** `Code → Download ZIP`은 개발용 소스입니다. 소스 ZIP을 받은 경우 루트의 `Download-EduStream.url`에서도 실행용 ZIP을 받을 수 있습니다.
 
@@ -57,7 +51,8 @@ dotnet test EduStream.sln --no-build
 
 - [실행 및 설정 가이드](docs/work/RUN_GUIDE.md)
 - [현재 상태와 로드맵](docs/work/STATUS_AND_ROADMAP.md)
-- [#57까지의 세션 기반·3번 RDP 상세 인계](docs/work/SESSION_RDP_HANDOFF_PR57.md) — #52~#57 main 반영 범위, #58/#59 검토 대기, 기존 PR 브랜치 최신화와 2·3·5번 구현 경계를 확인합니다.
+- [#63까지의 세션 기반·3번 RDP 상세 인계](docs/work/SESSION_RDP_HANDOFF_PR57.md) — 보호 인증·파일 앱 연결·초대 비밀 자동 전달과 남은 실제 엔진/UI 인수를 구분합니다.
+- [1·4번 후속 검증](docs/work/CORE_FILE_INTEGRATION_READINESS.md) — #62·#63 main 반영 및 검증, 루프백 TLS/TCP와 실제 WDS 인수 범위를 구분합니다.
 - [1·4번 선행 구현 인계](docs/work/FINAL_CORE_FILE_HANDOFF.md) · [최종 통합·QA 체크리스트](docs/work/FINAL_ACCEPTANCE_CHECKLIST.md) — #48·#49 코드 준비와 실제 연동/최종 인수를 구분합니다.
 - [확정 UI 시안·피드백](docs/work/UI_FEEDBACK_SPEC.md) · [역할 배분·제출 일정](docs/work/UI_RDP_WORK_ALLOCATION.md) — 후속 구현 계획이며 현재 배포 기능과 구분합니다.
 - [개발 작업 방식](docs/work/DEVELOPMENT_GUIDE.md)
