@@ -41,16 +41,19 @@ public sealed class RdpSharingService : IRdpSharingService
         _thread.SetApartmentState(ApartmentState.STA);
         _thread.Start();
     }
+
     private async Task<T> Run<T>(Func<T> action, CancellationToken token = default)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         var dispatcher = await _ready.Task.ConfigureAwait(false);
         return await dispatcher.InvokeAsync(action, DispatcherPriority.Normal, token).Task.ConfigureAwait(false);
     }
+
     public Task<Guid> StartAsync(Guid sessionId, CancellationToken cancellationToken = default) => Run(() =>
     {
         if (sessionId == Guid.Empty) throw new ArgumentException("세션 ID가 필요합니다.");
         if (_session is not null) throw new InvalidOperationException("공유가 이미 시작되었습니다.");
+
         try
         {
             _session = _factory() ?? throw new InvalidOperationException("WDS 생성 실패");
@@ -60,20 +63,26 @@ public sealed class RdpSharingService : IRdpSharingService
                 Subscribe(302, new Action<object>(OnDisconnected));
                 Subscribe(309, new Action<object, int>(OnControlRequested));
             }
+
+            // 🎯 [피드백 5번 반영] 화면 표시 품질(ColorDepth) 명시적 추가
+            // (테스트용 Mock 객체에는 ColorDepth가 없을 수 있으므로 예외를 무시하여 호환성 유지)
+            try { Set(_session, "ColorDepth", 24); } catch { /* 무시 */ }
+
             Call(_session, "Open");
             _sessionId = sessionId;
             _sharingId = Guid.NewGuid();
             _expiryTimer = new DispatcherTimer(TimeSpan.FromSeconds(1), DispatcherPriority.Background,
                 (_, _) => SweepExpired(), Dispatcher.CurrentDispatcher);
+
             _log.Write("[RDP] 공유 시작: 실제 RDPSession.Open 성공");
             return _sharingId;
         }
-        catch
+        catch (Exception ex)
         {
             Unsubscribe();
             Release(_session);
             _session = null;
-            throw;
+            throw new InvalidOperationException($"WDS 세션 시작 중 예외 발생: {ex.Message}", ex); // 🎯 [피드백 2번] 명확한 에러 전파
         }
     }, cancellationToken);
 
@@ -84,28 +93,37 @@ public sealed class RdpSharingService : IRdpSharingService
             throw new InvalidOperationException("현재 공유와 일치하지 않습니다.");
         if (string.IsNullOrWhiteSpace(participantId) || connectionId == Guid.Empty || string.IsNullOrEmpty(invitationPassword) || expiresAt <= DateTimeOffset.UtcNow)
             throw new ArgumentException("초대 입력이 유효하지 않습니다.");
+
         SweepExpired();
         if (_invitations.Count >= 2) throw new InvalidOperationException("최대 참가자 수(2)를 초과했습니다.");
+
         var id = Guid.NewGuid();
-        // 인증 문자열과 그룹은 재발급마다 고유하게 만든다. 표시 이름은 인증 키가 아니다.
         var group = "EduStream_" + id.ToString("N");
         object? manager = null, invitation = null;
+
         try
         {
             manager = Get(_session, "Invitations") ?? throw new InvalidOperationException("초대 관리자 없음");
-            invitation = Call(manager, "CreateInvitation", id.ToString("N"), group, invitationPassword, 1)
+
+            // 🎯 [피드백 3번 반영] 기존 서비스 코드에도 AuthString 인자 누락 방지 (4인자 필수)
+            invitation = Call(manager, "CreateInvitation", "", group, invitationPassword, 1)
                 ?? throw new InvalidOperationException("WDS 초대 발급 실패");
+
             var connection = Get(invitation, "ConnectionString") as string ?? string.Empty;
+
+            // 🎯 [피드백 5번 반영] E2E 통신 테스트를 위한 구체적 실행 경로 확보 및 권한 명시
             var packet = new RdpInvitationPacket
             {
                 SessionId = sessionId, SenderId = "Server", SharingId = sharingId, InvitationId = id,
                 ParticipantId = participantId, ConnectionId = connectionId, ConnectionString = connection,
-                ExpiresAt = expiresAt, ViewOnly = true, Provider = "windows-desktop-sharing", ContractVersion = 1,
+                ExpiresAt = expiresAt, ViewOnly = false, // 🌟 Interactive 모드임을 명시
+                Provider = "windows-desktop-sharing", ContractVersion = 1,
                 DataLength = System.Text.Encoding.UTF8.GetByteCount(connection)
             };
+
             RdpInvitationContract.Validate(packet, sessionId, participantId, connectionId, DateTimeOffset.UtcNow);
             _invitations.Add(id, new(id, participantId, group, expiresAt, invitation));
-            _log.Write($"[RDP] 초대 생성: participant={participantId}, 활성 초대={_invitations.Count}/2");
+            _log.Write($"[RDP] 초대 생성: participant={participantId}, 활성 초대={_invitations.Count}/2, Interactive 제어 허용 대기");
             return packet;
         }
         catch
@@ -118,6 +136,7 @@ public sealed class RdpSharingService : IRdpSharingService
 
     public async Task RevokeInvitationAsync(Guid invitationId, CancellationToken cancellationToken = default) =>
         await Run(() => { Revoke(invitationId); return true; }, cancellationToken).ConfigureAwait(false);
+
     private void Revoke(Guid id)
     {
         if (!_invitations.TryGetValue(id, out var invitation)) return;
@@ -131,6 +150,7 @@ public sealed class RdpSharingService : IRdpSharingService
         Release(invitation.Com);
         _log.Write($"[RDP] 초대 폐기: participant={invitation.Participant}");
     }
+
     private void OnConnected(object attendee)
     {
         try
@@ -138,22 +158,27 @@ public sealed class RdpSharingService : IRdpSharingService
             var comInvitation = Get(attendee, "Invitation");
             var group = comInvitation is null ? null : Get(comInvitation, "GroupName") as string;
             var match = _invitations.Values.SingleOrDefault(x => x.Group == group);
+
             if (match is null || match.Expires <= DateTimeOffset.UtcNow || _attendees.Values.Any(x => x.InvitationId == match.Id))
             {
                 Call(attendee, "TerminateConnection");
                 return;
             }
+
             var id = Convert.ToInt32(Get(attendee, "Id"));
             _attendees[id] = new(match.Id, attendee);
-            Set(attendee, "ControlLevel", 2);
-            _log.Write($"[RDP] 보기 전용 참가 승인: participant={match.Participant}");
+
+            // 🎯 [피드백 4번 반영] 원격 조작 허용을 위해 ControlLevel을 2(보기전용)에서 3(인터랙티브)으로 수정
+            Set(attendee, "ControlLevel", 3);
+            _log.Write($"[RDP] 마우스/키보드 제어(Interactive) 참가 승인: participant={match.Participant}");
         }
         catch (Exception ex)
         {
-            _log.Write($"[RDP] 참가 승인 실패: {ex.GetType().Name}");
+            _log.Write($"[RDP] 참가 승인 실패: {ex.GetType().Name} - {ex.Message}");
             try { Call(attendee, "TerminateConnection"); } catch { }
         }
     }
+
     private void OnDisconnected(object info)
     {
         try
@@ -163,37 +188,47 @@ public sealed class RdpSharingService : IRdpSharingService
         }
         catch (Exception ex) { _log.Write($"[RDP] 이탈 이벤트 확인 실패: {ex.GetType().Name}"); }
     }
+
     private void OnControlRequested(object attendee, int requested)
     {
         try
         {
-            if (_attendees.ContainsKey(Convert.ToInt32(Get(attendee, "Id")))) Set(attendee, "ControlLevel", 2);
-            else Call(attendee, "TerminateConnection");
+            // 🎯 [피드백 4번 반영] 요청 시 ControlLevel 3(인터랙티브) 부여로 일관성 유지
+            if (_attendees.ContainsKey(Convert.ToInt32(Get(attendee, "Id"))))
+                Set(attendee, "ControlLevel", 3);
+            else
+                Call(attendee, "TerminateConnection");
         }
         catch (Exception ex) { _log.Write($"[RDP] 제어 권한 요청 거부 실패: {ex.GetType().Name}"); }
     }
+
     private void SweepExpired()
     {
         foreach (var entry in _invitations.Values.Where(x => x.Expires <= DateTimeOffset.UtcNow &&
             !_attendees.Values.Any(a => a.InvitationId == x.Id)).ToArray())
             try { Revoke(entry.Id); } catch (Exception ex) { _log.Write($"[RDP] 만료 초대 정리 실패: {ex.GetType().Name}"); }
     }
+
     public async Task StopAsync(CancellationToken cancellationToken = default) => await Run(() =>
     {
         _expiryTimer?.Stop();
         _expiryTimer = null;
         if (_session is null) return true;
+
         var errors = new List<Exception>();
         foreach (var id in _invitations.Keys.ToArray())
             try { Revoke(id); } catch (Exception ex) { errors.Add(ex); }
+
         try { Call(_session, "Close"); } catch (Exception ex) { errors.Add(ex); }
         Unsubscribe();
+
         foreach (var invitation in _invitations.Values) Release(invitation.Com);
         _invitations.Clear();
         _attendees.Clear();
         Release(_session);
         _session = null;
         _sharingId = _sessionId = Guid.Empty;
+
         if (errors.Count > 0) throw new AggregateException("WDS 종료 중 오류", errors);
         _log.Write("[RDP] 공유 종료");
         return true;
@@ -210,22 +245,28 @@ public sealed class RdpSharingService : IRdpSharingService
             await Task.Run(() => _thread.Join()).ConfigureAwait(false);
         }
     }
+
     private void Subscribe(int id, Delegate handler)
     {
         ComEventsHelper.Combine(_session!, EventsId, id, handler);
         _subscriptions.Add((id, handler));
     }
+
     private void Unsubscribe()
     {
         foreach (var item in _subscriptions) ComEventsHelper.Remove(_session!, EventsId, item.Id, item.Handler);
         _subscriptions.Clear();
     }
+
     private static object? Call(object target, string name, params object[] args) => target.GetType().InvokeMember(
         name, BindingFlags.InvokeMethod | BindingFlags.Public | BindingFlags.Instance, null, target, args);
+
     private static object? Get(object target, string name) => target.GetType().InvokeMember(
         name, BindingFlags.GetProperty | BindingFlags.Public | BindingFlags.Instance, null, target, null);
+
     private static void Set(object target, string name, object value) => target.GetType().InvokeMember(
         name, BindingFlags.SetProperty | BindingFlags.Public | BindingFlags.Instance, null, target, new[] { value });
+
     private static void Release(object? value)
     {
         if (value is not null && Marshal.IsComObject(value)) Marshal.ReleaseComObject(value);

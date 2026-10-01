@@ -10,10 +10,10 @@ public sealed class ReverseSessionManager : IReverseSessionManager, IDisposable
 {
     private readonly object _stateLock = new();
     private readonly ConcurrentDictionary<Guid, ReverseInvitationPacket> _invitations = new();
-    
+
     // [프로젝트 규칙 적용] 깃배쉬 호환성을 위해 dynamic을 사용한 Late Binding으로 실제 엔진 호출
-    private dynamic? _rdpSession; 
-    
+    private dynamic? _rdpSession;
+
     private Guid _reverseSharingId = Guid.Empty;
     private string _hostStudentId = string.Empty;
     private ReverseSessionState _state = ReverseSessionState.Inactive;
@@ -40,25 +40,30 @@ public sealed class ReverseSessionManager : IReverseSessionManager, IDisposable
             if (_state != ReverseSessionState.Inactive)
                 throw new InvalidOperationException("역방향 공유가 이미 활성화되어 있습니다.");
 
+            // 🎯 [피드백 2번 반영] 단순 뭉뚱그림 방지: 레지스트리(CLSID) 미존재와 실제 Open 실패를 엄격히 구분하여 예외 처리
+            Type? rdpType = Type.GetTypeFromProgID("RDPCOMAPILib.RDPSession");
+            if (rdpType == null)
+                throw new NotSupportedException("WDS 엔진(RDPCOMAPILib.RDPSession)이 레지스트리에 등록되지 않았습니다. 현재 OS(Windows Home 등)에서 지원하지 않습니다.");
+
             try
             {
-                Type? rdpType = Type.GetTypeFromProgID("RDPCOMAPILib.RDPSession");
-                if (rdpType == null) throw new InvalidOperationException("WDS 엔진을 찾을 수 없습니다.");
-                
                 _rdpSession = Activator.CreateInstance(rdpType);
-                if (_rdpSession == null)
-                {
-                    throw new InvalidOperationException("WDS 세션이 만들어지지 않았습니다.");
-                }
-                
-                // 🌟 [진짜 WDS 연동 추가] 화면 공유 품질 및 제어 속성 초기화
-                _rdpSession.ColorDepth = 24; // 24비트 트루컬러 지원
-                
-                _rdpSession.Open(); 
             }
             catch (Exception ex)
             {
-                throw new InvalidOperationException("실제 WDS 세션을 여는 데 실패했습니다.", ex);
+                throw new InvalidOperationException("WDS 세션 인스턴스를 생성할 수 없습니다. (COM 활성화 실패)", ex);
+            }
+
+            try
+            {
+                // C# 컴파일러에게 "이거 절대 null 아니니까 안심하고 실행해"라고 알려주는 느낌표(!) 추가
+                _rdpSession!.ColorDepth = 24;
+                _rdpSession!.Open();
+            }
+            catch (Exception ex)
+            {
+                // 실제 Open 시 터지는 네트워크/OS 제한 에러를 명확히 상위로 던짐
+                throw new InvalidOperationException($"실제 WDS 세션(Open)을 여는 데 실패했습니다: {ex.Message}", ex);
             }
 
             _reverseSharingId = Guid.NewGuid();
@@ -70,7 +75,7 @@ public sealed class ReverseSessionManager : IReverseSessionManager, IDisposable
     }
 
     public Task<ReverseInvitationPacket> CreateProfessorInvitationAsync(
-        Guid sessionId, Guid sharingId, string professorId, Guid connectionId, 
+        Guid sessionId, Guid sharingId, string professorId, Guid connectionId,
         string invitationPassword, DateTimeOffset expiresAt, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -85,10 +90,16 @@ public sealed class ReverseSessionManager : IReverseSessionManager, IDisposable
             if (safeSession == null)
                 throw new InvalidOperationException("WDS 세션이 만들어지지 않았습니다.");
 
+            // 🎯 [피드백 3번 반영] 기존에 있던 sharingId 일치 검증 로직 복구
+            if (_reverseSharingId != sharingId)
+                throw new InvalidOperationException("현재 진행 중인 공유 ID와 요청한 공유 ID가 일치하지 않습니다.");
+
+            // 🎯 [피드백 3번 반영] MS 공식 명세에 맞춰 인자 4개(AuthString, GroupName, Password, AttendeeLimit)로 정확히 호출
             dynamic rdpInvitation = safeSession.Invitations.CreateInvitation(
-                "ProfessorGroup",
-                invitationPassword,
-                1
+                "", // AuthString (기본 빈 문자열 사용)
+                "ProfessorGroup", // GroupName
+                invitationPassword, // Password
+                1 // AttendeeLimit
             );
 
             var invitationId = Guid.NewGuid();
@@ -98,7 +109,7 @@ public sealed class ReverseSessionManager : IReverseSessionManager, IDisposable
                 SharingId = sharingId,
                 ProfessorId = professorId,
                 ConnectionId = connectionId,
-                ConnectionString = rdpInvitation.ConnectionString, 
+                ConnectionString = rdpInvitation.ConnectionString,
                 ExpiresAt = expiresAt,
                 HostStudentId = _hostStudentId
             };
@@ -116,25 +127,41 @@ public sealed class ReverseSessionManager : IReverseSessionManager, IDisposable
 
     public Task OnConnectedAsync(CancellationToken cancellationToken = default)
     {
-        lock (_stateLock) 
-        { 
-            if (_state == ReverseSessionState.Connecting) 
+        lock (_stateLock)
+        {
+            if (_state == ReverseSessionState.Connecting)
             {
-                _state = ReverseSessionState.Connected; 
-                
-                // 🌟 [진짜 WDS 연동 추가] 교수가 접속 완료된 시점에 마우스/키보드 제어권(Interactive) 강제 부여!
+                _state = ReverseSessionState.Connected;
+
                 if (_rdpSession != null)
                 {
                     try
                     {
-                        // 엔진에 접속된 모든 참석자(교수)에게 제어 권한 2(CTRL_LEVEL_INTERACTIVE) 할당
+                        int grantedCount = 0;
+
+                        // 🎯 [피드백 4번 반영] ControlLevel 2(보기 전용) -> 3(마우스 조작 가능)으로 수정
                         foreach (dynamic attendee in _rdpSession.Attendees)
                         {
-                            attendee.ControlLevel = 2; 
+                            attendee.ControlLevel = 3; // CTRL_LEVEL_INTERACTIVE
+                            grantedCount++;
                         }
-                        _state = ReverseSessionState.ControlGranted; // 권한 부여 완료 상태로 쐐기
+
+                        // 🎯 [피드백 4번 반영] 참석자가 0명인데 성공(ControlGranted)으로 넘어가는 꼼수 차단
+                        if (grantedCount > 0)
+                        {
+                            _state = ReverseSessionState.ControlGranted;
+                        }
+                        else
+                        {
+                            throw new InvalidOperationException("접속한 참석자가 없어 원격 제어 권한을 부여할 수 없습니다.");
+                        }
                     }
-                    catch { /* 테스트 환경 등 엔진이 껍데기일 때 터지는 것 방지 */ }
+                    catch (Exception ex)
+                    {
+                        // 🎯 [피드백 4번 반영] 권한 처리 예외를 catch에서 무시하지 않고 실패 상태로 롤백 후 에러 던짐
+                        _state = ReverseSessionState.Failed;
+                        throw new InvalidOperationException($"원격 제어 권한(ControlLevel=3) 부여 중 예외 발생: {ex.Message}", ex);
+                    }
                 }
             }
         }

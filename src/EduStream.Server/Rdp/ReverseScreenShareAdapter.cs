@@ -16,9 +16,8 @@ public sealed class ReverseScreenShareAdapter : IReverseScreenShareAdapter
     private int _currentFrameWidth = 0;
     private int _currentFrameHeight = 0;
     private long _totalFramesProcessed = 0;
-    
-    // 🌟 리뷰어 지적 대응: 상태 변화 추적용 변수
-    private ReverseSessionState _lastNotifiedState = ReverseSessionState.Inactive; 
+
+    private ReverseSessionState _lastNotifiedState = ReverseSessionState.Inactive;
 
     public bool IsAdapterActive => _isAdapterActive;
     public ReverseSessionState CurrentState => _reverseSessionManager.CurrentState;
@@ -36,17 +35,19 @@ public sealed class ReverseScreenShareAdapter : IReverseScreenShareAdapter
         _reverseSessionManager.FrameReceived += OnFrameReceived;
     }
 
-    // 🌟 리뷰어 지적 대응: 상태가 실제로 변했을 때만 이벤트를 명확히 발행하도록 중앙 집중화
-    private void NotifyStateChangedIfNeeded()
+    // 🎯 [피드백 7번 반영] 알림 강제 발송 파라미터(forceNotify) 추가
+    // 단순히 _isAdapterActive 여부에 의존하면 비활성화 순간을 놓치므로(false로 바뀐 뒤 호출되므로),
+    // 명시적으로 "지금 알림을 쏴라"라는 신호를 줄 수 있도록 개선했습니다.
+    private void NotifyStateChangedIfNeeded(bool forceNotify = false)
     {
         var currentState = _reverseSessionManager.CurrentState;
-        if (_lastNotifiedState != currentState || _isAdapterActive)
+        if (forceNotify || _lastNotifiedState != currentState || _isAdapterActive)
         {
             _lastNotifiedState = currentState;
-            AdapterStateChanged?.Invoke(this, new AdapterStateChangedEventArgs 
-            { 
-                IsActive = _isAdapterActive, 
-                SessionState = currentState 
+            AdapterStateChanged?.Invoke(this, new AdapterStateChangedEventArgs
+            {
+                IsActive = _isAdapterActive,
+                SessionState = currentState
             });
         }
     }
@@ -55,15 +56,21 @@ public sealed class ReverseScreenShareAdapter : IReverseScreenShareAdapter
     {
         cancellationToken.ThrowIfCancellationRequested();
         _isAdapterActive = true;
-        NotifyStateChangedIfNeeded();
+        NotifyStateChangedIfNeeded(forceNotify: true); // 활성화 알림 강제 발송
         return Task.CompletedTask;
     }
 
     public Task DeactivateAdapterAsync(CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
+
+        // 🎯 [피드백 7번 반영] 상태 변경과 알림 발송의 순서 무결성 확보
+        // 1. 먼저 비활성 상태로 변경
         _isAdapterActive = false;
-        NotifyStateChangedIfNeeded();
+
+        // 2. 바뀐 상태(Inactive)를 강제로 즉시 알림 발송 (if문 우회)
+        NotifyStateChangedIfNeeded(forceNotify: true);
+
         return Task.CompletedTask;
     }
 
@@ -125,7 +132,7 @@ public sealed class ReverseScreenShareAdapter : IReverseScreenShareAdapter
         var width = EstimateFrameWidth(e.FrameData);
         var height = EstimateFrameHeight(e.FrameData);
         if (width <= 0 || height <= 0) return;
-        
+
         _currentFrameWidth = width;
         _currentFrameHeight = height;
 
@@ -178,19 +185,19 @@ public sealed class ReverseScreenShareAdapter : IReverseScreenShareAdapter
 
         int w = 1920, h = 1080;
 
-        // 1. BMP 헤더 
-        if (frameData.Length >= 26 && frameData[0] == 0x42 && frameData[1] == 0x4D) 
+        // 1. BMP 헤더
+        if (frameData.Length >= 26 && frameData[0] == 0x42 && frameData[1] == 0x4D)
         {
             w = BitConverter.ToInt32(frameData, 18);
             h = Math.Abs(BitConverter.ToInt32(frameData, 22));
         }
-        // 2. WDS 헤더 
-        else if (frameData[0] == 0x57 && frameData[1] == 0x44 && frameData[2] == 0x53) 
+        // 2. WDS 헤더
+        else if (frameData[0] == 0x57 && frameData[1] == 0x44 && frameData[2] == 0x53)
         {
             w = BitConverter.ToInt32(frameData, 4);
             h = BitConverter.ToInt32(frameData, 8);
         }
-        // 3. PNG 헤더 (복구 완료)
+        // 3. PNG 헤더
         else if (frameData.Length >= 24 && frameData[0] == 0x89 && frameData[1] == 0x50 && frameData[2] == 0x4E && frameData[3] == 0x47)
         {
             byte[] wBytes = { frameData[19], frameData[18], frameData[17], frameData[16] };
@@ -199,7 +206,6 @@ public sealed class ReverseScreenShareAdapter : IReverseScreenShareAdapter
             h = BitConverter.ToInt32(hBytes, 0);
         }
 
-        // 🌟 리뷰어 지적 대응: BMP/WDS 등 모든 포맷에 대한 양수(Positive) 검사 추가
         if (w <= 0) w = 1920;
         if (h <= 0) h = 1080;
 
