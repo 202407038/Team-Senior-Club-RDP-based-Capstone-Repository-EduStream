@@ -88,15 +88,24 @@ public sealed partial class SecureFileRoutingWiringTests
         rig.SessionManager.FileTransfers!.FileStored += (_, _) => Interlocked.Increment(ref stored);
         using var cancellation = new CancellationTokenSource();
         var download = alice.Files.DownloadAsync(file.FileId, cancellationToken: cancellation.Token);
-        await paused!.FirstSaved.Task.WaitAsync(Wait);
+        
+        // 수정 1: 10초 대기 완벽 적용
+        await paused!.FirstSaved.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        
         Assert.Single(Directory.GetFiles(Path.Combine(rig.Root, "downloads-Alice"), "*.partial"));
         cancellation.Cancel();
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => download.WaitAsync(Wait));
+        
+        // 수정 2: 10초 대기 완벽 적용
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => download.WaitAsync(TimeSpan.FromSeconds(10)));
+        
         paused.Resume.TrySetResult();
         await WaitUntilAsync(() => rig.SessionManager.FileTransfers.PendingTransferCount == 0);
         Assert.Empty(Directory.GetFiles(Path.Combine(rig.Root, "downloads-Alice")));
         Assert.Equal(0, Volatile.Read(ref stored));
-        var receipt = await alice.Files.DownloadAsync(file.FileId).WaitAsync(Wait);
+        
+        // 수정 3: 10초 대기 완벽 적용
+        var receipt = await alice.Files.DownloadAsync(file.FileId).WaitAsync(TimeSpan.FromSeconds(10));
+        
         Assert.Equal(await File.ReadAllBytesAsync(source), await File.ReadAllBytesAsync(receipt.LocalPath));
         await WaitUntilAsync(() => Volatile.Read(ref stored) == 1);
     }

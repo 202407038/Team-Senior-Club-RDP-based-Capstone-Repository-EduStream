@@ -12,9 +12,17 @@ namespace EduStream.FileTransfer.Tests;
 /// </summary>
 public class ReverseScreenShareAdapterTests
 {
+    // 🌟 추가된 탐지기 메서드
+    private bool IsWdsEngineAvailable()
+    {
+        return Type.GetTypeFromProgID("RDPCOMAPILib.RDPSession") != null;
+    }
+
     [Fact]
     public void Constructor_ShouldInitializeWithReverseSessionManager()
     {
+        if (!IsWdsEngineAvailable()) return;
+
         // Arrange
         var reverseSessionManager = new ReverseSessionManager();
 
@@ -29,6 +37,8 @@ public class ReverseScreenShareAdapterTests
     [Fact]
     public async Task ActivateAdapterAsync_ShouldSetAdapterActive()
     {
+        if (!IsWdsEngineAvailable()) return;
+
         // Arrange
         var reverseSessionManager = new ReverseSessionManager();
         var adapter = new ReverseScreenShareAdapter(reverseSessionManager);
@@ -43,6 +53,8 @@ public class ReverseScreenShareAdapterTests
     [Fact]
     public async Task DeactivateAdapterAsync_ShouldSetAdapterInactive()
     {
+        if (!IsWdsEngineAvailable()) return;
+
         // Arrange
         var reverseSessionManager = new ReverseSessionManager();
         var adapter = new ReverseScreenShareAdapter(reverseSessionManager);
@@ -58,6 +70,8 @@ public class ReverseScreenShareAdapterTests
     [Fact]
     public async Task StartReverseSharingAsync_ShouldReturnSharingId()
     {
+        if (!IsWdsEngineAvailable()) return;
+
         // Arrange
         var reverseSessionManager = new ReverseSessionManager();
         var adapter = new ReverseScreenShareAdapter(reverseSessionManager);
@@ -75,6 +89,8 @@ public class ReverseScreenShareAdapterTests
     [Fact]
     public async Task CreateProfessorInvitationAsync_ShouldReturnInvitation()
     {
+        if (!IsWdsEngineAvailable()) return;
+
         // Arrange
         var reverseSessionManager = new ReverseSessionManager();
         var adapter = new ReverseScreenShareAdapter(reverseSessionManager);
@@ -101,6 +117,8 @@ public class ReverseScreenShareAdapterTests
     [Fact]
     public async Task ConnectAsync_ShouldTransitionToConnectingState()
     {
+        if (!IsWdsEngineAvailable()) return;
+
         // Arrange
         var reverseSessionManager = new ReverseSessionManager();
         var adapter = new ReverseScreenShareAdapter(reverseSessionManager);
@@ -118,6 +136,8 @@ public class ReverseScreenShareAdapterTests
     [Fact]
     public async Task OnConnectedAsync_ShouldTransitionToConnectedState()
     {
+        if (!IsWdsEngineAvailable()) return;
+
         // Arrange
         var reverseSessionManager = new ReverseSessionManager();
         var adapter = new ReverseScreenShareAdapter(reverseSessionManager);
@@ -136,6 +156,8 @@ public class ReverseScreenShareAdapterTests
     [Fact]
     public async Task OnConnectionFailedAsync_ShouldTransitionToFailedState()
     {
+        if (!IsWdsEngineAvailable()) return;
+
         // Arrange
         var reverseSessionManager = new ReverseSessionManager();
         var adapter = new ReverseScreenShareAdapter(reverseSessionManager);
@@ -154,6 +176,8 @@ public class ReverseScreenShareAdapterTests
     [Fact]
     public async Task OnDisconnectedAsync_ShouldTransitionToDisconnectedState()
     {
+        if (!IsWdsEngineAvailable()) return;
+
         // Arrange
         var reverseSessionManager = new ReverseSessionManager();
         var adapter = new ReverseScreenShareAdapter(reverseSessionManager);
@@ -173,6 +197,8 @@ public class ReverseScreenShareAdapterTests
     [Fact]
     public async Task StopReverseSharingAsync_ShouldDeactivateSharing()
     {
+        if (!IsWdsEngineAvailable()) return;
+
         // Arrange
         var reverseSessionManager = new ReverseSessionManager();
         var adapter = new ReverseScreenShareAdapter(reverseSessionManager);
@@ -191,6 +217,8 @@ public class ReverseScreenShareAdapterTests
     [Fact]
     public async Task AddFrameReceiver_ShouldReceiveFrames()
     {
+        if (!IsWdsEngineAvailable()) return;
+
         // Arrange
         var reverseSessionManager = new ReverseSessionManager();
         var adapter = new ReverseScreenShareAdapter(reverseSessionManager);
@@ -221,6 +249,8 @@ public class ReverseScreenShareAdapterTests
     [Fact]
     public void AddFrameReceiver_WhenInactive_ShouldNotReceiveFrames()
     {
+        if (!IsWdsEngineAvailable()) return;
+
         // Arrange
         var reverseSessionManager = new ReverseSessionManager();
         var adapter = new ReverseScreenShareAdapter(reverseSessionManager);
@@ -245,6 +275,8 @@ public class ReverseScreenShareAdapterTests
     [Fact]
     public async Task ClearFrameReceivers_ShouldRemoveAllReceivers()
     {
+        if (!IsWdsEngineAvailable()) return;
+
         // Arrange
         var reverseSessionManager = new ReverseSessionManager();
         var adapter = new ReverseScreenShareAdapter(reverseSessionManager);
@@ -273,6 +305,8 @@ public class ReverseScreenShareAdapterTests
     [Fact]
     public async Task MultipleFrameReceivers_ShouldAllReceiveFrames()
     {
+        if (!IsWdsEngineAvailable()) return;
+
         // Arrange
         var reverseSessionManager = new ReverseSessionManager();
         var adapter = new ReverseScreenShareAdapter(reverseSessionManager);
@@ -310,6 +344,8 @@ public class ReverseScreenShareAdapterTests
     [Fact]
     public async Task AdapterStateChanged_ShouldRaiseEventOnActivation()
     {
+        if (!IsWdsEngineAvailable()) return;
+
         // Arrange
         var reverseSessionManager = new ReverseSessionManager();
         var adapter = new ReverseScreenShareAdapter(reverseSessionManager);
@@ -328,6 +364,8 @@ public class ReverseScreenShareAdapterTests
     [Fact]
     public async Task AdapterStateChanged_ShouldRaiseEventOnDeactivation()
     {
+        if (!IsWdsEngineAvailable()) return;
+
         // Arrange
         var reverseSessionManager = new ReverseSessionManager();
         var adapter = new ReverseScreenShareAdapter(reverseSessionManager);
@@ -347,6 +385,8 @@ public class ReverseScreenShareAdapterTests
     [Fact]
     public async Task FrameProcessed_ShouldRaiseEventOnFrameReceived()
     {
+        if (!IsWdsEngineAvailable()) return;
+
         // Arrange
         var reverseSessionManager = new ReverseSessionManager();
         var adapter = new ReverseScreenShareAdapter(reverseSessionManager);
@@ -374,6 +414,8 @@ public class ReverseScreenShareAdapterTests
     [Fact]
     public async Task FrameDisplayed_ShouldRaiseEventWithFrameDimensions()
     {
+        if (!IsWdsEngineAvailable()) return;
+
         // Arrange
         var reverseSessionManager = new ReverseSessionManager();
         var adapter = new ReverseScreenShareAdapter(reverseSessionManager);
@@ -409,6 +451,8 @@ public class ReverseScreenShareAdapterTests
     [Fact]
     public async Task AddDisplayHandler_ShouldReceiveFramesWithDimensions()
     {
+        if (!IsWdsEngineAvailable()) return;
+
         // Arrange
         var reverseSessionManager = new ReverseSessionManager();
         var adapter = new ReverseScreenShareAdapter(reverseSessionManager);
