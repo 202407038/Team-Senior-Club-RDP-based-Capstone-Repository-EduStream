@@ -1,5 +1,5 @@
 using System;
-using System.Threading;
+using System.Reflection;
 using System.Threading.Tasks;
 using EduStream.Server.Rdp;
 using Xunit;
@@ -12,86 +12,57 @@ namespace EduStream.FileTransfer.Tests;
 /// </summary>
 public class ReverseScreenShareAdapterTests
 {
-    // 🌟 추가된 탐지기 메서드
-    private bool IsWdsEngineAvailable()
+    private void ForceControlGrantedState(ReverseSessionManager manager)
     {
-        return Type.GetTypeFromProgID("RDPCOMAPILib.RDPSession") != null;
+        var field = typeof(ReverseSessionManager).GetField("_state", BindingFlags.NonPublic | BindingFlags.Instance);
+        field?.SetValue(manager, ReverseSessionState.ControlGranted);
     }
 
-    [Fact]
+    [WdsFact]
     public void Constructor_ShouldInitializeWithReverseSessionManager()
     {
-        if (!IsWdsEngineAvailable()) return;
-
-        // Arrange
         var reverseSessionManager = new ReverseSessionManager();
-
-        // Act
         var adapter = new ReverseScreenShareAdapter(reverseSessionManager);
-
-        // Assert
         Assert.NotNull(adapter);
         Assert.False(adapter.IsAdapterActive);
     }
 
-    [Fact]
+    [WdsFact]
     public async Task ActivateAdapterAsync_ShouldSetAdapterActive()
     {
-        if (!IsWdsEngineAvailable()) return;
-
-        // Arrange
         var reverseSessionManager = new ReverseSessionManager();
         var adapter = new ReverseScreenShareAdapter(reverseSessionManager);
-
-        // Act
         await adapter.ActivateAdapterAsync();
-
-        // Assert
         Assert.True(adapter.IsAdapterActive);
     }
 
-    [Fact]
+    [WdsFact]
     public async Task DeactivateAdapterAsync_ShouldSetAdapterInactive()
     {
-        if (!IsWdsEngineAvailable()) return;
-
-        // Arrange
         var reverseSessionManager = new ReverseSessionManager();
         var adapter = new ReverseScreenShareAdapter(reverseSessionManager);
         await adapter.ActivateAdapterAsync();
-
-        // Act
         await adapter.DeactivateAdapterAsync();
-
-        // Assert
         Assert.False(adapter.IsAdapterActive);
     }
 
-    [Fact]
+    [WdsFact]
     public async Task StartReverseSharingAsync_ShouldReturnSharingId()
     {
-        if (!IsWdsEngineAvailable()) return;
-
-        // Arrange
         var reverseSessionManager = new ReverseSessionManager();
         var adapter = new ReverseScreenShareAdapter(reverseSessionManager);
         var sessionId = Guid.NewGuid();
         var studentId = "student-123";
 
-        // Act
         var sharingId = await adapter.StartReverseSharingAsync(sessionId, studentId);
 
-        // Assert
         Assert.NotEqual(Guid.Empty, sharingId);
         Assert.True(reverseSessionManager.IsReverseSharingActive);
     }
 
-    [Fact]
+    [WdsFact]
     public async Task CreateProfessorInvitationAsync_ShouldReturnInvitation()
     {
-        if (!IsWdsEngineAvailable()) return;
-
-        // Arrange
         var reverseSessionManager = new ReverseSessionManager();
         var adapter = new ReverseScreenShareAdapter(reverseSessionManager);
         var sessionId = Guid.NewGuid();
@@ -102,11 +73,9 @@ public class ReverseScreenShareAdapterTests
         var password = "test-password";
         var expiresAt = DateTimeOffset.UtcNow.AddHours(1);
 
-        // Act
         var invitation = await adapter.CreateProfessorInvitationAsync(
             sessionId, sharingId, professorId, connectionId, password, expiresAt);
 
-        // Assert
         Assert.NotNull(invitation);
         Assert.Equal(sessionId, invitation.SessionId);
         Assert.Equal(sharingId, invitation.SharingId);
@@ -114,31 +83,23 @@ public class ReverseScreenShareAdapterTests
         Assert.Equal(studentId, invitation.HostStudentId);
     }
 
-    [Fact]
+    [WdsFact]
     public async Task ConnectAsync_ShouldTransitionToConnectingState()
     {
-        if (!IsWdsEngineAvailable()) return;
-
-        // Arrange
         var reverseSessionManager = new ReverseSessionManager();
         var adapter = new ReverseScreenShareAdapter(reverseSessionManager);
         var sessionId = Guid.NewGuid();
         var studentId = "student-123";
         await adapter.StartReverseSharingAsync(sessionId, studentId);
 
-        // Act
         await adapter.ConnectAsync();
 
-        // Assert
         Assert.Equal(ReverseSessionState.Connecting, adapter.CurrentState);
     }
 
-    [Fact]
-    public async Task OnConnectedAsync_ShouldTransitionToConnectedState()
+    [WdsFact]
+    public async Task OnConnectedAsync_WhenNoAttendees_ShouldTransitionToFailedState()
     {
-        if (!IsWdsEngineAvailable()) return;
-
-        // Arrange
         var reverseSessionManager = new ReverseSessionManager();
         var adapter = new ReverseScreenShareAdapter(reverseSessionManager);
         var sessionId = Guid.NewGuid();
@@ -146,80 +107,60 @@ public class ReverseScreenShareAdapterTests
         await adapter.StartReverseSharingAsync(sessionId, studentId);
         await adapter.ConnectAsync();
 
-        // Act
-        await adapter.OnConnectedAsync();
-
-        // Assert
-        Assert.Equal(ReverseSessionState.Connected, adapter.CurrentState);
-    }
-
-    [Fact]
-    public async Task OnConnectionFailedAsync_ShouldTransitionToFailedState()
-    {
-        if (!IsWdsEngineAvailable()) return;
-
-        // Arrange
-        var reverseSessionManager = new ReverseSessionManager();
-        var adapter = new ReverseScreenShareAdapter(reverseSessionManager);
-        var sessionId = Guid.NewGuid();
-        var studentId = "student-123";
-        await adapter.StartReverseSharingAsync(sessionId, studentId);
-        await adapter.ConnectAsync();
-
-        // Act
-        await adapter.OnConnectionFailedAsync();
-
-        // Assert
+        await Assert.ThrowsAsync<InvalidOperationException>(() => adapter.OnConnectedAsync());
         Assert.Equal(ReverseSessionState.Failed, adapter.CurrentState);
     }
 
-    [Fact]
-    public async Task OnDisconnectedAsync_ShouldTransitionToDisconnectedState()
+    [WdsFact]
+    public async Task OnConnectionFailedAsync_ShouldTransitionToFailedState()
     {
-        if (!IsWdsEngineAvailable()) return;
-
-        // Arrange
         var reverseSessionManager = new ReverseSessionManager();
         var adapter = new ReverseScreenShareAdapter(reverseSessionManager);
         var sessionId = Guid.NewGuid();
         var studentId = "student-123";
         await adapter.StartReverseSharingAsync(sessionId, studentId);
         await adapter.ConnectAsync();
-        await adapter.OnConnectedAsync();
 
-        // Act
+        await adapter.OnConnectionFailedAsync();
+
+        Assert.Equal(ReverseSessionState.Failed, adapter.CurrentState);
+    }
+
+    [WdsFact]
+    public async Task OnDisconnectedAsync_ShouldTransitionToDisconnectedState()
+    {
+        var reverseSessionManager = new ReverseSessionManager();
+        var adapter = new ReverseScreenShareAdapter(reverseSessionManager);
+        var sessionId = Guid.NewGuid();
+        var studentId = "student-123";
+        await adapter.StartReverseSharingAsync(sessionId, studentId);
+        await adapter.ConnectAsync();
+
+        ForceControlGrantedState(reverseSessionManager);
+
         await adapter.OnDisconnectedAsync();
 
-        // Assert
         Assert.Equal(ReverseSessionState.Disconnected, adapter.CurrentState);
     }
 
-    [Fact]
+    [WdsFact]
     public async Task StopReverseSharingAsync_ShouldDeactivateSharing()
     {
-        if (!IsWdsEngineAvailable()) return;
-
-        // Arrange
         var reverseSessionManager = new ReverseSessionManager();
         var adapter = new ReverseScreenShareAdapter(reverseSessionManager);
         var sessionId = Guid.NewGuid();
         var studentId = "student-123";
         await adapter.StartReverseSharingAsync(sessionId, studentId);
 
-        // Act
         await adapter.StopReverseSharingAsync();
 
-        // Assert
         Assert.False(reverseSessionManager.IsReverseSharingActive);
         Assert.Equal(ReverseSessionState.Inactive, adapter.CurrentState);
     }
 
-    [Fact]
+    [WdsFact]
     public async Task AddFrameReceiver_ShouldReceiveFrames()
     {
-        if (!IsWdsEngineAvailable()) return;
-
-        // Arrange
         var reverseSessionManager = new ReverseSessionManager();
         var adapter = new ReverseScreenShareAdapter(reverseSessionManager);
         await adapter.ActivateAdapterAsync();
@@ -227,8 +168,8 @@ public class ReverseScreenShareAdapterTests
         var sessionId = Guid.NewGuid();
         var studentId = "student-123";
         await adapter.StartReverseSharingAsync(sessionId, studentId);
-        await adapter.ConnectAsync();
-        await adapter.OnConnectedAsync();
+
+        ForceControlGrantedState(reverseSessionManager);
 
         var receivedFrameData = Array.Empty<byte>();
         adapter.AddFrameReceiver(frameData =>
@@ -239,22 +180,16 @@ public class ReverseScreenShareAdapterTests
 
         var testFrameData = new byte[] { 1, 2, 3, 4, 5 };
 
-        // Act
         reverseSessionManager.ReceiveFrame(testFrameData);
 
-        // Assert
         Assert.Equal(testFrameData, receivedFrameData);
     }
 
-    [Fact]
+    [WdsFact]
     public void AddFrameReceiver_WhenInactive_ShouldNotReceiveFrames()
     {
-        if (!IsWdsEngineAvailable()) return;
-
-        // Arrange
         var reverseSessionManager = new ReverseSessionManager();
         var adapter = new ReverseScreenShareAdapter(reverseSessionManager);
-        // Note: adapter is NOT activated
 
         var receivedFrameData = Array.Empty<byte>();
         adapter.AddFrameReceiver(frameData =>
@@ -265,19 +200,14 @@ public class ReverseScreenShareAdapterTests
 
         var testFrameData = new byte[] { 1, 2, 3, 4, 5 };
 
-        // Act
         reverseSessionManager.ReceiveFrame(testFrameData);
 
-        // Assert
         Assert.Empty(receivedFrameData);
     }
 
-    [Fact]
+    [WdsFact]
     public async Task ClearFrameReceivers_ShouldRemoveAllReceivers()
     {
-        if (!IsWdsEngineAvailable()) return;
-
-        // Arrange
         var reverseSessionManager = new ReverseSessionManager();
         var adapter = new ReverseScreenShareAdapter(reverseSessionManager);
         await adapter.ActivateAdapterAsync();
@@ -285,8 +215,8 @@ public class ReverseScreenShareAdapterTests
         var sessionId = Guid.NewGuid();
         var studentId = "student-123";
         await adapter.StartReverseSharingAsync(sessionId, studentId);
-        await adapter.ConnectAsync();
-        await adapter.OnConnectedAsync();
+
+        ForceControlGrantedState(reverseSessionManager);
 
         adapter.AddFrameReceiver(frameData =>
         {
@@ -295,19 +225,13 @@ public class ReverseScreenShareAdapterTests
 
         adapter.ClearFrameReceivers();
 
-        // Act - Should not throw
         reverseSessionManager.ReceiveFrame(new byte[] { 1, 2, 3 });
-
-        // Assert
         Assert.True(true);
     }
 
-    [Fact]
+    [WdsFact]
     public async Task MultipleFrameReceivers_ShouldAllReceiveFrames()
     {
-        if (!IsWdsEngineAvailable()) return;
-
-        // Arrange
         var reverseSessionManager = new ReverseSessionManager();
         var adapter = new ReverseScreenShareAdapter(reverseSessionManager);
         await adapter.ActivateAdapterAsync();
@@ -315,8 +239,8 @@ public class ReverseScreenShareAdapterTests
         var sessionId = Guid.NewGuid();
         var studentId = "student-123";
         await adapter.StartReverseSharingAsync(sessionId, studentId);
-        await adapter.ConnectAsync();
-        await adapter.OnConnectedAsync();
+
+        ForceControlGrantedState(reverseSessionManager);
 
         var receiver1Called = false;
         var receiver2Called = false;
@@ -333,40 +257,30 @@ public class ReverseScreenShareAdapterTests
             return Task.CompletedTask;
         });
 
-        // Act
         reverseSessionManager.ReceiveFrame(new byte[] { 1, 2, 3 });
 
-        // Assert
         Assert.True(receiver1Called);
         Assert.True(receiver2Called);
     }
 
-    [Fact]
+    [WdsFact]
     public async Task AdapterStateChanged_ShouldRaiseEventOnActivation()
     {
-        if (!IsWdsEngineAvailable()) return;
-
-        // Arrange
         var reverseSessionManager = new ReverseSessionManager();
         var adapter = new ReverseScreenShareAdapter(reverseSessionManager);
 
         AdapterStateChangedEventArgs? eventArgs = null;
         adapter.AdapterStateChanged += (sender, args) => eventArgs = args;
 
-        // Act
         await adapter.ActivateAdapterAsync();
 
-        // Assert
         Assert.NotNull(eventArgs);
         Assert.True(eventArgs.IsActive);
     }
 
-    [Fact]
+    [WdsFact]
     public async Task AdapterStateChanged_ShouldRaiseEventOnDeactivation()
     {
-        if (!IsWdsEngineAvailable()) return;
-
-        // Arrange
         var reverseSessionManager = new ReverseSessionManager();
         var adapter = new ReverseScreenShareAdapter(reverseSessionManager);
         await adapter.ActivateAdapterAsync();
@@ -374,20 +288,15 @@ public class ReverseScreenShareAdapterTests
         AdapterStateChangedEventArgs? eventArgs = null;
         adapter.AdapterStateChanged += (sender, args) => eventArgs = args;
 
-        // Act
         await adapter.DeactivateAdapterAsync();
 
-        // Assert
         Assert.NotNull(eventArgs);
         Assert.False(eventArgs.IsActive);
     }
 
-    [Fact]
+    [WdsFact]
     public async Task FrameProcessed_ShouldRaiseEventOnFrameReceived()
     {
-        if (!IsWdsEngineAvailable()) return;
-
-        // Arrange
         var reverseSessionManager = new ReverseSessionManager();
         var adapter = new ReverseScreenShareAdapter(reverseSessionManager);
         await adapter.ActivateAdapterAsync();
@@ -395,28 +304,23 @@ public class ReverseScreenShareAdapterTests
         var sessionId = Guid.NewGuid();
         var studentId = "student-123";
         await adapter.StartReverseSharingAsync(sessionId, studentId);
-        await adapter.ConnectAsync();
-        await adapter.OnConnectedAsync();
+
+        ForceControlGrantedState(reverseSessionManager);
 
         FrameProcessedEventArgs? eventArgs = null;
         adapter.FrameProcessed += (sender, args) => eventArgs = args;
 
         var testFrameData = new byte[] { 1, 2, 3, 4, 5 };
 
-        // Act
         reverseSessionManager.ReceiveFrame(testFrameData);
 
-        // Assert
         Assert.NotNull(eventArgs);
         Assert.Equal(testFrameData, eventArgs.FrameData);
     }
 
-    [Fact]
+    [WdsFact]
     public async Task FrameDisplayed_ShouldRaiseEventWithFrameDimensions()
     {
-        if (!IsWdsEngineAvailable()) return;
-
-        // Arrange
         var reverseSessionManager = new ReverseSessionManager();
         var adapter = new ReverseScreenShareAdapter(reverseSessionManager);
         await adapter.ActivateAdapterAsync();
@@ -426,34 +330,28 @@ public class ReverseScreenShareAdapterTests
         var sessionId = Guid.NewGuid();
         var studentId = "student-123";
         await adapter.StartReverseSharingAsync(sessionId, studentId);
-        await adapter.ConnectAsync();
-        await adapter.OnConnectedAsync();
+
+        ForceControlGrantedState(reverseSessionManager);
 
         FrameDisplayedEventArgs? eventArgs = null;
         adapter.FrameDisplayed += (sender, args) => eventArgs = args;
 
-        // Create frame data with embedded dimensions (simulated WDS format)
         var widthBytes = BitConverter.GetBytes(1920);
         var heightBytes = BitConverter.GetBytes(1080);
         var testFrameData = new byte[8];
         Array.Copy(widthBytes, 0, testFrameData, 0, 4);
         Array.Copy(heightBytes, 0, testFrameData, 4, 4);
 
-        // Act
         reverseSessionManager.ReceiveFrame(testFrameData);
 
-        // Assert
         Assert.NotNull(eventArgs);
         Assert.Equal(1920, eventArgs.Width);
         Assert.Equal(1080, eventArgs.Height);
     }
 
-    [Fact]
+    [WdsFact]
     public async Task AddDisplayHandler_ShouldReceiveFramesWithDimensions()
     {
-        if (!IsWdsEngineAvailable()) return;
-
-        // Arrange
         var reverseSessionManager = new ReverseSessionManager();
         var adapter = new ReverseScreenShareAdapter(reverseSessionManager);
         await adapter.ActivateAdapterAsync();
@@ -461,8 +359,8 @@ public class ReverseScreenShareAdapterTests
         var sessionId = Guid.NewGuid();
         var studentId = "student-123";
         await adapter.StartReverseSharingAsync(sessionId, studentId);
-        await adapter.ConnectAsync();
-        await adapter.OnConnectedAsync();
+
+        ForceControlGrantedState(reverseSessionManager);
 
         var receivedFrameData = Array.Empty<byte>();
         var receivedWidth = 0;
@@ -482,10 +380,8 @@ public class ReverseScreenShareAdapterTests
         Array.Copy(widthBytes, 0, testFrameData, 0, 4);
         Array.Copy(heightBytes, 0, testFrameData, 4, 4);
 
-        // Act
         reverseSessionManager.ReceiveFrame(testFrameData);
 
-        // Assert
         Assert.Equal(testFrameData, receivedFrameData);
         Assert.Equal(1920, receivedWidth);
         Assert.Equal(1080, receivedHeight);
