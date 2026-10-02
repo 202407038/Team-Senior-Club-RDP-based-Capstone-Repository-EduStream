@@ -59,8 +59,8 @@ public class RdpSharingServiceTests : IAsyncLifetime
         Assert.Equal(1, invitation.ContractVersion);
         Assert.Equal("windows-desktop-sharing", invitation.Provider);
 
-        // 🎯 [핵심 수정] 인터랙티브 권한 부여로 인해 ViewOnly가 false여야 정상입니다!
-        Assert.False(invitation.ViewOnly);
+        // 🎯 [정상 복구] 기본 정방향(교수->학생) 공유이므로 반드시 ViewOnly가 true여야 합니다.
+        Assert.True(invitation.ViewOnly);
 
         Assert.Contains("초대 생성", string.Join("\n", _logSink.Snapshot()));
         Assert.DoesNotContain("password", invitation.ConnectionString);

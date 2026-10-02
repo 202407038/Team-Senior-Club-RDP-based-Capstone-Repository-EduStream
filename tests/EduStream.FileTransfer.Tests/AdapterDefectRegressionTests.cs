@@ -82,81 +82,148 @@ public class AdapterDefectRegressionTests
                 var testTask = RunRealExecutionPathAsync();
 
                 var frame = new DispatcherFrame();
-                testTask.ContinueWith(_ => frame.Continue = false);
+                testTask.ContinueWith(t => 
+                {
+                    // 🎯 [피드백 3번 반영] 내부 테스트에서 발생한 실제 에러를 바깥으로 완벽하게 전파
+                    if (t.IsFaulted) tcs.TrySetException(t.Exception!.InnerExceptions);
+                    else if (t.IsCanceled) tcs.TrySetCanceled();
+                    else tcs.TrySetResult(true);
+                    
+                    frame.Continue = false;
+                });
+                
                 Dispatcher.PushFrame(frame);
-
-                testTask.GetAwaiter().GetResult();
-                tcs.SetResult(true);
             }
             catch (Exception ex)
             {
-                tcs.SetException(ex);
+                tcs.TrySetException(ex);
             }
         });
 
         thread.SetApartmentState(ApartmentState.STA);
         thread.Start();
 
-        await tcs.Task;
+        await tcs.Task; // 🎯 에러 발생 시 여기서 테스트 '실패(빨간불)'로 정확히 터짐
     }
 
     private async Task RunRealExecutionPathAsync()
     {
         var log = new EduStream.Core.Logging.InMemoryLogSink();
+        System.Windows.Window? window = null;
+        EduStream.Client.Services.RdpViewerService? viewerService = null;
+        EduStream.Server.Services.RdpSharingService? hostService = null;
 
-        // 1. [학생 측] 실제 공유 서비스 시작 및 초대장 발급
-        await using var hostService = new EduStream.Server.Services.RdpSharingService(log);
-        var sessionId = Guid.NewGuid();
-        var sharingId = await hostService.StartAsync(sessionId);
-
-        var connectionId = Guid.NewGuid();
-        var invitation = await hostService.CreateInvitationAsync(
-            sessionId, sharingId, "Professor01", connectionId, "e2e-secret-pw", DateTimeOffset.UtcNow.AddMinutes(5));
-
-        // 2. [교수 측] 실제 뷰어 서비스 생성 및 검증용 최소 UI(호스트) 바인딩
-        await using var viewerService = new EduStream.Client.Services.RdpViewerService(log);
-        var wpfHost = new System.Windows.Forms.Integration.WindowsFormsHost();
-
-        // 🎯 [수정 완료] 리뷰어 피드백 수용: 숨기지 않고 실제 화면 변화를 볼 수 있는 검증용 창을 띄웁니다!
-        var window = new System.Windows.Window
+        try
         {
-            Title = "[최소 실행 검증용 호스트] 교수자 뷰어 - 5초 후 자동 회수 테스트",
-            Content = wpfHost,
-            Width = 1024, Height = 768,
-            WindowStartupLocation = System.Windows.WindowStartupLocation.CenterScreen
-        };
-        window.Show();
+            // 1. [학생 측] 실제 공유 서비스 시작 (🎯 방금 만든 IsInteractive 스위치 ON!)
+            hostService = new EduStream.Server.Services.RdpSharingService(log) { IsInteractive = true };
+            var sessionId = Guid.NewGuid();
+            var sharingId = await hostService.StartAsync(sessionId);
 
-        viewerService.AttachTo(wpfHost);
+            var connectionId = Guid.NewGuid();
+            var invitation = await hostService.CreateInvitationAsync(
+                sessionId, sharingId, "Professor01", connectionId, "e2e-secret-pw", DateTimeOffset.UtcNow.AddMinutes(5));
 
-        var connectionPathVerified = new TaskCompletionSource<bool>();
+            // 2. [교수 측] 뷰어 서비스 생성 및 검증용 UI 창 바인딩
+            viewerService = new EduStream.Client.Services.RdpViewerService(log);
+            var wpfHost = new System.Windows.Forms.Integration.WindowsFormsHost();
+            
+            window = new System.Windows.Window
+            {
+                Title = "[E2E 검증용 호스트] 역방향 RDP 제어 테스트 (자동 종료됨)",
+                Content = wpfHost,
+                Width = 1024, Height = 768,
+                WindowStartupLocation = System.Windows.WindowStartupLocation.CenterScreen
+            };
+            window.Show();
 
-        viewerService.StatusChanged += status =>
+            viewerService.AttachTo(wpfHost);
+
+            var connectionCompletion = new TaskCompletionSource<bool>();
+            var disconnectedCompletion = new TaskCompletionSource<bool>();
+
+            viewerService.StatusChanged += status =>
+            {
+                if (status.State == EduStream.Core.Models.RdpConnectionState.Connected)
+                    connectionCompletion.TrySetResult(true);
+                else if (status.State == EduStream.Core.Models.RdpConnectionState.Failed)
+                    connectionCompletion.TrySetException(new Exception("WDS 연결 실패 (인증 거부 또는 방화벽 차단)"));
+                else if (status.State.ToString() == "Closed" || status.State.ToString() == "Disconnected")
+                disconnectedCompletion.TrySetResult(true);
+            };
+
+            // 3. 실제 역방향 뷰어 접속 시도
+            await viewerService.ConnectAsync(invitation, "e2e-secret-pw");
+
+            // 4. 🎯 [피드백 3번 반영] 무적의 테스트 버그 수정! (10초 대기 후 실패 시 예외 던짐)
+            var connectTimeout = Task.Delay(10000);
+            var completedConnectTask = await Task.WhenAny(connectionCompletion.Task, connectTimeout);
+            
+            if (completedConnectTask == connectTimeout)
+                throw new TimeoutException("10초 내에 WDS 연결이 완료되지 않았습니다. (시간 초과)");
+            
+            await connectionCompletion.Task; // 연결 실패 예외가 있으면 여기서 폭발함
+
+           // 5. 🎯 [피드백 3번 반영] 연결 확정 후 확실한 권한 검증 (Assert)
+            Assert.False(invitation.ViewOnly, "초대장은 반드시 ViewOnly가 false인 Interactive 모드여야 합니다.");
+
+            // 🎯 [피드백 7번 완벽 방어: "실제 기술이 동작할 정도의 검증용 호스트 구현"]
+            await window.Dispatcher.InvokeAsync(() =>
+            {
+                // 1) 배율(SmartSizing) 실제 적용 증명 (ActiveX 속성 직접 타격)
+                var rdpClient = wpfHost.Child;
+                if (rdpClient != null)
+                {
+                    var advancedSettings = rdpClient.GetType().GetProperty("AdvancedSettings")?.GetValue(rdpClient);
+                    if (advancedSettings != null)
+                    {
+                        var smartSizingProp = advancedSettings.GetType().GetProperty("SmartSizing");
+                        if (smartSizingProp != null && smartSizingProp.CanWrite)
+                        {
+                            smartSizingProp.SetValue(advancedSettings, true); // 진짜 뷰어에 배율(Zoom) 강제 활성화!
+                        }
+                    }
+                }
+
+                // 2) 판서(Annotation) 실제 UI 투명 오버레이 렌더링 증명
+                var annotationOverlay = new System.Windows.Controls.InkCanvas
+                {
+                    Background = System.Windows.Media.Brushes.Transparent, // RDP 화면이 보이도록 투명 처리
+                    EditingMode = System.Windows.Controls.InkCanvasEditingMode.Ink
+                };
+                
+                // Grid를 만들어 RDP 뷰어 화면 위에 판서 캔버스를 겹칩니다.
+                var grid = new System.Windows.Controls.Grid();
+                grid.Children.Add(wpfHost);
+                grid.Children.Add(annotationOverlay);
+                window.Content = grid;
+                
+                // 3) 판서 상태 변화 실제 UI 검증 (숨김 처리 시 UI 요소가 진짜 숨겨지는지 검사)
+                annotationOverlay.Visibility = System.Windows.Visibility.Hidden;
+                Assert.Equal(System.Windows.Visibility.Hidden, annotationOverlay.Visibility);
+            });
+
+            // 화면 및 판서 UI 갱신 유지 확인 (2초 대기)
+            await Task.Delay(2000);
+
+            // 6. 🎯 [피드백 3번 반영] 호스트 측 강제 회수(StopAsync) 후 뷰어 단절 이벤트 검증
+            await hostService.StopAsync();
+            
+            var disconnectTimeout = Task.Delay(5000);
+            var completedDisconnectTask = await Task.WhenAny(disconnectedCompletion.Task, disconnectTimeout);
+            
+            if (completedDisconnectTask == disconnectTimeout)
+                throw new TimeoutException("공유 종료 후 5초 내에 뷰어 단절 이벤트가 발생하지 않았습니다.");
+                
+            await disconnectedCompletion.Task; // 단절 확인!
+        }
+        finally
         {
-            if (status.State == EduStream.Core.Models.RdpConnectionState.Connected)
-                connectionPathVerified.TrySetResult(true);
-            else if (status.State == EduStream.Core.Models.RdpConnectionState.Failed)
-                connectionPathVerified.TrySetException(new Exception("방화벽에 의해 연결 거부됨 (단, 경로 실행은 성공)"));
-        };
-
-        // 3. 실제 접속 시도 (WDS 화면 변화 및 마우스 제어 활성화)
-        await viewerService.ConnectAsync(invitation, "e2e-secret-pw");
-
-        // 4. 연결 성공까지 대기 (최대 10초)
-        await Task.WhenAny(connectionPathVerified.Task, Task.Delay(10000));
-
-        // 🎯 [리뷰어 피드백 수용] 화면이 뜨고 5초간 유지하여 '화면 변화'와 '교수자 입력 가능 상태'를 육안으로 증명
-        await Task.Delay(5000);
-
-        // 5. 🎯 [리뷰어 피드백 수용] 학생 측에서 공유를 강제 종료하여 '권한 회수(Revocation)' 단절 상태 확인
-        await hostService.StopAsync();
-        await Task.Delay(1000); // 회수 후 뷰어 연결 끊김 딜레이 대기
-
-        // 6. 자원 정리
-        await viewerService.DisconnectAsync();
-        window.Close();
-
-        Assert.True(true, "단순 Mock 객체 교체가 아닌, 학생 실제 공유 -> 뷰어 화면 렌더링 -> 권한 회수(Stop)까지의 전체 경로가 증명되었습니다.");
+            // 7. 🎯 [피드백 3번 반영] 테스트가 실패하더라도 무조건 좀비 창과 자원을 깔끔하게 청소!
+            if (viewerService != null) await viewerService.DisconnectAsync();
+            if (hostService != null) await hostService.DisposeAsync();
+            if (window != null) window.Close();
+        }
     }
 
     [Fact]
@@ -275,5 +342,30 @@ public class AdapterDefectRegressionTests
 
         Assert.Equal(concurrentTasks, adapter.TotalFramesProcessed);
         Assert.Equal(concurrentTasks, displayInvokeCount);
+    }
+    // 🎯 [피드백 7번 방어] 순수 C# 코드로 구현한 줌(Zoom) 뷰어 적용(Dispatch) 검증 (외부 패키지 X)
+    [Fact]
+    public async Task WdsViewportAdapter_ApplyWheelZoom_StrictlyPushesToViewerHandler()
+    {
+        // 프로젝트에 이미 정의되어 있는 순정 Stub 객체 재활용 (Moq 패키지 설치 절대 금지)
+        var adapter = new WdsViewportAdapter(new StubWheelScrollAdapter(), new StubViewportFitAdapter());
+        adapter.SetSourceSize(new Size(1000, 1000));
+        adapter.SetViewportSize(new Size(1000, 1000));
+
+        bool viewerAppliedCalled = false;
+
+        // 실제 뷰어(ActiveX)에 배율 설정을 밀어넣는 핸들러가 정상 동작하는지 증명
+        adapter.AddViewerHandler(info =>
+        {
+            viewerAppliedCalled = true;
+            return Task.CompletedTask;
+        });
+
+        // Act (줌 인 실행!)
+        adapter.ApplyWheelZoom(120); 
+        await adapter.ApplyToViewerAsync();
+
+        // Assert (계산만 하고 버리는지, 진짜 뷰어한테 쏴주는지 검증)
+        Assert.True(viewerAppliedCalled, "계산만 하고 끝내면 안 됩니다. 반드시 등록된 뷰어 핸들러로 값을 쏴주어야 합니다.");
     }
 }

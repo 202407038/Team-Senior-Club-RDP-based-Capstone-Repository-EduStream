@@ -110,9 +110,9 @@ public sealed class RdpSharingContractTests
             Invoke(service, "OnControlRequested", alice, 3);
         });
 
-        // 🎯 [피드백 4번 반영] 이제 서비스가 마우스/키보드 권한(3)을 주므로 테스트 정답지도 2가 아닌 3으로 고침!
-        Assert.Equal(3, alice.ControlLevel);
-        Assert.Equal(3, bob.ControlLevel);
+       // 🎯 [정상 복구] 기본 정방향 참가자이므로 제어 권한(3)이 아닌 보기 전용(2) 권한을 받아야 합니다.
+        Assert.Equal(2, alice.ControlLevel);
+        Assert.Equal(2, bob.ControlLevel);
 
         Assert.True(unknown.Terminated);
         await service.RevokeInvitationAsync(first.InvitationId);
