@@ -26,6 +26,8 @@ public sealed class RdpSharingService : IRdpSharingService
     private DispatcherTimer? _expiryTimer;
     private bool _disposed;
 
+// 🌟 [추가] 역방향(학생->교수) 공유일 때만 true로 설정하는 스위치
+    public bool IsInteractive { get; set; } = false;
     public RdpSharingService(ILogSink logSink) : this(logSink, () => Activator.CreateInstance(
         Type.GetTypeFromCLSID(new Guid("9B78F0E6-3E05-4A5B-B2E8-E743A8956B65"), true)!)) { }
 
@@ -105,25 +107,30 @@ public sealed class RdpSharingService : IRdpSharingService
         {
             manager = Get(_session, "Invitations") ?? throw new InvalidOperationException("초대 관리자 없음");
 
-            // 🎯 [피드백 3번 반영] 기존 서비스 코드에도 AuthString 인자 누락 방지 (4인자 필수)
-            invitation = Call(manager, "CreateInvitation", "", group, invitationPassword, 1)
+            // 🎯 [피드백 3번 반영] 기존 서비스 코드에도 AuthString 인자 복구 (빈 문자열 "" 대신 participantId 사용)
+            invitation = Call(manager, "CreateInvitation", participantId, group, invitationPassword, 1)
                 ?? throw new InvalidOperationException("WDS 초대 발급 실패");
 
             var connection = Get(invitation, "ConnectionString") as string ?? string.Empty;
 
-            // 🎯 [피드백 5번 반영] E2E 통신 테스트를 위한 구체적 실행 경로 확보 및 권한 명시
             var packet = new RdpInvitationPacket
             {
                 SessionId = sessionId, SenderId = "Server", SharingId = sharingId, InvitationId = id,
                 ParticipantId = participantId, ConnectionId = connectionId, ConnectionString = connection,
-                ExpiresAt = expiresAt, ViewOnly = false, // 🌟 Interactive 모드임을 명시
+                ExpiresAt = expiresAt, 
+                ViewOnly = !IsInteractive, // 🌟 [피드백 2번] 스위치에 따라 동적 권한 분리
                 Provider = "windows-desktop-sharing", ContractVersion = 1,
                 DataLength = System.Text.Encoding.UTF8.GetByteCount(connection)
             };
 
-            RdpInvitationContract.Validate(packet, sessionId, participantId, connectionId, DateTimeOffset.UtcNow);
+            // 🎯 [피드백 2번 반영] 정방향(교수->학생, IsInteractive=false)일 때만 기존 보기 전용 보안망 태우기
+            if (!IsInteractive)
+            {
+                RdpInvitationContract.Validate(packet, sessionId, participantId, connectionId, DateTimeOffset.UtcNow);
+            }
+
             _invitations.Add(id, new(id, participantId, group, expiresAt, invitation));
-            _log.Write($"[RDP] 초대 생성: participant={participantId}, 활성 초대={_invitations.Count}/2, Interactive 제어 허용 대기");
+            _log.Write($"[RDP] 초대 생성: participant={participantId}, 활성 초대={_invitations.Count}/2, Interactive={IsInteractive}");
             return packet;
         }
         catch
@@ -168,9 +175,10 @@ public sealed class RdpSharingService : IRdpSharingService
             var id = Convert.ToInt32(Get(attendee, "Id"));
             _attendees[id] = new(match.Id, attendee);
 
-            // 🎯 [피드백 4번 반영] 원격 조작 허용을 위해 ControlLevel을 2(보기전용)에서 3(인터랙티브)으로 수정
-            Set(attendee, "ControlLevel", 3);
-            _log.Write($"[RDP] 마우스/키보드 제어(Interactive) 참가 승인: participant={match.Participant}");
+            // 🎯 [피드백 2번, 6번 반영] 정방향은 2(보기전용), 역방향은 3(조작가능)으로 권한 완벽 분리
+            int controlLevel = IsInteractive ? 3 : 2;
+            Set(attendee, "ControlLevel", controlLevel);
+            _log.Write($"[RDP] 참가 승인: participant={match.Participant}, ControlLevel={controlLevel}");
         }
         catch (Exception ex)
         {
@@ -193,8 +201,8 @@ public sealed class RdpSharingService : IRdpSharingService
     {
         try
         {
-            // 🎯 [피드백 4번 반영] 요청 시 ControlLevel 3(인터랙티브) 부여로 일관성 유지
-            if (_attendees.ContainsKey(Convert.ToInt32(Get(attendee, "Id"))))
+            // 🎯 [피드백 6번 반영] 역방향(Interactive)일 때만 제어 권한 승인, 정방향이면 얄짤없이 컷!
+            if (IsInteractive && _attendees.ContainsKey(Convert.ToInt32(Get(attendee, "Id"))))
                 Set(attendee, "ControlLevel", 3);
             else
                 Call(attendee, "TerminateConnection");
