@@ -13,17 +13,17 @@ namespace EduStream.Server.Rdp
         /// 시스템의 모든 모니터 정보 조회
         /// </summary>
         IReadOnlyList<MonitorInfo> GetMonitors();
-        
+
         /// <summary>
         /// 논리 좌표를 실제 픽셀 좌표로 변환 (DPI 보정)
         /// </summary>
         Point LogicalToPhysical(Point logicalPoint, MonitorInfo monitor);
-        
+
         /// <summary>
         /// 실제 픽셀 좌표를 논리 좌표로 변환 (DPI 보정)
         /// </summary>
         Point PhysicalToLogical(Point physicalPoint, MonitorInfo monitor);
-        
+
         /// <summary>
         /// 주 모니터 정보 조회
         /// </summary>
