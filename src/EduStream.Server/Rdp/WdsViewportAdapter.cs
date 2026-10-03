@@ -257,21 +257,33 @@ public sealed class WdsViewportAdapter : IWdsViewportAdapter
         _axViewer = axViewer;
     }
 
-    /// <summary>
-    /// 🎯 [피드백 7번 반영] 실제 ActiveX 뷰어에 뷰포트 설정 적용
+   /// <summary>
+    /// 🎯 [피드백 4번, 1번 반영] 실제 ActiveX 뷰어에 뷰포트 설정 적용 (리플렉션 꼼수 원천 제거)
     /// </summary>
     public void ApplyViewportSettings(Rectangle rect)
     {
-        if (_axViewer != null && _axViewer.GetOcx() != null)
+        if (_axViewer == null)
         {
-            try
-            {
-                _axViewer.AdvancedSettings7.SmartSizing = true;
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"[WdsViewportAdapter] ActiveX SmartSizing 설정 실패: {ex.GetType().Name}");
-            }
+            throw new InvalidOperationException("WDS Viewer가 초기화되지 않았습니다.");
+        }
+
+        try
+        {
+            // 리플렉션(GetType().GetProperty) 꼼수를 싹 다 지웠습니다!
+            // C# dynamic을 이용해 네이티브 속성에 정공법으로 직접 바인딩하며, 
+            // 느낌표(!)를 붙여 컴파일러의 CS8602(Null 가능성) 경고를 완벽하게 차단합니다.
+            _axViewer!.SmartSizing = true;
+            _axViewer!.Width = rect.Width;
+            _axViewer!.Height = rect.Height;
+        }
+        catch (Microsoft.CSharp.RuntimeBinder.RuntimeBinderException ex)
+        {
+            // 실패를 숨기지 않고 명확하게 던짐
+            throw new NotSupportedException("현재 연결된 WDS 컨트롤에서 SmartSizing 속성을 지원하지 않습니다.", ex);
+        }
+        catch (Exception ex)
+        {
+            throw new InvalidOperationException($"ActiveX 뷰포트 설정(SmartSizing) 적용 중 예외가 발생했습니다: {ex.Message}", ex);
         }
     }
 }
