@@ -58,7 +58,10 @@ public class RdpSharingServiceTests : IAsyncLifetime
         Assert.Equal(connectionId, invitation.ConnectionId);
         Assert.Equal(1, invitation.ContractVersion);
         Assert.Equal("windows-desktop-sharing", invitation.Provider);
+
+        // 🎯 [정상 복구] 기본 정방향(교수->학생) 공유이므로 반드시 ViewOnly가 true여야 합니다.
         Assert.True(invitation.ViewOnly);
+
         Assert.Contains("초대 생성", string.Join("\n", _logSink.Snapshot()));
         Assert.DoesNotContain("password", invitation.ConnectionString);
     }
@@ -221,6 +224,9 @@ public class RdpSharingServiceTests : IAsyncLifetime
 /// </summary>
 internal class MockRdpSession
 {
+    // 🎯 [피드백 5번 연동 에러 방지] 깡통 객체에 ColorDepth 속성을 달아줘서 예외가 터지지 않게 합니다.
+    public int ColorDepth { get; set; } = 24;
+
     public void Open() { }
     public void Close() { }
     public MockInvitations Invitations { get; } = new MockInvitations();
@@ -228,7 +234,8 @@ internal class MockRdpSession
 
 internal class MockInvitations
 {
-    public MockInvitation CreateInvitation(string groupName, string authString, string password, int attendeeLimit)
+    // 기존 서비스의 CreateInvitation 인자가 4개로 고정되었으므로 이 깡통도 4개를 받도록 맞춥니다.
+    public MockInvitation CreateInvitation(string authString, string groupName, string password, int attendeeLimit)
     {
         return new MockInvitation();
     }
