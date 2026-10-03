@@ -80,6 +80,16 @@ public interface IWdsViewportAdapter
     /// 뷰어 핸들러 초기화
     /// </summary>
     void ClearViewerHandlers();
+
+    /// <summary>
+    /// 실제 ActiveX 뷰어 참조 설정
+    /// </summary>
+    void SetAxViewer(dynamic axViewer);
+
+    /// <summary>
+    /// 실제 ActiveX 뷰어에 뷰포트 설정 적용
+    /// </summary>
+    void ApplyViewportSettings(Rectangle rect);
 }
 
 /// <summary>

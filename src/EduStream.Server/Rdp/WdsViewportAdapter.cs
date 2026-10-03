@@ -28,6 +28,9 @@ public sealed class WdsViewportAdapter : IWdsViewportAdapter
         SourceRect = Rectangle.Empty
     };
 
+    // 🎯 [피드백 7번 반영] 실제 ActiveX 뷰어 참조
+    private dynamic? _axViewer;
+
     public double CurrentZoom => _currentZoom;
     public Size CurrentViewportSize => _currentViewportSize;
     public Rectangle CurrentSourceRect => _currentSourceRect;
@@ -244,6 +247,32 @@ public sealed class WdsViewportAdapter : IWdsViewportAdapter
     public void ClearViewerHandlers()
     {
         _viewerHandlers.Clear();
+    }
+
+    /// <summary>
+    /// 🎯 [피드백 7번 반영] 실제 ActiveX 뷰어 참조 설정
+    /// </summary>
+    public void SetAxViewer(dynamic axViewer)
+    {
+        _axViewer = axViewer;
+    }
+
+    /// <summary>
+    /// 🎯 [피드백 7번 반영] 실제 ActiveX 뷰어에 뷰포트 설정 적용
+    /// </summary>
+    public void ApplyViewportSettings(Rectangle rect)
+    {
+        if (_axViewer != null && _axViewer.GetOcx() != null)
+        {
+            try
+            {
+                _axViewer.AdvancedSettings7.SmartSizing = true;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[WdsViewportAdapter] ActiveX SmartSizing 설정 실패: {ex.GetType().Name}");
+            }
+        }
     }
 }
 

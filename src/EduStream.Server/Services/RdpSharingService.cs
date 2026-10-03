@@ -117,7 +117,7 @@ public sealed class RdpSharingService : IRdpSharingService
             {
                 SessionId = sessionId, SenderId = "Server", SharingId = sharingId, InvitationId = id,
                 ParticipantId = participantId, ConnectionId = connectionId, ConnectionString = connection,
-                ExpiresAt = expiresAt, 
+                ExpiresAt = expiresAt,
                 ViewOnly = !IsInteractive, // 🌟 [피드백 2번] 스위치에 따라 동적 권한 분리
                 Provider = "windows-desktop-sharing", ContractVersion = 1,
                 DataLength = System.Text.Encoding.UTF8.GetByteCount(connection)

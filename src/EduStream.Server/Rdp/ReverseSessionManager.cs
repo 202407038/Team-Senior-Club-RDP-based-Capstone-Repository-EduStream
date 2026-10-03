@@ -16,6 +16,7 @@ public sealed class ReverseSessionManager : IReverseSessionManager, IDisposable
 
     private Guid _reverseSharingId = Guid.Empty;
     private string _hostStudentId = string.Empty;
+    private string _approvedTargetProfessorId = string.Empty;
     private ReverseSessionState _state = ReverseSessionState.Inactive;
     private bool _isDisposed;
 
@@ -43,7 +44,12 @@ public sealed class ReverseSessionManager : IReverseSessionManager, IDisposable
             // 🎯 [피드백 2번 반영] 단순 뭉뚱그림 방지: 레지스트리(CLSID) 미존재와 실제 Open 실패를 엄격히 구분하여 예외 처리
             Type? rdpType = Type.GetTypeFromProgID("RDPCOMAPILib.RDPSession");
             if (rdpType == null)
-                throw new NotSupportedException("WDS 엔진(RDPCOMAPILib.RDPSession)이 레지스트리에 등록되지 않았습니다. 현재 OS(Windows Home 등)에서 지원하지 않습니다.");
+            {
+                // 🎯 [피드백 5번 반영] GetTypeFromProgID 실패 시 GetTypeFromCLSID로 폴백
+                rdpType = Type.GetTypeFromCLSID(new Guid("9B78F0E6-3E05-4A5B-B2E8-E743A8956B65"));
+                if (rdpType == null)
+                    throw new NotSupportedException("WDS 엔진(RDPCOMAPILib.RDPSession)이 레지스트리에 등록되지 않았습니다. 현재 OS(Windows Home 등)에서 지원하지 않습니다.");
+            }
 
             try
             {
@@ -115,6 +121,7 @@ public sealed class ReverseSessionManager : IReverseSessionManager, IDisposable
             };
 
             _invitations[invitationId] = invitation;
+            _approvedTargetProfessorId = professorId; // 🎯 [피드백 6번 반영] 승인된 교수자 ID 저장
             return Task.FromResult(invitation);
         }
     }
@@ -140,10 +147,29 @@ public sealed class ReverseSessionManager : IReverseSessionManager, IDisposable
                         int grantedCount = 0;
 
                         // 🎯 [피드백 4번 반영] ControlLevel 2(보기 전용) -> 3(마우스 조작 가능)으로 수정
+                        // 🎯 [피드백 6번 반영] 승인된 대상만 ControlLevel=3, 나머지는 2(ViewOnly)
                         foreach (dynamic attendee in _rdpSession.Attendees)
                         {
-                            attendee.ControlLevel = 3; // CTRL_LEVEL_INTERACTIVE
-                            grantedCount++;
+                            // 참석자의 초대 정보 확인
+                            dynamic attendeeInvitation = attendee.Invitation;
+                            if (attendeeInvitation != null)
+                            {
+                                // 초대장의 ProfessorId가 승인된 대상인지 확인
+                                var attendeeProfessorId = attendeeInvitation.ProfessorId as string;
+                                if (attendeeProfessorId == _approvedTargetProfessorId)
+                                {
+                                    attendee.ControlLevel = 3; // CTRL_LEVEL_INTERACTIVE
+                                    grantedCount++;
+                                }
+                                else
+                                {
+                                    attendee.ControlLevel = 2; // CTRL_LEVEL_VIEW
+                                }
+                            }
+                            else
+                            {
+                                attendee.ControlLevel = 2; // CTRL_LEVEL_VIEW (기본)
+                            }
                         }
 
                         // 🎯 [피드백 4번 반영] 참석자가 0명인데 성공(ControlGranted)으로 넘어가는 꼼수 차단
@@ -202,7 +228,11 @@ public sealed class ReverseSessionManager : IReverseSessionManager, IDisposable
                     _rdpSession.Close();
                     Marshal.ReleaseComObject(_rdpSession);
                 }
-                catch { /* 무시 */ }
+                catch (Exception ex)
+                {
+                    // 🎯 [피드백 5번 반영] 종료 실패 시 예외를 상위로 전파
+                    throw new InvalidOperationException("역방향 세션 종료 실패", ex);
+                }
                 finally
                 {
                     _rdpSession = null;
@@ -212,6 +242,7 @@ public sealed class ReverseSessionManager : IReverseSessionManager, IDisposable
             _invitations.Clear();
             _reverseSharingId = Guid.Empty;
             _hostStudentId = string.Empty;
+            _approvedTargetProfessorId = string.Empty;
             _state = ReverseSessionState.Inactive;
         }
         return Task.CompletedTask;
