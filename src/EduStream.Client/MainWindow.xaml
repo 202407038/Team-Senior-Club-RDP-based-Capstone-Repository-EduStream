@@ -412,7 +412,11 @@
                                         Content="전송"
                                         Command="{Binding SendChatCommand}" />
                                 <TextBox Style="{StaticResource DarkTextBox}"
-                                         Text="{Binding ChatInput, UpdateSourceTrigger=PropertyChanged}" />
+                                         Text="{Binding ChatInput, UpdateSourceTrigger=PropertyChanged}">
+                                    <TextBox.InputBindings>
+                                        <KeyBinding Key="Return" Command="{Binding SendChatCommand}" />
+                                    </TextBox.InputBindings>
+                                </TextBox>
                             </DockPanel>
                         </StackPanel>
                     </Border>
