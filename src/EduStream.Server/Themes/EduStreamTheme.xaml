@@ -138,8 +138,7 @@
         <Border Margin="0,2"
                 Padding="10,8"
                 CornerRadius="10"
-                MaxWidth="320"
-                HorizontalAlignment="Left">
+                MaxWidth="320">
             <Border.Style>
                 <Style TargetType="Border">
                     <Setter Property="Background" Value="#2A2A2A" />
@@ -158,8 +157,7 @@
             </Border.Style>
             <StackPanel>
                 <TextBlock FontSize="11"
-                           FontWeight="SemiBold"
-                           Foreground="{StaticResource BrushAccentTeal}">
+                           FontWeight="SemiBold">
                     <TextBlock.Style>
                         <Style TargetType="TextBlock">
                             <Setter Property="Foreground" Value="{StaticResource BrushAccentTeal}" />
@@ -167,16 +165,24 @@
                                 <DataTrigger Binding="{Binding IsSystem}" Value="True">
                                     <Setter Property="Foreground" Value="{StaticResource BrushTextMuted}" />
                                 </DataTrigger>
+                                <DataTrigger Binding="{Binding IsSelf}" Value="True">
+                                    <Setter Property="Foreground" Value="{StaticResource BrushAccentPurple}" />
+                                </DataTrigger>
                             </Style.Triggers>
                         </Style>
                     </TextBlock.Style>
                     <Run Text="{Binding Sender, Mode=OneWay}" />
                 </TextBlock>
-                <TextBlock Margin="0,4,0,0"
-                           Text="{Binding Message}"
-                           TextWrapping="Wrap"
-                           Foreground="#E8E8E8"
-                           FontSize="13" />
+                <!-- 읽기 전용 TextBox라서 메시지를 드래그로 선택하고 Ctrl+C·우클릭으로 복사할 수 있다. -->
+                <TextBox Margin="0,4,0,0"
+                         Text="{Binding Message, Mode=OneWay}"
+                         IsReadOnly="True"
+                         TextWrapping="Wrap"
+                         Background="Transparent"
+                         BorderThickness="0"
+                         Padding="0"
+                         Foreground="#E8E8E8"
+                         FontSize="13" />
             </StackPanel>
         </Border>
     </DataTemplate>
