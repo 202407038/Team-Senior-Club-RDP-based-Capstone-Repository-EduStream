@@ -352,8 +352,18 @@
                             HorizontalAlignment="Left"
                             Margin="16"
                             Padding="10,6"
-                            Background="#CC000000"
                             CornerRadius="8">
+                        <Border.Style>
+                            <Style TargetType="Border">
+                                <Setter Property="Background" Value="#CC000000" />
+                                <Style.Triggers>
+                                    <!-- PNG 프레임 방식의 상태 표시이므로 RDP 화면이 연결되면 숨긴다. -->
+                                    <DataTrigger Binding="{Binding IsRdpActive}" Value="True">
+                                        <Setter Property="Visibility" Value="Collapsed" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Border.Style>
                         <TextBlock Foreground="{StaticResource BrushAccentTeal}"
                                    FontWeight="SemiBold"
                                    Text="{Binding RenderStatus}" />
@@ -362,8 +372,18 @@
                             HorizontalAlignment="Right"
                             Margin="16"
                             Padding="10,6"
-                            Background="#CC000000"
                             CornerRadius="8">
+                        <Border.Style>
+                            <Style TargetType="Border">
+                                <Setter Property="Background" Value="#CC000000" />
+                                <Style.Triggers>
+                                    <!-- PNG 프레임 방식의 상태 표시이므로 RDP 화면이 연결되면 숨긴다. -->
+                                    <DataTrigger Binding="{Binding IsRdpActive}" Value="True">
+                                        <Setter Property="Visibility" Value="Collapsed" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Border.Style>
                         <TextBlock Foreground="{StaticResource BrushTextMuted}"
                                    FontWeight="SemiBold"
                                    Text="{Binding FrameFreshness}" />

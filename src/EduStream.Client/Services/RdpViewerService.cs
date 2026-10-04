@@ -20,6 +20,8 @@ public sealed class RdpViewerService : IRdpViewerService
     private DispatcherTimer? _timeout;
     private int _generation;
     private bool _disposed;
+    // 공유 화면의 가로/세로 비율. 0이면 아직 모른다. 알면 표시 영역을 이 비율로 맞춰 늘어나 보이지 않게 한다.
+    private double _aspect;
     public event Action<RdpConnectionStatus>? StatusChanged;
 
     public RdpViewerService(ILogSink? logSink = null) => _log = logSink;
@@ -30,6 +32,45 @@ public sealed class RdpViewerService : IRdpViewerService
         if (_host is not null && !ReferenceEquals(_host, host))
             throw new InvalidOperationException("이미 다른 표시 영역에 연결됐습니다.");
         _host = host;
+        if (host.Parent is System.Windows.FrameworkElement parent)
+            parent.SizeChanged += (_, _) => FitHost();
+    }
+
+    /// <summary>
+    /// 공유 데스크톱 크기를 받아 표시 비율을 갱신합니다. 연결 직후 임시 크기가 먼저 올 수 있어 마지막 값을 따릅니다.
+    /// 뷰어는 공유 영역 변경(OnSharedRectChanged)은 알려 주지 않고, 데스크톱 설정 변경(OnSharedDesktopSettingsChanged)으로 크기를 알려 줍니다.
+    /// </summary>
+    private void ApplySharedSize(int generation, int width, int height, string source)
+    {
+        if (generation != _generation || width <= 0 || height <= 0) return;
+        _aspect = (double)width / height;
+        FitHost();
+    }
+
+    /// <summary>
+    /// 표시 컨트롤을 공유 화면의 원래 비율로 바깥 영역 안에 맞춥니다(남는 쪽은 여백).
+    /// SmartSizing은 영역을 가득 채우도록 늘리기만 하므로, 컨트롤 자체를 원본 비율로 만들어 납작하게 보이지 않게 합니다.
+    /// </summary>
+    private void FitHost()
+    {
+        if (_host is not { Parent: System.Windows.FrameworkElement parent } host) return;
+        if (_aspect <= 0 || parent.ActualWidth <= 0 || parent.ActualHeight <= 0)
+        {
+            host.Width = double.NaN;
+            host.Height = double.NaN;
+            return;
+        }
+        var width = parent.ActualWidth;
+        var height = width / _aspect;
+        if (height > parent.ActualHeight)
+        {
+            height = parent.ActualHeight;
+            width = height * _aspect;
+        }
+        host.HorizontalAlignment = System.Windows.HorizontalAlignment.Center;
+        host.VerticalAlignment = System.Windows.VerticalAlignment.Center;
+        host.Width = width;
+        host.Height = height;
     }
 
     public async Task ConnectAsync(RdpInvitationPacket invitation, string invitationPassword, CancellationToken cancellationToken = default)
@@ -64,6 +105,12 @@ public sealed class RdpViewerService : IRdpViewerService
                 host.Child = viewer;
                 ((ISupportInitialize)viewer).EndInit();
                 viewer.CreateControl();
+                // 공유 화면 전체가 창 크기에 맞게 축소되어 스크롤 없이 보이게 한다(기본 화면 맞춤).
+                viewer.SmartSizing = true;
+                viewer.OnSharedRectChanged += (_, e) =>
+                    ApplySharedSize(generation, e.right - e.left, e.bottom - e.top, "SharedRect");
+                viewer.OnSharedDesktopSettingsChanged += (_, e) =>
+                    ApplySharedSize(generation, e.width, e.height, "DesktopSettings");
                 _timeout = new DispatcherTimer(TimeSpan.FromSeconds(20), DispatcherPriority.Background,
                     (_, _) => Fail(generation, RdpFailureReason.HostUnavailable), host.Dispatcher);
                 viewer.Connect(invitation.ConnectionString, invitation.ParticipantId, invitationPassword);
@@ -98,6 +145,8 @@ public sealed class RdpViewerService : IRdpViewerService
     private void ResetViewer()
     {
         ++_generation; // 해제 중 발생하는 COM 이벤트와 이전 연결 알림을 먼저 무효화한다.
+        _aspect = 0;
+        FitHost();
         _timeout?.Stop();
         _timeout = null;
         var viewer = _viewer;
