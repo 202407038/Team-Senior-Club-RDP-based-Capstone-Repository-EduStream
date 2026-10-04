@@ -298,8 +298,21 @@
                         <Image Source="{Binding DisplaySource}" />
                     </Viewbox>
                     <wfi:WindowsFormsHost x:Name="RdpHost" Visibility="{Binding IsRdpActive, Converter={StaticResource BoolToVis}}" />
-                    <Border Background="#CC0A0A0A"
-                            Visibility="{Binding HasRemoteFrame, Converter={StaticResource BoolToVis}, ConverterParameter=Invert}">
+                    <!-- 화면 프레임(PNG)도 RDP 화면도 없을 때만 "연결 대기 중" 안내를 보여 준다. -->
+                    <Border>
+                        <Border.Style>
+                            <Style TargetType="Border">
+                                <Setter Property="Background" Value="#CC0A0A0A" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding HasRemoteFrame}" Value="True">
+                                        <Setter Property="Visibility" Value="Collapsed" />
+                                    </DataTrigger>
+                                    <DataTrigger Binding="{Binding IsRdpActive}" Value="True">
+                                        <Setter Property="Visibility" Value="Collapsed" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Border.Style>
                         <StackPanel VerticalAlignment="Center"
                                     HorizontalAlignment="Center"
                                     MaxWidth="420"
