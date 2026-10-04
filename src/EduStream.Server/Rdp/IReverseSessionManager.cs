@@ -97,17 +97,37 @@ public sealed class FrameReceivedEventArgs : EventArgs
 }
 
 /// <summary>
+/// 역방향 초대가 허용하는 제어 범위.
+/// 정방향(교수자→학생) 초대는 Core 계약(RdpInvitationContract)에 따라 항상 보기 전용이며,
+/// 이 열거형은 역방향(학생→교수자) 계약에서만 사용합니다.
+/// </summary>
+public enum ReverseControlMode
+{
+    /// <summary>보기 전용 (ControlLevel=2)</summary>
+    ViewOnly = 0,
+
+    /// <summary>
+    /// 접속 직후에는 보기 전용(ControlLevel=2)이며, 호스트(학생)가 명시적으로 허용한 뒤에만
+    /// 상호작용(ControlLevel=3)으로 올라갈 수 있습니다.
+    /// </summary>
+    HostGrantedInteractive = 1
+}
+
+/// <summary>
 /// 역방향 초대 패킷
 /// </summary>
 public sealed class ReverseInvitationPacket
 {
     public Guid SessionId { get; init; }
     public Guid SharingId { get; init; }
+    /// <summary>이 초대(= ConnectionString 매핑 항목)를 식별하는 ID</summary>
+    public Guid InvitationId { get; init; }
     public string ProfessorId { get; init; } = string.Empty;
     public Guid ConnectionId { get; init; }
     public string ConnectionString { get; init; } = string.Empty;
     public DateTimeOffset ExpiresAt { get; init; }
     public string HostStudentId { get; init; } = string.Empty;
+    public ReverseControlMode ControlMode { get; init; } = ReverseControlMode.HostGrantedInteractive;
 }
 
 /// <summary>

@@ -257,34 +257,80 @@ public sealed class WdsViewportAdapter : IWdsViewportAdapter
         _axViewer = axViewer;
     }
 
-   /// <summary>
-    /// 🎯 [피드백 4번, 1번 반영] 실제 ActiveX 뷰어에 뷰포트 설정 적용 (리플렉션 꼼수 원천 제거)
+    /// <summary>
+    /// 마지막으로 "실제 적용이 확인된" 뷰어 경계. 적용에 성공한 적이 없으면 Empty
+    /// </summary>
+    public Rectangle LastAppliedViewerBounds { get; private set; } = Rectangle.Empty;
+
+    /// <summary>
+    /// 실제 ActiveX 뷰어(WinForms Control)에 뷰포트를 적용하고, 적용된 값을 다시 읽어 확인합니다.
+    ///  - SmartSizing=true 로 원격 화면이 컨트롤 크기에 맞춰 스케일되게 하고
+    ///  - Dock 을 해제한 뒤 Bounds(위치+크기)를 rect 로 설정합니다. (Dock=Fill 이면 크기 지정이 무시되므로)
+    ///  - 읽어 본 SmartSizing/Bounds 가 요청과 다르면 예외를 던지며 ViewerApplied 는 발생하지 않습니다.
+    /// 뷰어를 만든 UI 스레드가 아니면 Control.Invoke 로 마샬링합니다.
+    /// 컨트롤은 크기를 강제로 다시 맞추지 않는 컨테이너(예: Panel) 안에 두어야 결과가 유지됩니다.
     /// </summary>
     public void ApplyViewportSettings(Rectangle rect)
     {
-        if (_axViewer == null)
-        {
+        if (rect.Width <= 0 || rect.Height <= 0)
+            throw new ArgumentOutOfRangeException(nameof(rect), rect, "뷰포트 크기는 0보다 커야 합니다.");
+
+        object? viewer = _axViewer;
+        if (viewer == null)
             throw new InvalidOperationException("WDS Viewer가 초기화되지 않았습니다.");
-        }
+
+        if (viewer is not System.Windows.Forms.Control control)
+            throw new NotSupportedException("WDS Viewer 는 System.Windows.Forms.Control(AxRDPViewer) 이어야 합니다.");
 
         try
         {
-            // 리플렉션(GetType().GetProperty) 꼼수를 싹 다 지웠습니다!
-            // C# dynamic을 이용해 네이티브 속성에 정공법으로 직접 바인딩하며, 
-            // 느낌표(!)를 붙여 컴파일러의 CS8602(Null 가능성) 경고를 완벽하게 차단합니다.
-            _axViewer!.SmartSizing = true;
-            _axViewer!.Width = rect.Width;
-            _axViewer!.Height = rect.Height;
+            if (control.InvokeRequired)
+                control.Invoke(new Action(() => ApplyAndVerify(control, rect)));
+            else
+                ApplyAndVerify(control, rect);
         }
         catch (Microsoft.CSharp.RuntimeBinder.RuntimeBinderException ex)
         {
-            // 실패를 숨기지 않고 명확하게 던짐
             throw new NotSupportedException("현재 연결된 WDS 컨트롤에서 SmartSizing 속성을 지원하지 않습니다.", ex);
+        }
+        catch (InvalidOperationException)
+        {
+            throw; // 검증 실패 메시지를 그대로 전달
         }
         catch (Exception ex)
         {
             throw new InvalidOperationException($"ActiveX 뷰포트 설정(SmartSizing) 적용 중 예외가 발생했습니다: {ex.Message}", ex);
         }
+
+        // 🎯 실제 적용·확인에 성공한 뒤에만 완료 이벤트 발행
+        LastAppliedViewerBounds = rect;
+        ViewerApplied?.Invoke(this, new ViewerAppliedEventArgs
+        {
+            ViewportInfo = new ViewportInfo
+            {
+                ViewportSize = rect.Size,
+                ZoomLevel = _currentZoom,
+                SourceRect = _currentSourceRect
+            },
+            AppliedAt = DateTimeOffset.UtcNow
+        });
+    }
+
+    private static void ApplyAndVerify(System.Windows.Forms.Control control, Rectangle rect)
+    {
+        dynamic dynamicViewer = control;
+        dynamicViewer.SmartSizing = true;
+
+        control.Dock = System.Windows.Forms.DockStyle.None;
+        control.Bounds = rect;
+
+        bool smartSizing = (bool)dynamicViewer.SmartSizing;
+        if (!smartSizing)
+            throw new InvalidOperationException("SmartSizing 적용을 확인하지 못했습니다. (읽은 값: false)");
+
+        if (control.Bounds != rect)
+            throw new InvalidOperationException(
+                $"뷰어 경계 적용을 확인하지 못했습니다. (요청 {rect}, 실제 {control.Bounds})");
     }
 }
 

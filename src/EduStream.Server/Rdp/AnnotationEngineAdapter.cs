@@ -18,6 +18,7 @@ public sealed class AnnotationEngineAdapter : IAnnotationEngineAdapter
     private readonly List<Func<AnnotationStroke, Task>> _renderPipeline = new();
     private readonly List<Func<AnnotationStroke, string, Task>> _transmissionPipeline = new();
     private readonly List<Func<AnnotationStroke, Point[], Task>> _rendererHandlers = new();
+    private readonly List<Func<AnnotationLayerSnapshot, Task>> _layerSyncHandlers = new();
     private readonly Stack<AnnotationStroke> _undoStack = new();
     private readonly object _syncRoot = new();
 
@@ -37,6 +38,7 @@ public sealed class AnnotationEngineAdapter : IAnnotationEngineAdapter
     public event EventHandler<EngineStateChangedEventArgs>? EngineStateChanged;
     public event EventHandler<StrokeRenderedEventArgs>? OnStrokeRendered;
     public event EventHandler<StrokeDispatchedEventArgs>? OnStrokeDispatched;
+    public event EventHandler<AnnotationLayerSyncedEventArgs>? OnLayerSynced;
 
     public AnnotationEngineAdapter(IAnnotationManager annotationManager)
     {
@@ -126,6 +128,23 @@ public sealed class AnnotationEngineAdapter : IAnnotationEngineAdapter
         }
     }
 
+    public void AddLayerSyncHandler(Func<AnnotationLayerSnapshot, Task> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        lock (_syncRoot)
+        {
+            _layerSyncHandlers.Add(handler);
+        }
+    }
+
+    public void ClearLayerSyncHandlers()
+    {
+        lock (_syncRoot)
+        {
+            _layerSyncHandlers.Clear();
+        }
+    }
+
     public void ClearRenderPipeline()
     {
         lock (_syncRoot)
@@ -164,6 +183,10 @@ public sealed class AnnotationEngineAdapter : IAnnotationEngineAdapter
             rendererCopy = _rendererHandlers.ToArray();
             _currentState = _currentState.ContentChanged();
         }
+
+        // 숨김 상태에서는 스트로크를 보존만 하고 화면에는 그리지 않는다.
+        // 다시 표시하면 레이어 동기화가 보존된 스트로크를 모두 복원한다.
+        if (!_annotationManager.IsLayerVisible) return;
 
         // 렌더러가 하나도 등록되어 있지 않으면 완료 이벤트를 발생시키지 않음
         if (renderCopy.Length == 0 && rendererCopy.Length == 0)
@@ -221,6 +244,9 @@ public sealed class AnnotationEngineAdapter : IAnnotationEngineAdapter
             transmissionCopy = _transmissionPipeline.ToArray();
         }
 
+        // 숨김 상태에서는 공유 대상 화면으로 전송하지 않는다 (재표시 시 레이어 동기화로 복원).
+        if (!_annotationManager.IsLayerVisible) return;
+
         // 전송 핸들러가 미등록된 경우 완료 이벤트 미발생
         if (transmissionCopy.Length == 0)
         {
@@ -266,6 +292,8 @@ public sealed class AnnotationEngineAdapter : IAnnotationEngineAdapter
             IsActive = IsEngineActive,
             Timestamp = DateTimeOffset.UtcNow
         });
+
+        await PushLayerSyncAsync(AnnotationLayerChange.VisibilityChanged, cancellationToken);
     }
 
     public async Task ToggleLayerVisibilityAsync(CancellationToken cancellationToken = default)
@@ -289,6 +317,8 @@ public sealed class AnnotationEngineAdapter : IAnnotationEngineAdapter
             IsActive = IsEngineActive,
             Timestamp = DateTimeOffset.UtcNow
         });
+
+        await PushLayerSyncAsync(AnnotationLayerChange.Cleared, cancellationToken);
     }
 
     public async Task UndoAsync(CancellationToken cancellationToken = default)
@@ -311,6 +341,64 @@ public sealed class AnnotationEngineAdapter : IAnnotationEngineAdapter
             {
                 IsActive = IsEngineActive,
                 Timestamp = DateTimeOffset.UtcNow
+            });
+
+            await PushLayerSyncAsync(AnnotationLayerChange.Undone, cancellationToken);
+        }
+    }
+
+    /// <summary>
+    /// 지금 화면에 있어야 할 전체 스트로크(숨김이면 빈 목록)를 등록된 싱크에 밀어 넣는다.
+    /// 하나 이상의 싱크가 실제로 적용에 성공했을 때만 <see cref="OnLayerSynced"/> 를 발생시킨다.
+    /// </summary>
+    private async Task PushLayerSyncAsync(AnnotationLayerChange change, CancellationToken cancellationToken)
+    {
+        Func<AnnotationLayerSnapshot, Task>[] handlers;
+        long revision;
+        lock (_syncRoot)
+        {
+            handlers = _layerSyncHandlers.ToArray();
+            revision = _currentState.ContentRevision;
+        }
+
+        if (handlers.Length == 0) return;
+
+        var isVisible = _annotationManager.IsLayerVisible;
+        IReadOnlyList<AnnotationStroke> visibleStrokes = Array.Empty<AnnotationStroke>();
+        if (isVisible)
+        {
+            var all = await _annotationManager.GetAllStrokesAsync(cancellationToken);
+            visibleStrokes = all.Where(s => s.IsVisible).OrderBy(s => s.CreatedAt).ToArray();
+        }
+
+        var snapshot = new AnnotationLayerSnapshot
+        {
+            Change = change,
+            IsVisible = isVisible,
+            ContentRevision = revision,
+            VisibleStrokes = visibleStrokes
+        };
+
+        int applied = 0;
+        foreach (var handler in handlers)
+        {
+            try
+            {
+                await handler(snapshot);
+                applied++;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[AnnotationEngine] 레이어 동기화 실패: {ex.Message}");
+            }
+        }
+
+        if (applied > 0)
+        {
+            OnLayerSynced?.Invoke(this, new AnnotationLayerSyncedEventArgs
+            {
+                Snapshot = snapshot,
+                AppliedHandlerCount = applied
             });
         }
     }

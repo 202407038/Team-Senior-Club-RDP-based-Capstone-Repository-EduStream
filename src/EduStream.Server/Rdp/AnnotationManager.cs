@@ -17,7 +17,7 @@ public sealed class AnnotationManager : IAnnotationManager
 {
     private readonly ConcurrentDictionary<Guid, AnnotationStroke> _strokes = new();
     private readonly ConcurrentDictionary<string, List<Guid>> _participantStrokeMap = new();
-    private bool _isLayerVisible = true;
+    private volatile bool _isLayerVisible = true;
 
     public bool IsLayerVisible => _isLayerVisible;
     public event EventHandler<StrokeRenderedEventArgs>? OnStrokeRendered;

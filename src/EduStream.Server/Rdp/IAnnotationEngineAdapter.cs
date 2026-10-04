@@ -38,6 +38,24 @@ public interface IAnnotationEngineAdapter
     event EventHandler<StrokeDispatchedEventArgs>? OnStrokeDispatched;
 
     /// <summary>
+    /// 레이어 상태 동기화 완료 이벤트.
+    /// 숨김/재표시/전체 삭제/실행 취소 결과가 등록된 싱크(렌더러·전송) 중 하나 이상에 실제로 적용됐을 때만 발생한다.
+    /// </summary>
+    event EventHandler<AnnotationLayerSyncedEventArgs>? OnLayerSynced;
+
+    /// <summary>
+    /// 레이어 동기화 싱크 등록.
+    /// 숨김/재표시/전체 삭제/실행 취소가 일어날 때마다 "지금 화면에 있어야 할 전체 스트로크" 스냅샷이 전달된다.
+    /// 싱크는 자신의 출력(로컬 캔버스, 학생 화면 오버레이 등)을 이 스냅샷으로 통째로 교체해야 한다.
+    /// </summary>
+    void AddLayerSyncHandler(Func<AnnotationLayerSnapshot, Task> handler);
+
+    /// <summary>
+    /// 레이어 동기화 싱크 초기화
+    /// </summary>
+    void ClearLayerSyncHandlers();
+
+    /// <summary>
     /// 엔진 활성화
     /// </summary>
     Task ActivateEngineAsync(CancellationToken cancellationToken = default);
@@ -111,6 +129,34 @@ public interface IAnnotationEngineAdapter
     /// 모든 판서 스트로크 조회
     /// </summary>
     Task<IReadOnlyList<AnnotationStroke>> GetAllStrokesAsync(CancellationToken cancellationToken = default);
+}
+
+/// <summary>레이어 동기화를 일으킨 변경 종류</summary>
+public enum AnnotationLayerChange
+{
+    VisibilityChanged,
+    Cleared,
+    Undone
+}
+
+/// <summary>
+/// 레이어 동기화 스냅샷. 싱크는 자신의 출력을 <see cref="VisibleStrokes"/> 로 통째로 교체한다.
+/// 숨김 상태이면 <see cref="VisibleStrokes"/> 는 비어 있다(스트로크 자체는 매니저에 보존된다).
+/// </summary>
+public sealed class AnnotationLayerSnapshot
+{
+    public AnnotationLayerChange Change { get; init; }
+    public bool IsVisible { get; init; }
+    public long ContentRevision { get; init; }
+    public IReadOnlyList<AnnotationStroke> VisibleStrokes { get; init; } = Array.Empty<AnnotationStroke>();
+}
+
+/// <summary>레이어 동기화 완료 이벤트 인자</summary>
+public sealed class AnnotationLayerSyncedEventArgs : EventArgs
+{
+    public AnnotationLayerSnapshot Snapshot { get; init; } = null!;
+    public int AppliedHandlerCount { get; init; }
+    public DateTimeOffset SyncedAt { get; init; } = DateTimeOffset.UtcNow;
 }
 
 /// <summary>
