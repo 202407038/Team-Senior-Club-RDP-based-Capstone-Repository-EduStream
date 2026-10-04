@@ -25,6 +25,7 @@
                     <ControlTemplate TargetType="ComboBox">
                         <Grid>
                             <ToggleButton x:Name="Toggle" Background="{TemplateBinding Background}"
+                                          Foreground="{TemplateBinding Foreground}"
                                           BorderBrush="{TemplateBinding BorderBrush}"
                                           BorderThickness="{TemplateBinding BorderThickness}"
                                           IsChecked="{Binding IsDropDownOpen, RelativeSource={RelativeSource TemplatedParent}, Mode=TwoWay}"
@@ -61,6 +62,12 @@
                                 </Border>
                             </Popup>
                         </Grid>
+                        <ControlTemplate.Triggers>
+                            <!-- 비활성(엔진 연결 전)이어도 글자는 읽을 수 있게 흐리게만 한다. -->
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter TargetName="Toggle" Property="Opacity" Value="0.65" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
                     </ControlTemplate>
                 </Setter.Value>
             </Setter>
