@@ -251,27 +251,20 @@
                                 <TextBox Style="{StaticResource DarkTextBox}"
                                          Text="{Binding DisplayName, UpdateSourceTrigger=PropertyChanged}" />
 
-                                <Grid Margin="0,12,0,0">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="2*" />
-                                        <ColumnDefinition Width="8" />
-                                        <ColumnDefinition Width="*" />
-                                    </Grid.ColumnDefinitions>
-                                    <StackPanel Grid.Column="0">
-                                        <TextBlock Style="{StaticResource FieldLabel}" Text="호스트" />
-                                        <TextBox Style="{StaticResource DarkTextBox}"
-                                                 Text="{Binding HostAddress, UpdateSourceTrigger=PropertyChanged}" />
-                                    </StackPanel>
-                                    <StackPanel Grid.Column="2">
-                                        <TextBlock Style="{StaticResource FieldLabel}" Text="포트" />
+                                <StackPanel Margin="0,12,0,0">
+                                    <TextBlock Style="{StaticResource FieldLabel}" Text="교수자 IP" />
+                                    <TextBox Style="{StaticResource DarkTextBox}"
+                                             Text="{Binding HostAddress, UpdateSourceTrigger=PropertyChanged}" />
+                                </StackPanel>
+                                <Expander Header="고급 연결 설정 (기본 포트 5000)" IsExpanded="False"
+                                          Foreground="{StaticResource BrushTextSecondary}" Margin="0,10,0,0">
+                                    <StackPanel Margin="0,8,0,0">
+                                        <TextBlock Style="{StaticResource FieldLabel}" Text="포트 (교수자가 변경한 경우만)" />
                                         <TextBox Style="{StaticResource DarkTextBox}"
                                                  Text="{Binding Port, UpdateSourceTrigger=PropertyChanged}" />
                                     </StackPanel>
-                                </Grid>
-
-                                <TextBlock Style="{StaticResource FieldLabel}" Margin="0,12,0,6" Text="접속 코드" />
-                                <TextBox Style="{StaticResource DarkTextBox}"
-                                         Text="{Binding ConnectionCode, UpdateSourceTrigger=PropertyChanged}" />
+                                </Expander>
+                                <!-- 이전 ConnectionCode 입력칸은 제거. LAN TLS 참가에는 별도 코드/신뢰 확인창이 없습니다. -->
 
                                 <TextBlock Style="{StaticResource FieldLabel}" Margin="0,12,0,6" Text="방 비밀번호 (설정된 경우)" />
                                 <PasswordBox x:Name="RoomPasswordBox" Padding="8" />
