@@ -357,7 +357,7 @@ public sealed class ServerViewModel : ObservableObject
                                 ? " 방 비밀번호도 함께 알려 주세요. 열린 세션의 비밀번호는 바꿀 수 없으니, 바꾸려면 세션을 닫고 다시 여세요."
                                 : " 비밀번호 없는 방입니다.");
             IsStatusError = false;
-            RdpStatus = "WDS 공유 시작 후 학생을 연결해 주세요. 이미 참여한 학생은 RDP 재접속을 눌러 주세요.";
+            RdpStatus = "공유 시작을 누르면 참가한 학생 화면에 자동으로 연결됩니다.";
             ChatMessages.Insert(0, ChatLine.System("세션이 열렸습니다."));
             SyncLogs();
         }
