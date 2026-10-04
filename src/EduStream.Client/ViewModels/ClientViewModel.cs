@@ -40,7 +40,7 @@ public sealed class ClientViewModel : ObservableObject
     private SecureSessionChannel? _secureChannel;
     private StudentStatusClient? _statusClient;
     // 자동 재연결(U03): 마지막 참가 정보와 교수자가 준 일회용 토큰. 비밀번호는 보관하지 않는다.
-    private sealed record JoinTarget(string Host, int Port, string Code, string DisplayName);
+    private sealed record JoinTarget(string Host, int Port, string DisplayName);
     private JoinTarget? _lastJoin;
     private string? _reconnectToken;
     private TimeSpan _reconnectWindow = ReconnectRules.DefaultWindow;
@@ -53,7 +53,6 @@ public sealed class ClientViewModel : ObservableObject
     private TaskCompletionSource<JoinAckResult>? _pendingJoinAck;
     private StudentStatus _studentStatus = StudentStatus.Initial;
     private bool _permissionNoticeShown;
-    private string _connectionCode = string.Empty;
     private RdpInvitationPacket? _activeRdpInvitation;
     // 초대(TCP)와 비밀번호(보호 채널)는 도착 순서가 정해져 있지 않아, 둘이 같은 초대로 짝지어질 때까지 보관한다.
     private readonly object _rdpAutoConnectLock = new();
@@ -173,13 +172,6 @@ public sealed class ClientViewModel : ObservableObject
     {
         get => _port;
         set => SetProperty(ref _port, value);
-    }
-
-    /// <summary>교수자 화면의 접속 코드(XXXX-XXXX-XXXX)입니다. 연결한 PC가 그 교수자인지 확인하는 데 씁니다.</summary>
-    public string ConnectionCode
-    {
-        get => _connectionCode;
-        set => SetProperty(ref _connectionCode, value);
     }
 
     private bool _roomPasswordRequired;
@@ -419,12 +411,6 @@ public sealed class ClientViewModel : ObservableObject
             return;
         }
 
-        if (!EduStream.Core.Network.ConnectionCode.TryNormalize(ConnectionCode, out _))
-        {
-            ApplyJoinError(_sessionClient.CreateJoinError(HostAddress, Port, "교수자 화면의 접속 코드(XXXX-XXXX-XXXX)를 입력해 주세요."));
-            return;
-        }
-
         try
         {
             // 💡 연결 시도 시 에러 상태 초기화 및 로딩 가동
@@ -441,16 +427,16 @@ public sealed class ClientViewModel : ObservableObject
             _reconnectToken = null;
             _userLeaving = false;
             _sessionEnded = false;
-            _lastJoin = new JoinTarget(HostAddress, Port, ConnectionCode, DisplayName);
+            _lastJoin = new JoinTarget(HostAddress, Port, DisplayName);
 
-            // 접속 코드로 교수자 PC를 확인한 보호 채널에서만 방 비밀번호를 보내고 참가 티켓을 받는다.
-            StatusMessage = "교수자 PC를 확인하는 중입니다...";
+            // 입력한 교수자 IP로 TLS 보호 채널을 연 뒤 방 비밀번호를 보내고 참가 티켓을 받는다.
+            StatusMessage = "교수자 PC에 연결하는 중입니다...";
             var roomPassword = RoomPasswordProvider?.Invoke() ?? string.Empty;
             SecureSessionChannel secure;
             try
             {
                 secure = await SecureRoomJoinClient.AuthenticateAsync(
-                    HostAddress, Port, ConnectionCode, DisplayName, roomPassword.AsMemory(), _logSink);
+                    HostAddress, Port, DisplayName, roomPassword.AsMemory(), _logSink);
             }
             catch (SecureJoinException ex)
             {
@@ -1270,7 +1256,7 @@ public sealed class ClientViewModel : ObservableObject
         SecureSessionChannel secure;
         try
         {
-            secure = await SecureRoomJoinClient.AuthenticateAsync(target.Host, target.Port, target.Code, target.DisplayName,
+            secure = await SecureRoomJoinClient.AuthenticateAsync(target.Host, target.Port, target.DisplayName,
                 ReadOnlyMemory<char>.Empty, _logSink, cancellationToken: cancellationToken, reconnectToken: token);
         }
         catch (SecureJoinException ex) when (ex.Failure == SecureJoinFailure.Unreachable)
@@ -1533,8 +1519,8 @@ public sealed class ClientViewModel : ObservableObject
 
     private static string DescribeSecureJoinFailure(SecureJoinFailure failure) => failure switch
     {
-        SecureJoinFailure.InvalidCode => "접속 코드 형식이 올바르지 않습니다. 교수자 화면의 코드를 다시 확인해 주세요.",
-        SecureJoinFailure.CodeMismatch => "접속 코드가 이 PC와 맞지 않습니다. 호스트 주소와 접속 코드를 다시 확인해 주세요.",
+        SecureJoinFailure.InvalidAddress => "교수자 IP 형식이 올바르지 않습니다. 교수자 화면에 표시된 IP와 고급 설정의 포트(기본 5000)를 확인해 주세요.",
+        SecureJoinFailure.InvalidCertificate => "교수자 앱의 TLS 인증서가 유효하지 않습니다. 교수자 PC의 시간과 인증서를 확인해 주세요.",
         SecureJoinFailure.PasswordRejected => "방 비밀번호가 올바르지 않습니다.",
         SecureJoinFailure.LockedOut => "비밀번호를 여러 번 틀려 잠시 참가할 수 없습니다. 1분 뒤 다시 시도해 주세요.",
         SecureJoinFailure.VersionMismatch => "교수자 앱과 버전이 맞지 않습니다. 같은 버전의 앱을 사용해 주세요.",

@@ -63,6 +63,29 @@
                 </DataTrigger>
             </Style.Triggers>
         </Style>
+        <Style x:Key="FileLinkButton" TargetType="Button">
+            <Setter Property="Foreground" Value="#DDDDDD" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="HorizontalAlignment" Value="Left" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <TextBlock x:Name="Label" Text="{TemplateBinding Content}"
+                                   Foreground="{TemplateBinding Foreground}"
+                                   TextTrimming="CharacterEllipsis" />
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Label" Property="TextDecorations" Value="Underline" />
+                                <Setter TargetName="Label" Property="Foreground" Value="{StaticResource BrushAccentPurple}" />
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter TargetName="Label" Property="Opacity" Value="0.5" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
         <Style x:Key="CaptionButton" TargetType="Button">
             <Setter Property="Width" Value="46" />
             <Setter Property="Height" Value="36" />
@@ -168,23 +191,26 @@
                         <TextBox Style="{StaticResource DarkTextBox}"
                                  Text="{Binding DisplayName, UpdateSourceTrigger=PropertyChanged}" />
 
-                        <TextBlock Style="{StaticResource FieldLabel}" Margin="0,12,0,6" Text="접속 코드" />
+                        <TextBlock Style="{StaticResource FieldLabel}" Margin="0,12,0,6" Text="교수자 IP" />
                         <TextBox Style="{StaticResource DarkTextBox}"
-                                 Text="{Binding ConnectionCode, UpdateSourceTrigger=PropertyChanged}" />
+                                 Text="{Binding HostAddress, UpdateSourceTrigger=PropertyChanged}" />
                         <TextBlock Margin="0,6,0,0"
                                    FontSize="11"
                                    Foreground="{StaticResource BrushTextMuted}"
-                                   Text="교수자 화면에 표시된 XXXX-XXXX-XXXX 코드를 입력하세요." />
+                                   Text="교수자 화면에 표시된 IP를 입력하세요." />
 
-                        <TextBlock Style="{StaticResource FieldLabel}" Margin="0,12,0,6" Text="호스트 IP" />
-                        <TextBox Style="{StaticResource DarkTextBox}"
-                                 Text="{Binding HostAddress, UpdateSourceTrigger=PropertyChanged}" />
+                        <Expander Header="고급 설정 (기본 포트 5000)"
+                                  IsExpanded="False"
+                                  Margin="0,10,0,0"
+                                  Foreground="{StaticResource BrushTextSecondary}">
+                            <StackPanel Margin="0,8,0,0">
+                                <TextBlock Style="{StaticResource FieldLabel}" Text="포트 (교수자가 바꾼 경우에만)" />
+                                <TextBox Style="{StaticResource DarkTextBox}"
+                                         Text="{Binding Port, UpdateSourceTrigger=PropertyChanged}" />
+                            </StackPanel>
+                        </Expander>
 
-                        <TextBlock Style="{StaticResource FieldLabel}" Margin="0,12,0,6" Text="포트" />
-                        <TextBox Style="{StaticResource DarkTextBox}"
-                                 Text="{Binding Port, UpdateSourceTrigger=PropertyChanged}" />
-
-                        <!-- 접속 코드를 이 칸에 잘못 넣는 일을 막기 위해, 비밀번호가 걸린 방일 때만 체크하고 입력한다. -->
+                        <!-- 방 비밀번호는 비밀번호가 걸린 방일 때만 체크하고 입력한다. 비밀번호 없는 방은 비워 두는 것과 같다. -->
                         <CheckBox x:Name="UseRoomPasswordCheck"
                                   Margin="0,16,0,0"
                                   Foreground="{StaticResource BrushTextSecondary}"
@@ -197,7 +223,7 @@
                             <TextBlock Margin="0,6,0,0"
                                        FontSize="11"
                                        Foreground="{StaticResource BrushTextMuted}"
-                                       Text="접속 코드가 아니라, 교수자가 따로 알려 준 방 비밀번호입니다." />
+                                       Text="교수자가 따로 알려 준 방 비밀번호를 입력하세요." />
                         </StackPanel>
 
                         <Button Style="{StaticResource PrimaryButton}"
@@ -476,7 +502,10 @@
                                             <Button DockPanel.Dock="Right" Style="{StaticResource GhostButton}" Padding="10,0"
                                                     Content="다운로드" Command="{Binding DownloadCommand}" />
                                             <StackPanel>
-                                                <TextBlock Text="{Binding DisplayText}" Foreground="#DDDDDD" TextTrimming="CharacterEllipsis" />
+                                                <Button Style="{StaticResource FileLinkButton}"
+                                                        Content="{Binding DisplayText}"
+                                                        Command="{Binding DownloadCommand}"
+                                                        ToolTip="클릭하면 다운로드합니다" />
                                                 <TextBlock Text="{Binding Status}" Foreground="#999999" FontSize="11" TextWrapping="Wrap" />
                                             </StackPanel>
                                         </DockPanel>
@@ -496,7 +525,7 @@
                               Margin="0,0,0,12"
                               Foreground="{StaticResource BrushTextSecondary}">
                         <ListBox Margin="0,8,0,0"
-                                 Height="200"
+                                 Height="140"
                                  Style="{StaticResource DarkListBox}"
                                  ItemsSource="{Binding ActivityLogs}"
                                  ItemTemplate="{StaticResource LogLineTemplate}" />
