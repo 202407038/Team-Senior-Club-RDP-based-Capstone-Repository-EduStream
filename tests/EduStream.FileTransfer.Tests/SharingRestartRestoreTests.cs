@@ -125,6 +125,98 @@ public sealed class SharingRestartRestoreTests
     }
 
     [Fact]
+    public async Task ViewingOffThenOnBeforeSharing_IsRequeued_AndNotifiedWhenSharingStarts()
+    {
+        await using var rig = await Rig.OpenAsync();
+        var alice = await rig.JoinAsync("Alice");
+        await rig.RequestInvitationAsync(alice, Guid.NewGuid());
+        Assert.Equal(1, rig.SessionManager.ScreenWaiterCount);
+
+        Assert.True(await rig.SessionManager.UpdateParticipantPermissionsAsync("Alice", allowViewing: false, allowControl: false));
+        Assert.Equal(0, rig.SessionManager.ScreenWaiterCount);
+        Assert.True(await rig.SessionManager.UpdateParticipantPermissionsAsync("Alice", allowViewing: true, allowControl: false));
+        Assert.Equal(1, rig.SessionManager.ScreenWaiterCount);
+
+        rig.SessionManager.AttachRdpSharing(rig.Sharing, Guid.NewGuid());
+
+        await alice.SharingStarted.Reader.ReadAsync().AsTask().WaitAsync(Wait);
+    }
+
+    [Fact]
+    public async Task ViewingOnWhileSharingWithoutInvitation_NotifiesImmediately()
+    {
+        await using var rig = await Rig.OpenAsync();
+        var alice = await rig.JoinAsync("Alice");
+        Assert.True(await rig.SessionManager.UpdateParticipantPermissionsAsync("Alice", allowViewing: false, allowControl: false));
+        rig.SessionManager.AttachRdpSharing(rig.Sharing, Guid.NewGuid());
+        await Task.Delay(100);
+        Assert.False(alice.SharingStarted.Reader.TryRead(out _));
+
+        Assert.True(await rig.SessionManager.UpdateParticipantPermissionsAsync("Alice", allowViewing: true, allowControl: false));
+
+        var notice = await alice.SharingStarted.Reader.ReadAsync().AsTask().WaitAsync(Wait);
+        Assert.Equal(rig.SessionManager.CurrentSession!.SessionId, notice.SessionId);
+    }
+
+    [Fact]
+    public async Task ViewingOnWhileSharingWithExistingInvitation_DoesNotNotifyAgain()
+    {
+        await using var rig = await Rig.OpenAsync();
+        var alice = await rig.JoinAsync("Alice");
+        rig.SessionManager.AttachRdpSharing(rig.Sharing, Guid.NewGuid());
+        Assert.IsType<RdpInvitationPacket>(await rig.RequestInvitationAsync(alice, Guid.NewGuid()));
+        Assert.Equal(1, rig.SessionManager.RdpInvitationCount);
+
+        Assert.True(await rig.SessionManager.UpdateParticipantPermissionsAsync("Alice", allowViewing: true, allowControl: true));
+
+        await Task.Delay(150);
+        Assert.False(alice.SharingStarted.Reader.TryRead(out _));
+        Assert.Equal(1, rig.SessionManager.RdpInvitationCount);
+    }
+
+    [Fact]
+    public async Task ViewingToggledDuringPause_ThenRestart_NotifiesOnlyOnce()
+    {
+        await using var rig = await Rig.OpenAsync();
+        var alice = await rig.JoinAsync("Alice");
+        rig.SessionManager.AttachRdpSharing(rig.Sharing, Guid.NewGuid());
+        await rig.RequestInvitationAsync(alice, Guid.NewGuid());
+        await rig.SessionManager.DetachRdpSharingAsync();
+        Assert.Equal(1, rig.SessionManager.ScreenWaiterCount);
+
+        Assert.True(await rig.SessionManager.UpdateParticipantPermissionsAsync("Alice", allowViewing: false, allowControl: false));
+        Assert.True(await rig.SessionManager.UpdateParticipantPermissionsAsync("Alice", allowViewing: true, allowControl: false));
+        Assert.Equal(1, rig.SessionManager.ScreenWaiterCount);
+
+        rig.SessionManager.AttachRdpSharing(rig.Sharing, Guid.NewGuid());
+
+        await alice.SharingStarted.Reader.ReadAsync().AsTask().WaitAsync(Wait);
+        await Task.Delay(150);
+        Assert.False(alice.SharingStarted.Reader.TryRead(out _));
+        Assert.Equal(0, rig.SessionManager.ScreenWaiterCount);
+    }
+
+    [Fact]
+    public async Task LeftStudent_CannotBeRestoredByViewingOn()
+    {
+        await using var rig = await Rig.OpenAsync();
+        var alice = await rig.JoinAsync("Alice");
+        rig.SessionManager.AttachRdpSharing(rig.Sharing, Guid.NewGuid());
+        await rig.RequestInvitationAsync(alice, Guid.NewGuid());
+        await alice.Client.SendAsync(PacketFactory.CreateSessionLeave(
+            senderId: "Alice", displayName: "Alice", reason: "테스트 퇴장", sessionId: rig.SessionManager.CurrentSession!.SessionId));
+        await WaitUntilAsync(() => rig.SessionManager.ParticipantCount == 0);
+
+        Assert.False(await rig.SessionManager.UpdateParticipantPermissionsAsync("Alice", allowViewing: true, allowControl: false));
+        await rig.SessionManager.DetachRdpSharingAsync();
+        rig.SessionManager.AttachRdpSharing(rig.Sharing, Guid.NewGuid());
+
+        await Task.Delay(150);
+        Assert.False(alice.SharingStarted.Reader.TryRead(out _));
+        Assert.Equal(0, rig.SessionManager.ScreenWaiterCount);
+    }
+
+    [Fact]
     public async Task StudentWhoNeverRequestedScreen_IsNotNotified()
     {
         await using var rig = await Rig.OpenAsync();

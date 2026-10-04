@@ -266,9 +266,38 @@ public sealed class SessionManager
 
         // 보기 허용을 철회한 학생은 공유 재시작 때 자동 복귀시키지 않는다(U03).
         if (!allowViewing) _screenWaiters.TryRemove(clientId, out _);
+        else await ResumeViewingForClientAsync(clientId, displayName);
         _logSink.Write($"[Control] 허용 변경: 대상={displayName}, 보기={allowViewing}, 제어={allowViewing && allowControl}");
         await ConfirmControlInputRevokedAsync();
         return true;
+    }
+
+    /// <summary>
+    /// 학생이 보기 허용을 다시 켰을 때 화면을 받을 수 있게 되돌립니다. 공유가 아직 없으면 시작 때 자동 복귀하도록
+    /// 대기에 올리고, 이미 공유 중이면서 초대가 없으면 학생에게 초대 재요청 알림을 보냅니다.
+    /// </summary>
+    private async Task ResumeViewingForClientAsync(string clientId, string displayName)
+    {
+        Guid sessionId;
+        bool sharing;
+        lock (_sessionLock)
+        {
+            if (CurrentSession is null) return;
+            sessionId = CurrentSession.SessionId;
+            sharing = _rdpSharingService is not null && _sharingLifetime is { IsCancellationRequested: false };
+            if (!sharing)
+            {
+                TryAddScreenWaiter(clientId);
+                return;
+            }
+        }
+        if (_rdpInvitations.ContainsKey(displayName)) return;
+        await _tcpServer.SendToClientAsync(clientId, PacketFactory.CreateAck(
+            senderId: "Server",
+            ackCode: AckCodes.RdpSharingStarted,
+            message: "화면 공유가 시작되었습니다.",
+            sessionId: sessionId));
+        _logSink.Write($"[Rdp] 보기 허용 복구 후 화면 복귀 알림: clientId={clientId}");
     }
 
     /// <summary>
