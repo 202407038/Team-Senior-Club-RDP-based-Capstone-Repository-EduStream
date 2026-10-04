@@ -21,6 +21,16 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- 역방향 E2E 테스트가 교수자 측 실제 AxRDPViewer 를 직접 생성하기 위한 참조 (Client 와 동일한 interop 사용) -->
+    <Reference Include="AxRDPCOMAPILib">
+      <HintPath>..\..\src\EduStream.Client\libs\AxRDPCOMAPILib.dll</HintPath>
+    </Reference>
+    <Reference Include="RDPCOMAPILib">
+      <HintPath>..\..\src\EduStream.Client\libs\RDPCOMAPILib.dll</HintPath>
+    </Reference>
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\..\src\EduStream.Core\EduStream.Core.csproj" />
     <ProjectReference Include="..\..\src\EduStream.Client\EduStream.Client.csproj" />
     <ProjectReference Include="..\..\src\EduStream.Server\EduStream.Server.csproj" />
