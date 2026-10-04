@@ -27,6 +27,23 @@
     <SolidColorBrush x:Key="BrushTextSecondary" Color="{StaticResource TextSecondary}" />
     <SolidColorBrush x:Key="BrushTextMuted" Color="{StaticResource TextMuted}" />
 
+    <!-- 모든 스크롤바를 숨긴다. 마우스 휠과 키보드 스크롤은 그대로 동작한다. -->
+    <Style TargetType="ScrollBar">
+        <Setter Property="Width" Value="0" />
+        <Setter Property="Height" Value="0" />
+        <Setter Property="MinWidth" Value="0" />
+        <Setter Property="MinHeight" Value="0" />
+        <Setter Property="Opacity" Value="0" />
+        <Setter Property="IsHitTestVisible" Value="False" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="ScrollBar">
+                    <Grid />
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
     <Style x:Key="PanelCard" TargetType="Border">
         <Setter Property="Background" Value="{StaticResource BrushBgSurface}" />
         <Setter Property="BorderBrush" Value="{StaticResource BrushBorder}" />
@@ -54,6 +71,33 @@
         <Setter Property="CaretBrush" Value="{StaticResource BrushAccentTeal}" />
         <Setter Property="BorderThickness" Value="0" />
         <Setter Property="SelectionBrush" Value="#5503DAC6" />
+    </Style>
+
+    <!-- 모든 PasswordBox(방 비밀번호, RDP 초대 비밀번호)에 DarkTextBox와 같은 모양을 적용한다. -->
+    <Style TargetType="PasswordBox">
+        <Setter Property="Padding" Value="10,8" />
+        <Setter Property="Background" Value="{StaticResource BrushBgInput}" />
+        <Setter Property="Foreground" Value="{StaticResource BrushTextPrimary}" />
+        <Setter Property="CaretBrush" Value="{StaticResource BrushAccentTeal}" />
+        <Setter Property="SelectionBrush" Value="#5503DAC6" />
+        <Setter Property="BorderThickness" Value="0" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="PasswordBox">
+                    <Border Background="{TemplateBinding Background}"
+                            BorderBrush="{StaticResource BrushAccentPurple}"
+                            BorderThickness="0"
+                            x:Name="Box">
+                        <ScrollViewer x:Name="PART_ContentHost" Margin="{TemplateBinding Padding}" />
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsKeyboardFocusWithin" Value="True">
+                            <Setter TargetName="Box" Property="BorderThickness" Value="0,0,0,2" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
     </Style>
 
     <Style x:Key="PrimaryButton" TargetType="Button">
@@ -138,8 +182,7 @@
         <Border Margin="0,2"
                 Padding="10,8"
                 CornerRadius="10"
-                MaxWidth="320"
-                HorizontalAlignment="Left">
+                MaxWidth="320">
             <Border.Style>
                 <Style TargetType="Border">
                     <Setter Property="Background" Value="#2A2A2A" />
@@ -167,16 +210,25 @@
                                 <DataTrigger Binding="{Binding IsSystem}" Value="True">
                                     <Setter Property="Foreground" Value="{StaticResource BrushTextMuted}" />
                                 </DataTrigger>
+                                <DataTrigger Binding="{Binding IsSelf}" Value="True">
+                                    <Setter Property="Foreground" Value="{StaticResource BrushAccentPurple}" />
+                                </DataTrigger>
                             </Style.Triggers>
                         </Style>
                     </TextBlock.Style>
                     <Run Text="{Binding Sender, Mode=OneWay}" />
                 </TextBlock>
-                <TextBlock Margin="0,4,0,0"
-                           Text="{Binding Message}"
-                           TextWrapping="Wrap"
-                           Foreground="#E8E8E8"
-                           FontSize="13" />
+                <!-- 읽기 전용 TextBox라서 메시지를 드래그로 선택해 복사할 수 있다. -->
+                <TextBox Margin="0,4,0,0"
+                         Text="{Binding Message, Mode=OneWay}"
+                         IsReadOnly="True"
+                         TextWrapping="Wrap"
+                         Background="Transparent"
+                         BorderThickness="0"
+                         Padding="0"
+                         Foreground="#E8E8E8"
+                         SelectionBrush="#557C4DFF"
+                         FontSize="13" />
             </StackPanel>
         </Border>
     </DataTemplate>
