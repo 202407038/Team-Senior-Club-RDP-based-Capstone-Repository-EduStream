@@ -1,5 +1,6 @@
 using System.Collections.Specialized;
 using System.Windows;
+using System.Windows.Input;
 using System.Windows.Threading;
 using EduStream.Client.ViewModels;
 
@@ -114,6 +115,23 @@ public partial class MainWindow : Window
 
     private void UseRoomPasswordCheck_Unchecked(object sender, RoutedEventArgs e) => RoomPasswordBox.Clear();
 
+    /// <summary>Enter는 전송, Shift+Enter는 줄바꿈입니다. IME 조합을 확정하는 Enter(ImeProcessed)는 건드리지 않습니다.</summary>
+    private void ChatInput_PreviewKeyDown(object sender, System.Windows.Input.KeyEventArgs e)
+    {
+        if (e.Key != Key.Return || sender is not System.Windows.Controls.TextBox box) return;
+        if (Keyboard.Modifiers.HasFlag(ModifierKeys.Shift))
+        {
+            var caret = box.CaretIndex;
+            box.Text = box.Text.Insert(caret, Environment.NewLine);
+            box.CaretIndex = caret + Environment.NewLine.Length;
+        }
+        else if (DataContext is ClientViewModel model && model.SendChatCommand.CanExecute(null))
+        {
+            model.SendChatCommand.Execute(null);
+        }
+        e.Handled = true;
+    }
+
     private void Minimize_Click(object sender, RoutedEventArgs e) => WindowState = WindowState.Minimized;
 
     private void Maximize_Click(object sender, RoutedEventArgs e) =>
@@ -129,12 +147,5 @@ public partial class MainWindow : Window
         WindowRoot.Margin = maximized ? SystemParameters.WindowResizeBorderThickness : new Thickness(0);
         MaximizeButton.Content = maximized ? "" : "";
         MaximizeButton.ToolTip = maximized ? "이전 크기로" : "최대화";
-    }
-
-    private async void ConnectRdp_Click(object sender, RoutedEventArgs e)
-    {
-        var password = RdpPassword.Password;
-        RdpPassword.Clear();
-        if (DataContext is ClientViewModel vm) await vm.ConnectRdpWithPasswordAsync(password);
     }
 }

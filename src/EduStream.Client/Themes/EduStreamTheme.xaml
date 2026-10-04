@@ -218,11 +218,17 @@
                     </TextBlock.Style>
                     <Run Text="{Binding Sender, Mode=OneWay}" />
                 </TextBlock>
-                <TextBlock Margin="0,4,0,0"
-                           Text="{Binding Message}"
-                           TextWrapping="Wrap"
-                           Foreground="#E8E8E8"
-                           FontSize="13" />
+                <!-- 읽기 전용 TextBox라서 메시지를 드래그로 선택해 복사할 수 있다. -->
+                <TextBox Margin="0,4,0,0"
+                         Text="{Binding Message, Mode=OneWay}"
+                         IsReadOnly="True"
+                         TextWrapping="Wrap"
+                         Background="Transparent"
+                         BorderThickness="0"
+                         Padding="0"
+                         Foreground="#E8E8E8"
+                         SelectionBrush="#557C4DFF"
+                         FontSize="13" />
             </StackPanel>
         </Border>
     </DataTemplate>

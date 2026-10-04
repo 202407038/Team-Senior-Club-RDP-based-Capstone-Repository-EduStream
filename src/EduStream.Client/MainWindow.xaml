@@ -24,6 +24,45 @@
     </WindowChrome.WindowChrome>
 
     <Window.Resources>
+        <Style x:Key="PermissionPill" TargetType="Button">
+            <Setter Property="Width" Value="64" />
+            <Setter Property="Height" Value="26" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Content" Value="OFF" />
+            <Setter Property="Background" Value="#444444" />
+            <Setter Property="Foreground" Value="{StaticResource BrushTextPrimary}" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Pill" CornerRadius="13" Background="{TemplateBinding Background}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter TargetName="Pill" Property="Opacity" Value="0.5" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style x:Key="ControlPermissionPill" TargetType="Button" BasedOn="{StaticResource PermissionPill}">
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding AllowControl}" Value="True">
+                    <Setter Property="Content" Value="ON" />
+                    <Setter Property="Background" Value="{StaticResource BrushAccentPurple}" />
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+        <Style x:Key="ViewingPermissionPill" TargetType="Button" BasedOn="{StaticResource PermissionPill}">
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding AllowViewing}" Value="True">
+                    <Setter Property="Content" Value="ON" />
+                    <Setter Property="Background" Value="{StaticResource BrushAccentPurple}" />
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
         <Style x:Key="CaptionButton" TargetType="Button">
             <Setter Property="Width" Value="46" />
             <Setter Property="Height" Value="36" />
@@ -330,35 +369,32 @@
                                         Content="제어 중단"
                                         Command="{Binding StopControlNowCommand}" />
                                 <Button DockPanel.Dock="Right"
-                                        Command="{Binding ToggleControlPermissionCommand}"
-                                        Width="64"
-                                        Height="26"
-                                        Cursor="Hand">
-                                    <Button.Template>
-                                        <ControlTemplate TargetType="Button">
-                                            <Border x:Name="Pill" CornerRadius="13" Background="#444444">
-                                                <TextBlock x:Name="Label" Text="OFF"
-                                                           Foreground="{StaticResource BrushTextPrimary}"
-                                                           FontWeight="SemiBold"
-                                                           HorizontalAlignment="Center"
-                                                           VerticalAlignment="Center" />
-                                            </Border>
-                                            <ControlTemplate.Triggers>
-                                                <DataTrigger Binding="{Binding AllowControl}" Value="True">
-                                                    <Setter TargetName="Pill" Property="Background" Value="{StaticResource BrushAccentPurple}" />
-                                                    <Setter TargetName="Label" Property="Text" Value="ON" />
-                                                </DataTrigger>
-                                                <Trigger Property="IsEnabled" Value="False">
-                                                    <Setter TargetName="Pill" Property="Opacity" Value="0.5" />
-                                                </Trigger>
-                                            </ControlTemplate.Triggers>
-                                        </ControlTemplate>
-                                    </Button.Template>
-                                </Button>
+                                        Style="{StaticResource ControlPermissionPill}"
+                                        Command="{Binding ToggleControlPermissionCommand}" />
                                 <TextBlock VerticalAlignment="Center"
                                            Foreground="{StaticResource BrushTextSecondary}"
                                            Text="교수자 제어 허용" />
                             </DockPanel>
+
+                            <DockPanel Margin="0,10,0,0">
+                                <Button DockPanel.Dock="Right"
+                                        Style="{StaticResource ViewingPermissionPill}"
+                                        Command="{Binding ToggleViewingPermissionCommand}" />
+                                <TextBlock VerticalAlignment="Center"
+                                           Foreground="{StaticResource BrushTextSecondary}"
+                                           Text="내 화면 보기 허용" />
+                            </DockPanel>
+
+                            <TextBlock Margin="0,12,0,0"
+                                       FontSize="12"
+                                       TextWrapping="Wrap"
+                                       Foreground="{StaticResource BrushTextMuted}"
+                                       Text="{Binding ControlStatusText}" />
+                            <TextBlock Margin="0,4,0,0"
+                                       FontSize="12"
+                                       TextWrapping="Wrap"
+                                       Foreground="{StaticResource BrushTextMuted}"
+                                       Text="{Binding RdpStatusText}" />
                         </StackPanel>
                     </Border>
 
@@ -412,11 +448,10 @@
                                         Content="전송"
                                         Command="{Binding SendChatCommand}" />
                                 <TextBox Style="{StaticResource DarkTextBox}"
-                                         Text="{Binding ChatInput, UpdateSourceTrigger=PropertyChanged}">
-                                    <TextBox.InputBindings>
-                                        <KeyBinding Key="Return" Command="{Binding SendChatCommand}" />
-                                    </TextBox.InputBindings>
-                                </TextBox>
+                                         TextWrapping="Wrap"
+                                         MaxHeight="90"
+                                         PreviewKeyDown="ChatInput_PreviewKeyDown"
+                                         Text="{Binding ChatInput, UpdateSourceTrigger=PropertyChanged}" />
                             </DockPanel>
                         </StackPanel>
                     </Border>
@@ -465,50 +500,6 @@
                                  Style="{StaticResource DarkListBox}"
                                  ItemsSource="{Binding ActivityLogs}"
                                  ItemTemplate="{StaticResource LogLineTemplate}" />
-                    </Expander>
-
-                    <!-- 설정 / 고급 -->
-                    <Expander Header="설정 · 고급"
-                              Margin="0,0,0,12"
-                              Foreground="{StaticResource BrushTextSecondary}">
-                        <StackPanel Margin="0,10,0,0">
-                            <TextBlock Style="{StaticResource SectionTitle}" Text="원격 제어" />
-                            <TextBlock Foreground="{StaticResource BrushTextSecondary}" TextWrapping="Wrap" Margin="0,8,0,0"
-                                       Text="{Binding ControlStatusText}" />
-                            <TextBlock Foreground="{StaticResource BrushTextSecondary}" TextWrapping="Wrap" Margin="0,4,0,0"
-                                       Text="{Binding PermissionSummary}" />
-                            <WrapPanel Margin="0,8,0,16">
-                                <Button Style="{StaticResource GhostButton}" Margin="0,0,8,8" Padding="12,0"
-                                        Content="{Binding ControlToggleLabel}" Command="{Binding ToggleControlPermissionCommand}" />
-                                <Button Style="{StaticResource GhostButton}" Margin="0,0,8,8" Padding="12,0"
-                                        Content="{Binding ViewingToggleLabel}" Command="{Binding ToggleViewingPermissionCommand}" />
-                            </WrapPanel>
-
-                            <TextBlock Style="{StaticResource SectionTitle}" Text="RDP" />
-                            <TextBlock Margin="0,8,0,0"
-                                       Foreground="{StaticResource BrushTextSecondary}"
-                                       TextWrapping="Wrap"
-                                       Text="{Binding RdpStatusText}" />
-                            <TextBlock Text="교수자에게 별도로 받은 초대 비밀번호" Margin="0,8,0,4" Foreground="{StaticResource BrushTextSecondary}" />
-                            <PasswordBox x:Name="RdpPassword" />
-                            <Button Style="{StaticResource GhostButton}" Margin="0,8,0,0"
-                                    Content="RDP 연결" Click="ConnectRdp_Click" />
-                            <Button Style="{StaticResource GhostButton}"
-                                    Margin="0,8,0,16"
-                                    Content="RDP 재접속"
-                                    Command="{Binding ReconnectRdpCommand}" />
-
-                            <TextBlock Style="{StaticResource SectionTitle}" Text="개발자 테스트" />
-                            <WrapPanel Margin="0,10,0,0">
-                                <Button Style="{StaticResource GhostButton}"
-                                        Margin="0,0,8,0"
-                                        Content="화면 수신 테스트"
-                                        Command="{Binding SimulateScreenRenderCommand}" />
-                                <Button Style="{StaticResource GhostButton}"
-                                        Content="파일 수신 테스트"
-                                        Command="{Binding SimulateFileReceiveCommand}" />
-                            </WrapPanel>
-                        </StackPanel>
                     </Expander>
                 </StackPanel>
             </ScrollViewer>

@@ -399,6 +399,9 @@ public sealed class ClientViewModel : ObservableObject
     /// <summary>교수자 원격 제어 허용 여부입니다. 강의 화면의 허용 표시(ON/OFF)에 씁니다.</summary>
     public bool AllowControl => _studentStatus.AllowControl;
 
+    /// <summary>교수자가 내 화면을 볼 수 있는지 여부입니다.</summary>
+    public bool AllowViewing => _studentStatus.AllowViewing;
+
     public string ControlToggleLabel => _studentStatus.AllowControl ? "원격 제어 허용 끄기" : "원격 제어 허용 켜기";
 
     public string ViewingToggleLabel => _studentStatus.AllowViewing ? "내 화면 보기 허용 끄기" : "내 화면 보기 허용 켜기";
@@ -862,6 +865,16 @@ public sealed class ClientViewModel : ObservableObject
             {
                 ResetStatusPriority();
                 UpdateStatus("교수자 화면에 연결되었습니다.", StatusPriority.Success);
+            }
+            else if (IsConnected && status.State == RdpConnectionState.Closed)
+            {
+                ResetStatusPriority();
+                UpdateStatus("교수자 화면 공유가 끝났습니다. 다시 시작되면 자동으로 연결됩니다.", StatusPriority.Info);
+            }
+            else if (IsConnected && status.State == RdpConnectionState.Failed)
+            {
+                ResetStatusPriority();
+                UpdateStatus($"교수자 화면에 연결하지 못했습니다. ({status.Failure})", StatusPriority.Error, isError: true);
             }
             _logSink.Write($"[RDP] 상태 변경: {status.State}");
             SyncLogs();
@@ -1485,6 +1498,7 @@ public sealed class ClientViewModel : ObservableObject
         OnPropertyChanged(nameof(ControlStatusText));
         OnPropertyChanged(nameof(IsUnderControl));
         OnPropertyChanged(nameof(AllowControl));
+        OnPropertyChanged(nameof(AllowViewing));
         OnPropertyChanged(nameof(ControlToggleLabel));
         OnPropertyChanged(nameof(ViewingToggleLabel));
         ToggleControlPermissionCommand.RaiseCanExecuteChanged();
