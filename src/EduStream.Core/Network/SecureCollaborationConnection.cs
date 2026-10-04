@@ -57,7 +57,20 @@ public sealed class SecureCollaborationConnection : ICollaborationChannel, IAsyn
         try
         {
             ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
-            await CollaborationFraming.WriteAsync(_stream, frame, linked.Token);
+            linked.Token.ThrowIfCancellationRequested();
+            // 파일 요청 취소는 송신 대기/프레임 시작 전까지만 적용한다.
+            // 기록을 시작한 프레임은 끝까지 보내야 다음 파일·제어 메시지의 경계가 유지된다.
+            // 연결 자체의 종료는 여전히 진행 중인 쓰기를 취소할 수 있다.
+            try
+            {
+                await CollaborationFraming.WriteAsync(_stream, frame, _lifetime.Token);
+            }
+            catch (Exception ex) when (ex is IOException or OperationCanceledException)
+            {
+                // 일부 바이트만 전송됐을 수 있으므로 손상된 채널에 다음 프레임을 붙이지 않는다.
+                await DisposeAsync();
+                throw;
+            }
         }
         finally
         {
