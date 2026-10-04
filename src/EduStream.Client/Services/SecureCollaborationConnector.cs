@@ -10,35 +10,46 @@ using EduStream.Core.Network;
 namespace EduStream.Client.Services;
 
 /// <summary>
-/// 2번 구현: 학생 앱의 보호 채널 연결. 교수자 인증서는 체인이 아니라 학생이 입력한 접속 코드와의 일치로만 신뢰합니다.
-/// 코드가 틀리거나 비어 있으면 연결하지 않으며, 평문 연결로 대체하지 않습니다.
+/// 신뢰하는 교실 LAN에서 입력한 IP로 TLS 연결합니다. 별도 접속 코드나 신뢰 확인창은 사용하지 않습니다.
+/// TLS 암호화는 유지하지만 인증서 지문 대조는 하지 않으므로 능동적 중간자 공격에 대한 서버 신원 보장은 없습니다.
+/// 방 비밀번호·참가 티켓·참가자 권한 검증은 상위 계층에서 유지하며 평문으로 대체하지 않습니다.
 /// </summary>
 public static class SecureCollaborationConnector
 {
-    // SNI용 고정 이름. 신뢰 판단에는 쓰지 않는다.
+    // SNI용 고정 이름. LAN 주소의 서버 신원을 증명하는 이름이 아닙니다.
     private const string TargetHost = "edustream-professor";
 
     /// <exception cref="CollaborationException">
-    /// InvalidRequest: 접속 코드 형식 오류, NotAuthorized: 코드 불일치(다른 PC이거나 중간 가로채기),
+    /// InvalidRequest: 주소/포트 형식 오류, NotAuthorized: 사용할 수 없는 TLS 인증서,
     /// UnsupportedCapability: 교수자 앱 버전 불일치.
     /// </exception>
-    public static async Task<SecureCollaborationConnection> ConnectAsync(string host, int port, string connectionCode,
+    public static async Task<SecureCollaborationConnection> ConnectAsync(string host, int port,
         ILogSink logSink, TimeSpan? timeout = null, CancellationToken cancellationToken = default)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(host);
         ArgumentNullException.ThrowIfNull(logSink);
-        if (!ConnectionCode.TryNormalize(connectionCode, out var expectedCode))
+        if (!System.Net.IPAddress.TryParse(host, out var address) ||
+            address.Equals(System.Net.IPAddress.Any) || address.Equals(System.Net.IPAddress.IPv6Any) ||
+            address.Equals(System.Net.IPAddress.Broadcast) || port is < 1 or > 65535)
             throw new CollaborationException(CollaborationError.InvalidRequest);
+
+        // 2026-10-04 이전 수동 코드 방식(사용자 요청으로 주석 보존, 실행하지 않음):
+        // if (!ConnectionCode.TryNormalize(connectionCode, out var expectedCode))
+        //     throw new CollaborationException(CollaborationError.InvalidRequest);
+        // 이전 RemoteCertificateValidationCallback의 지문 대조:
+        // var matches = certificate is not null &&
+        //     ConnectionCode.Matches(expectedCode, certificate as X509Certificate2 ?? new X509Certificate2(certificate));
+        // codeMismatch = !matches;
+        // return matches;
 
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         deadline.CancelAfter(timeout ?? CollaborationHandshake.DefaultTimeout);
 
         var client = new TcpClient();
         SslStream? ssl = null;
-        var codeMismatch = false;
+        var invalidCertificate = false;
         try
         {
-            await client.ConnectAsync(host, port, deadline.Token);
+            await client.ConnectAsync(address, port, deadline.Token);
             ssl = new SslStream(client.GetStream(), leaveInnerStreamOpen: false);
             await ssl.AuthenticateAsClientAsync(new SslClientAuthenticationOptions
             {
@@ -47,11 +58,10 @@ public static class SecureCollaborationConnector
                 CertificateRevocationCheckMode = X509RevocationMode.NoCheck,
                 RemoteCertificateValidationCallback = (_, certificate, _, _) =>
                 {
-                    // 자체 서명이라 체인·이름 오류는 항상 난다. 대신 접속 코드(지문)가 맞아야만 통과시킨다.
-                    var matches = certificate is not null &&
-                        ConnectionCode.Matches(expectedCode, certificate as X509Certificate2 ?? new X509Certificate2(certificate));
-                    codeMismatch = !matches;
-                    return matches;
+                    // 자체 서명 LAN 인증서의 유효기간·서버 용도는 검사하되, 알려진 교수자 신원이라고 주장하지 않습니다.
+                    var usable = LanServerCertificatePolicy.IsUsable(certificate);
+                    invalidCertificate = !usable;
+                    return usable;
                 }
             }, deadline.Token);
 
@@ -59,16 +69,16 @@ public static class SecureCollaborationConnector
             await CollaborationHandshake.ReceiveAsync(ssl, ParticipantRole.Professor, deadline.Token);
 
             var connection = new SecureCollaborationConnection(ssl, client, logSink);
-            logSink.Write($"[Secure] 교수자 보호 채널 연결: {host}:{port}");
+            logSink.Write($"[Secure] LAN TLS 연결: {host}:{port} (접속 코드 신원 대조 없음)");
             return connection;
         }
         catch (Exception ex)
         {
             try { ssl?.Dispose(); } catch { }
             client.Dispose();
-            if (ex is AuthenticationException && codeMismatch)
+            if (ex is AuthenticationException && invalidCertificate)
             {
-                logSink.Write("[Secure] 접속 코드 불일치로 연결 중단");
+                logSink.Write("[Secure] 유효하지 않은 TLS 서버 인증서로 연결 중단");
                 throw new CollaborationException(CollaborationError.NotAuthorized);
             }
             if (ex is IOException && ssl is not null && ssl.IsAuthenticated)

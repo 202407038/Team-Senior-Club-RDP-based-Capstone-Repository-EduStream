@@ -214,7 +214,6 @@ public sealed class ClientReconnectViewModelTests
         {
             HostAddress = "127.0.0.1",
             Port = Port,
-            ConnectionCode = _listener.ConnectionCode,
             DisplayName = "Alice"
         };
 

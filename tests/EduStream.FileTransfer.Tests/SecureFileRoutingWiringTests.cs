@@ -98,7 +98,7 @@ public sealed partial class SecureFileRoutingWiringTests
     {
         await using var rig = await Rig.OpenAsync();
         var file = await rig.SessionManager.RegisterFileAsync(await rig.WriteSourceAsync(64));
-        var secure = await SecureRoomJoinClient.AuthenticateAsync("127.0.0.1", rig.Port, rig.SessionManager.ConnectionCode!,
+        var secure = await SecureRoomJoinClient.AuthenticateAsync("127.0.0.1", rig.Port,
             "Alice", ReadOnlyMemory<char>.Empty, new InMemoryLogSink(), Wait);
         var received = 0;
         secure.FrameReceived += _ => { Interlocked.Increment(ref received); return Task.CompletedTask; };
@@ -174,7 +174,7 @@ public sealed partial class SecureFileRoutingWiringTests
         public async Task<Student> JoinAsync(string displayName,
             Func<ISessionFileDownloader, ISessionFileDownloader>? decorateDownloader = null)
         {
-            var secure = await SecureRoomJoinClient.AuthenticateAsync("127.0.0.1", Port, SessionManager.ConnectionCode!,
+            var secure = await SecureRoomJoinClient.AuthenticateAsync("127.0.0.1", Port,
                 displayName, ReadOnlyMemory<char>.Empty, new InMemoryLogSink(), Wait);
             var downloads = Path.Combine(Root, "downloads-" + displayName);
             ISessionFileDownloader downloader = new SessionFileDownloader(new ReadinessDirectory(downloads));

@@ -274,7 +274,7 @@ public sealed class StudentPermissionSyncTests
 
         public async Task<Student> JoinAsync(string displayName)
         {
-            var secure = await SecureRoomJoinClient.AuthenticateAsync("127.0.0.1", Port, SessionManager.ConnectionCode!,
+            var secure = await SecureRoomJoinClient.AuthenticateAsync("127.0.0.1", Port,
                 displayName, ReadOnlyMemory<char>.Empty, new InMemoryLogSink(), Wait);
             var status = new StudentStatusClient(secure.SessionId, secure.Connection, new InMemoryLogSink());
             var tcp = new TcpClientService(new InMemoryLogSink(), _serializer);
