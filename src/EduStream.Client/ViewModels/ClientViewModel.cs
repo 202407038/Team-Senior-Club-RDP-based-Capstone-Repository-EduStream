@@ -53,7 +53,8 @@ public sealed class ClientViewModel : ObservableObject
     private TaskCompletionSource<JoinAckResult>? _pendingJoinAck;
     private StudentStatus _studentStatus = StudentStatus.Initial;
     private bool _permissionNoticeShown;
-    // 이전 방식(주석 보존): private string _connectionCode = string.Empty;
+    // 후속 입력 UI PR까지 기존 XAML 바인딩을 보존한다. LAN 인증에는 사용하지 않는다.
+    private string _connectionCode = string.Empty;
     private RdpInvitationPacket? _activeRdpInvitation;
     // 초대(TCP)와 비밀번호(보호 채널)는 도착 순서가 정해져 있지 않아, 둘이 같은 초대로 짝지어질 때까지 보관한다.
     private readonly object _rdpAutoConnectLock = new();
@@ -175,7 +176,8 @@ public sealed class ClientViewModel : ObservableObject
         set => SetProperty(ref _port, value);
     }
 
-    // 이전 UI 바인딩(주석 보존): public string ConnectionCode { get => _connectionCode; set => SetProperty(ref _connectionCode, value); }
+    // 구 UI 호환용이며 인증/재참가 경로는 이 값을 읽지 않는다. 후속 UI PR에서 제거한다.
+    public string ConnectionCode { get => _connectionCode; set => SetProperty(ref _connectionCode, value); }
 
     /// <summary>참가 요청 뒤 서버의 참가 승인을 기다리는 최대 시간입니다. 넘기면 참가 실패로 정리합니다.</summary>
     public TimeSpan JoinAckTimeout { get; set; } = TimeSpan.FromSeconds(10);
