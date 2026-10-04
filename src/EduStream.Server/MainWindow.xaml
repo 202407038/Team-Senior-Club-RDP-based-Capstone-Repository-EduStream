@@ -39,41 +39,33 @@
                         <StackPanel>
                             <TextBlock Style="{StaticResource SectionTitle}" Text="세션 관리" />
 
-                            <!-- 이전 SessionName 입력과 ConnectionCode 표시 대신 실제 LAN 주소를 안내합니다. -->
-                            <TextBlock Style="{StaticResource FieldLabel}" Margin="0,14,0,6" Text="교수자 IP" />
-                            <DockPanel>
-                                <Button DockPanel.Dock="Right" Style="{StaticResource GhostButton}"
-                                        Margin="8,0,0,0" Content="IP 복사" Click="CopyHostIp_Click" />
-                                <ComboBox ItemsSource="{Binding HostAddresses}" SelectedItem="{Binding SelectedHostAddress}">
-                                    <ComboBox.ItemTemplate>
-                                        <DataTemplate>
-                                            <TextBlock>
-                                                <Run Text="{Binding Address, Mode=OneWay}" />
-                                                <Run Text=" · " /><Run Text="{Binding Kind, Mode=OneWay}" />
-                                                <Run Text=" · " /><Run Text="{Binding InterfaceName, Mode=OneWay}" />
-                                            </TextBlock>
-                                        </DataTemplate>
-                                    </ComboBox.ItemTemplate>
-                                </ComboBox>
-                            </DockPanel>
-                            <TextBlock Foreground="{StaticResource BrushTextMuted}" TextWrapping="Wrap" Margin="0,4,0,8"
-                                       Text="학생과 같은 LAN/무선 주소를 선택하세요. VPN은 같은 VPN에서만, Loopback은 이 PC에서만 연결됩니다." />
-                            <StackPanel>
-                                <TextBlock Style="{StaticResource FieldLabel}" Text="방 비밀번호 (선택)" />
-                                <PasswordBox x:Name="RoomPasswordBox" Padding="8"
-                                             IsEnabled="{Binding IsSessionOpen, Converter={StaticResource InverseBool}}" />
-                                <TextBlock Foreground="{StaticResource BrushTextMuted}" TextWrapping="Wrap" Margin="0,4,0,0"
-                                           Text="빈칸이면 비밀번호 없는 방입니다. 변경하려면 세션을 닫고 입력한 뒤 다시 여세요." />
-                            </StackPanel>
-                            <Expander Header="고급 연결 설정 (기본 포트 5000)" IsExpanded="False"
-                                      Foreground="{StaticResource BrushTextSecondary}" Margin="0,10,0,0">
-                                <StackPanel Margin="0,8,0,0">
-                                    <TextBlock Style="{StaticResource FieldLabel}" Text="포트 (충돌 시에만 변경)" />
-                                    <TextBox Style="{StaticResource DarkTextBox}" Width="120" HorizontalAlignment="Left"
+                            <UniformGrid Margin="0,14,0,0" Columns="2">
+                                <StackPanel Margin="0,0,8,0">
+                                    <TextBlock Style="{StaticResource FieldLabel}" Text="세션 이름" />
+                                    <TextBox Style="{StaticResource DarkTextBox}"
+                                             IsEnabled="{Binding IsSessionOpen, Converter={StaticResource InverseBool}}"
+                                             Text="{Binding SessionName, UpdateSourceTrigger=PropertyChanged}" />
+                                </StackPanel>
+                                <StackPanel Margin="8,0,0,0">
+                                    <TextBlock Style="{StaticResource FieldLabel}" Text="포트" />
+                                    <TextBox Style="{StaticResource DarkTextBox}"
                                              IsEnabled="{Binding IsSessionOpen, Converter={StaticResource InverseBool}}"
                                              Text="{Binding Port, UpdateSourceTrigger=PropertyChanged}" />
                                 </StackPanel>
-                            </Expander>
+                            </UniformGrid>
+
+                            <UniformGrid Margin="0,10,0,0" Columns="2">
+                                <StackPanel Margin="0,0,8,0">
+                                    <TextBlock Style="{StaticResource FieldLabel}" Text="방 비밀번호 (선택)" />
+                                    <PasswordBox x:Name="RoomPasswordBox" Padding="8"
+                                                 IsEnabled="{Binding IsSessionOpen, Converter={StaticResource InverseBool}}" />
+                                </StackPanel>
+                                <StackPanel Margin="8,0,0,0">
+                                    <TextBlock Style="{StaticResource FieldLabel}" Text="접속 코드" />
+                                    <TextBox Style="{StaticResource DarkTextBox}" IsReadOnly="True"
+                                             Text="{Binding ConnectionCode, Mode=OneWay}" />
+                                </StackPanel>
+                            </UniformGrid>
 
                             <WrapPanel Margin="0,14,0,0">
                                 <Button Style="{StaticResource PrimaryButton}"

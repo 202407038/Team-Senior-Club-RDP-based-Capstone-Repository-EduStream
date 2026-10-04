@@ -27,20 +27,6 @@ public partial class MainWindow : Window
     private bool _closed;
     private bool _closing;
 
-    private void CopyHostIp_Click(object sender, RoutedEventArgs e)
-    {
-        if (_viewModel.SelectedHostAddress is not { } address)
-        {
-            MessageBox.Show("사용할 네트워크 주소가 없습니다. LAN 연결을 확인해 주세요.", "EduStream");
-            return;
-        }
-        try { Clipboard.SetText(address.Address); }
-        catch (System.Runtime.InteropServices.ExternalException)
-        {
-            MessageBox.Show("클립보드를 사용할 수 없습니다. 잠시 후 다시 시도해 주세요.", "EduStream");
-        }
-    }
-
     private async void OnClosing(object? sender, System.ComponentModel.CancelEventArgs e)
     {
         if (_closed) return;
