@@ -1,8 +1,10 @@
-using System.Windows;
-using MessageBox = System.Windows.MessageBox;
-using Clipboard = System.Windows.Clipboard;
 using EduStream.Server.ViewModels;
-
+using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Media;
+using System.Windows.Threading;
+using Clipboard = System.Windows.Clipboard;
+using MessageBox = System.Windows.MessageBox;
 namespace EduStream.Server;
 
 public partial class MainWindow : Window
@@ -21,7 +23,20 @@ public partial class MainWindow : Window
             return password;
         };
         DataContext = _viewModel;
+       
         Closing += OnClosing;
+        Loaded += (_, _) =>
+        {
+            ((System.Collections.Specialized.INotifyCollectionChanged)_viewModel.ChatMessages).CollectionChanged += (s, e) =>
+            {
+                if (e.Action != System.Collections.Specialized.NotifyCollectionChangedAction.Add) return;
+                Dispatcher.BeginInvoke(new Action(() =>
+                {
+                    if (ChatListBox.Items.Count > 0)
+                        ChatListBox.ScrollIntoView(ChatListBox.Items[^1]);
+                }), DispatcherPriority.Background);
+            };
+        };
     }
 
     private bool _closed;
@@ -41,20 +56,56 @@ public partial class MainWindow : Window
         }
         finally { _closed = true; Close(); }
     }
-
-    private void CopyInvitationPassword_Click(object sender, RoutedEventArgs e)
+    private void CopyConnectionCode_Click(object sender, RoutedEventArgs e)
     {
-        var password = InvitationParticipant.SelectedItem is string participant
-            ? _viewModel.GetInvitationPassword(participant) : null;
-        if (password is null)
+        if (!string.IsNullOrWhiteSpace(ConnectionCodeBox.Text))
         {
-            MessageBox.Show("학생을 선택해 주세요. 초대가 만료됐다면 학생 앱에서 RDP 재접속을 눌러 주세요.", "EduStream");
-            return;
+            System.Windows.Clipboard.SetText(ConnectionCodeBox.Text);
         }
-        try { Clipboard.SetText(password); }
-        catch (System.Runtime.InteropServices.ExternalException)
+    }
+
+
+private void ExpandAllStudents_Click(object sender, RoutedEventArgs e) => SetAllStudentsExpanded(true);
+private void CollapseAllStudents_Click(object sender, RoutedEventArgs e) => SetAllStudentsExpanded(false);
+
+private void SetAllStudentsExpanded(bool expanded)
+{
+    for (int i = 0; i < StudentListItems.Items.Count; i++)
+    {
+        if (StudentListItems.ItemContainerGenerator.ContainerFromIndex(i) is not FrameworkElement container)
+            continue;
+
+        var expander = FindVisualChild<Expander>(container, "StudentExpander");
+        if (expander is not null)
         {
-            MessageBox.Show("클립보드를 사용할 수 없습니다. 잠시 후 다시 시도해 주세요.", "EduStream");
+            expander.IsExpanded = expanded;
         }
+    }
+}
+
+    private static ScrollViewer? GetScrollViewer(DependencyObject depObj)
+    {
+        if (depObj is ScrollViewer sv) return sv;
+        for (int i = 0; i < VisualTreeHelper.GetChildrenCount(depObj); i++)
+        {
+            var result = GetScrollViewer(VisualTreeHelper.GetChild(depObj, i));
+            if (result != null) return result;
+        }
+        return null;
+    }
+    private static T? FindVisualChild<T>(DependencyObject parent, string name) where T : FrameworkElement
+{
+    for (int i = 0; i < VisualTreeHelper.GetChildrenCount(parent); i++)
+    {
+        var child = VisualTreeHelper.GetChild(parent, i);
+        if (child is T typed && typed.Name == name) return typed;
+        var found = FindVisualChild<T>(child, name);
+        if (found is not null) return found;
+    }
+    return null;
+}
+private void DrawingToggle_Click(object sender, RoutedEventArgs e)
+    {
+        // TODO: 실제 판서 기능은 엔진 담당자 연결 후 구현. 지금은 ON/OFF 겉모습만 바뀝니다.
     }
 }

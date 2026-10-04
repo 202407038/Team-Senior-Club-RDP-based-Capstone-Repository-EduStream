@@ -243,6 +243,8 @@ public sealed class ServerViewModel : ObservableObject
 
     public ObservableCollection<ChatLine> ChatMessages { get; } = [];
 
+    public ObservableCollection<string> Participants { get; } = [];
+
     public RelayCommand OpenSessionCommand { get; }
 
     public RelayCommand CloseSessionCommand { get; }
@@ -481,7 +483,7 @@ public sealed class ServerViewModel : ObservableObject
         packet.DataLength = ChatInput.Length;
         await _sessionManager.BroadcastPacketAsync(packet);
 
-        ChatMessages.Insert(0, ChatLine.User("교수자", ChatInput, isSelf: true));
+        ChatMessages.Add(ChatLine.User("교수자", ChatInput, isSelf: true));
         ChatInput = string.Empty;
         SyncLogs();
     }
@@ -628,6 +630,12 @@ public sealed class ServerViewModel : ObservableObject
                 SessionStatus = $"세션 Open · 참가자 {ParticipantCount}명";
             }
 
+            Participants.Clear();
+            foreach (var name in _sessionManager.ParticipantNames)
+            {
+                Participants.Add(name);
+            }
+
             SyncLogs();
         });
     }
@@ -641,7 +649,7 @@ public sealed class ServerViewModel : ObservableObject
             var line = string.Equals(sender, "System", StringComparison.Ordinal)
                 ? ChatLine.System(message)
                 : ChatLine.User(sender, message, isSelf: false);
-            ChatMessages.Insert(0, line);
+            ChatMessages.Add(line);
             SyncLogs();
         });
     }

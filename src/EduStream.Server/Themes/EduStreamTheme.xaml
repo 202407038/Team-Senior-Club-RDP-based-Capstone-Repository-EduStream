@@ -138,8 +138,7 @@
         <Border Margin="0,2"
                 Padding="10,8"
                 CornerRadius="10"
-                MaxWidth="320"
-                HorizontalAlignment="Left">
+                MaxWidth="320">
             <Border.Style>
                 <Style TargetType="Border">
                     <Setter Property="Background" Value="#2A2A2A" />
@@ -158,14 +157,16 @@
             </Border.Style>
             <StackPanel>
                 <TextBlock FontSize="11"
-                           FontWeight="SemiBold"
-                           Foreground="{StaticResource BrushAccentTeal}">
+                           FontWeight="SemiBold">
                     <TextBlock.Style>
                         <Style TargetType="TextBlock">
                             <Setter Property="Foreground" Value="{StaticResource BrushAccentTeal}" />
                             <Style.Triggers>
                                 <DataTrigger Binding="{Binding IsSystem}" Value="True">
                                     <Setter Property="Foreground" Value="{StaticResource BrushTextMuted}" />
+                                </DataTrigger>
+                                <DataTrigger Binding="{Binding IsSelf}" Value="True">
+                                    <Setter Property="Foreground" Value="{StaticResource BrushAccentPurple}" />
                                 </DataTrigger>
                             </Style.Triggers>
                         </Style>
