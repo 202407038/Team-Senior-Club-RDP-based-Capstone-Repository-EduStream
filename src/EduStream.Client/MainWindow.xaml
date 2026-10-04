@@ -173,11 +173,11 @@
         <Grid Margin="16" Visibility="{Binding IsLectureViewActive, Converter={StaticResource BoolToVis}, ConverterParameter=Invert}">
             <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
                 <Border Style="{StaticResource PanelCard}"
-                        Width="440"
+                        MaxWidth="440"
                         Padding="28"
                         Margin="0,16"
                         VerticalAlignment="Center"
-                        HorizontalAlignment="Center">
+                        HorizontalAlignment="Stretch">
                     <StackPanel>
                         <TextBlock Text="EDUSTREAM"
                                    Foreground="{StaticResource BrushAccentPurple}"

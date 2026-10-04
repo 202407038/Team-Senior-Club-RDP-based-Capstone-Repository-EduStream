@@ -29,7 +29,12 @@ public partial class MainWindow : Window
                 if (args.PropertyName == nameof(ClientViewModel.IsLectureViewActive))
                     ApplyLayoutMode(vm.IsLectureViewActive);
             };
-            ApplyLayoutMode(vm.IsLectureViewActive);
+            // 모니터 정보를 읽을 창 핸들이 생긴 뒤 배치한다. 초기에는 참가 폼 크기만 준비한다.
+            Width = JoinWidth;
+            MinWidth = 420;
+            MinHeight = 0;
+            SizeToContent = SizeToContent.Height;
+            Loaded += (_, _) => ApplyLayoutMode(vm.IsLectureViewActive);
         }
         // 새 메시지가 추가되면 채팅 목록을 맨 아래로 내린다.
         Loaded += (_, _) =>
@@ -60,27 +65,27 @@ public partial class MainWindow : Window
     private double _lectureHeight = 820;
     private bool _lectureMaximized;
     private bool? _lectureMode;
+    private int _layoutGeneration;
 
     private void ApplyLayoutMode(bool lecture)
     {
+        if (!IsLoaded) return;
         if (_lectureMode == lecture) return;
         var previous = _lectureMode;
         _lectureMode = lecture;
+        var generation = ++_layoutGeneration;
+        var placement = WindowPlacement.Capture(this);
+        var availableWidth = placement.WorkArea.Width / placement.ScaleX;
+        var availableHeight = placement.WorkArea.Height / placement.ScaleY;
 
         if (lecture)
         {
             SizeToContent = SizeToContent.Manual;
             MaxHeight = double.PositiveInfinity;
-            MinWidth = 960;
-            MinHeight = 640;
-            var area = SystemParameters.WorkArea;
-            Width = Math.Min(_lectureWidth, area.Width);
-            Height = Math.Min(_lectureHeight, area.Height);
-            // 커지는 방향이 한쪽으로 치우치지 않도록 크기를 바꾸자마자 가운데로 옮긴다.
-            Left = area.Left + (area.Width - Width) / 2;
-            Top = area.Top + (area.Height - Height) / 2;
-            if (_lectureMaximized) WindowState = WindowState.Maximized;
-            return;
+            MinWidth = Math.Min(960, availableWidth);
+            MinHeight = Math.Min(640, availableHeight);
+            Width = Math.Min(_lectureWidth, availableWidth);
+            Height = Math.Min(_lectureHeight, availableHeight);
         }
         else
         {
@@ -95,21 +100,21 @@ public partial class MainWindow : Window
                 }
             }
             WindowState = WindowState.Normal;
-            MinWidth = 420;
+            MinWidth = Math.Min(420, availableWidth);
             MinHeight = 0;
-            MaxHeight = SystemParameters.WorkArea.Height;
-            Width = JoinWidth;
+            MaxHeight = availableHeight;
+            Width = Math.Min(JoinWidth, availableWidth);
             SizeToContent = SizeToContent.Height;
         }
 
-        // 크기가 바뀐 뒤 화면 가운데로 다시 맞춘다.
+        // 주 모니터로 재중앙 정렬하지 않는다. 이전 위치를 유지하고 화면 밖으로 나간 만큼만 보정한다.
         Dispatcher.BeginInvoke(new Action(() =>
         {
+            if (generation != _layoutGeneration || _shutdownComplete) return;
             if (WindowState != WindowState.Normal) return;
-            var area = SystemParameters.WorkArea;
             UpdateLayout();
-            Left = area.Left + (area.Width - ActualWidth) / 2;
-            Top = Math.Max(area.Top, area.Top + (area.Height - ActualHeight) / 2);
+            WindowPlacement.RestorePosition(this, placement);
+            if (lecture && _lectureMaximized) WindowState = WindowState.Maximized;
         }), DispatcherPriority.ApplicationIdle);
     }
 
