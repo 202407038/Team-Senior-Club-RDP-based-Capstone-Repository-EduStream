@@ -23,7 +23,10 @@ public enum SecureJoinFailure
     /// <summary>교수자 PC에 연결하지 못했거나 응답이 없습니다.</summary>
     Unreachable,
     /// <summary>재연결 토큰이 만료·사용됐거나 이미 다른 이름으로 쓰였습니다. 새로 참가해야 합니다.</summary>
-    ReconnectRejected
+    ReconnectRejected,
+    // 구 UI의 빌드 호환 이름입니다. 새 UI는 InvalidAddress/InvalidCertificate로 메시지를 매핑합니다.
+    InvalidCode = InvalidAddress,
+    CodeMismatch = InvalidCertificate
 }
 
 public sealed class SecureJoinException(SecureJoinFailure failure) : Exception(failure.ToString())
@@ -64,14 +67,25 @@ public sealed class SecureSessionChannel : IAsyncDisposable
 /// </summary>
 public static class SecureRoomJoinClient
 {
+    /// <summary>기본 포트 5000의 코드 없는 참가 API. 화면 조립은 UI 담당자가 수행합니다.</summary>
+    public static Task<SecureSessionChannel> AuthenticateAsync(string host, string displayName,
+        ReadOnlyMemory<char> password, ILogSink logSink, TimeSpan? timeout = null,
+        CancellationToken cancellationToken = default, string? reconnectToken = null)
+        => AuthenticateAsync(host, LanSessionEndpoint.DefaultPort, displayName, password, logSink,
+            timeout, cancellationToken, reconnectToken);
+
+    /// <summary>기존 UI의 빌드 호환용입니다. connectionCode는 무시하며 새 UI에서는 코드 없는 API를 사용합니다.</summary>
+    public static Task<SecureSessionChannel> AuthenticateAsync(string host, int sessionPort, string connectionCode,
+        string displayName, ReadOnlyMemory<char> password, ILogSink logSink, TimeSpan? timeout = null,
+        CancellationToken cancellationToken = default, string? reconnectToken = null)
+        => AuthenticateAsync(host, sessionPort, displayName, password, logSink, timeout, cancellationToken, reconnectToken);
+
     /// <param name="reconnectToken">비정상 끊김 뒤 자동 재연결할 때만 넣습니다. 넣으면 비밀번호는 보내지 않습니다.</param>
     public static async Task<SecureSessionChannel> AuthenticateAsync(string host, int sessionPort,
         string displayName, ReadOnlyMemory<char> password, ILogSink logSink, TimeSpan? timeout = null,
         CancellationToken cancellationToken = default, string? reconnectToken = null)
     {
         ArgumentNullException.ThrowIfNull(logSink);
-        if (sessionPort is < 1 or > 65534)
-            throw new SecureJoinException(SecureJoinFailure.InvalidAddress);
         // 이전 수동 코드 방식(주석 보존):
         // if (!ConnectionCode.TryNormalize(connectionCode, out _))
         //     throw new SecureJoinException(SecureJoinFailure.InvalidCode);
@@ -79,7 +93,8 @@ public static class SecureRoomJoinClient
         SecureCollaborationConnection connection;
         try
         {
-            connection = await SecureCollaborationConnector.ConnectAsync(host, CollaborationPorts.ForSession(sessionPort),
+            var endpoint = LanSessionEndpoint.Create(host, sessionPort);
+            connection = await SecureCollaborationConnector.ConnectAsync(endpoint.Address.ToString(), CollaborationPorts.ForSession(endpoint.Port),
                 logSink, timeout, cancellationToken);
         }
         catch (CollaborationException ex)

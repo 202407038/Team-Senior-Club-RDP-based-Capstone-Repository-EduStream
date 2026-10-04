@@ -16,6 +16,11 @@ namespace EduStream.Client.Services;
 /// </summary>
 public static class SecureCollaborationConnector
 {
+    /// <summary>기존 UI의 빌드 호환용입니다. connectionCode는 더 이상 인증에 사용하지 않습니다.</summary>
+    public static Task<SecureCollaborationConnection> ConnectAsync(string host, int port, string connectionCode,
+        ILogSink logSink, TimeSpan? timeout = null, CancellationToken cancellationToken = default)
+        => ConnectAsync(host, port, logSink, timeout, cancellationToken);
+
     // SNI용 고정 이름. LAN 주소의 서버 신원을 증명하는 이름이 아닙니다.
     private const string TargetHost = "edustream-professor";
 

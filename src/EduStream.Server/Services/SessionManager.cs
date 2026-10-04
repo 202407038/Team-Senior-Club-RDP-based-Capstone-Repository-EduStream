@@ -356,7 +356,7 @@ public sealed class SessionManager
     public bool IsRoomPasswordProtected => _roomPassword is not null;
 
     /// <summary>
-    /// 구버전 진단용 인증서 지문입니다. 현재 LAN 참가 UI에서는 표시/입력을 요구하지 않습니다.
+    /// 구버전 진단용 인증서 지문입니다. 새 LAN API에서는 요구하지 않습니다. 기존 UI의 표시/입력 제거는 5번 후속 작업입니다.
     /// </summary>
     public string? ConnectionCode => _secureListener?.ConnectionCode;
 

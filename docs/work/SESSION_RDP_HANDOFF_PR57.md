@@ -3,6 +3,33 @@
 갱신: 2026-09-29. 코드 기준 main `ea87cbf` (#52~#59 및 #61~#63 병합). 기존 링크 호환을 위해 파일명은 유지합니다.
 문서의 PR 번호는 기능 식별용이며 머지 순서가 아닙니다. 이 문서는 역할 변경이나 완료 기준 완화가 아니라 **이미 제공된 기능과 남은 구현을 구분하는 최신 인계**입니다.
 
+## 2026-10-04 UI 수정 요청용 참가 API 인계
+
+코드 기준 main `b0ffe05` (#73·#74). 아래 9/29 기록보다 이 절의 LAN 참가 정책이 우선합니다. #68~#71은 #72로 철회됐으며 재적용 대상이 아닙니다.
+
+### 제공된 기반과 호출
+
+- 1번: `LanSessionEndpoint.Create(host, sessionPort = 5000)`. IP와 세션 포트를 검사하고 보호 채널은 기존 `CollaborationPorts.ForSession(port)` 규칙(+1)을 유지합니다.
+- 2번: `SecureRoomJoinClient.AuthenticateAsync(host, displayName, password, logSink, ...)`는 코드 없이 기본 5000으로 인증합니다. 고급 설정용 `AuthenticateAsync(host, sessionPort, displayName, password, logSink, ...)`도 제공합니다.
+- 인증 후 반환하는 SecureSessionChannel의 참가 티켓을 기존 TCP 참가에 사용합니다. 기존 승인 ACK·채널 수명·재연결 토큰·권한 검사·초대 자동 전달 흐름을 유지합니다. 인증 성공만으로 참가 승인 또는 실제 WDS 표시 완료로 처리하지 않습니다.
+- 실패는 `InvalidAddress`, `InvalidCertificate`, `PasswordRejected`, `LockedOut`, `VersionMismatch`, `Unreachable`, `ReconnectRejected`로 구분합니다. 자동 재연결은 같은 API에 기존 reconnectToken을 넘기며 방 비밀번호 재입력을 요구하지 않습니다.
+- 구 connectionCode 인자형 메서드와 InvalidCode/CodeMismatch 별칭은 기존 UI 빌드 호환용입니다. 새 서비스는 코드 인자를 검사하지 않습니다. 구 지문 검증은 주석으로 보존했고 새 UI에서는 이 호환 경로를 사용하지 않습니다.
+- TLS는 유지하되 서버 지문 대조는 제거했습니다. 유효기간/서버 용도 검사는 교수자 신원 인증이 아니며 신뢰 LAN 전용입니다.
+
+### 5번이 기존 PR에서 마무리할 부분
+
+1. 양 앱 XAML·화면 코드·ViewModel은 이번 선행 변경에서 수정하지 않았습니다. ClientViewModel의 구 코드 입력 검사, JoinTarget의 Code, 참가/재연결 호출, 구 오류 안내 및 입력 UI를 새 API 기준으로 바꿉니다.
+2. 학생 이름·교수자 IP·선택적 방 비밀번호만 기본 참가 화면에 두고, 포트는 LanSessionEndpoint.DefaultPort를 사용합니다. 교수자 IP는 기존 HostNetworkInfoService.GetAddresses() 결과를 선택/복사하도록 연결합니다.
+3. 세션 이름/수동 RDP/개발자 테스트 UI 제거, 교수자 방 비밀번호·입력 잠금 안내, 양쪽 채팅/접힌 로그, 목록 상태 유지, 파일 드롭/파일명 다운로드는 [U01~U09](./UI_FEEDBACK_SPEC.md)로 검증합니다.
+4. #67에는 이전 #65 서버 커밋과 #68이 포함돼 있으므로 최신 main 병합 충돌을 검토합니다. 철회된 #70 UI나 #69 파일 취소 수정을 다시 가져오지 말고 5번의 기존 PR 수정으로 연결합니다. 새 PR/작성자 변경/force push 없이 기존 PR을 이어갑니다.
+5. 서비스 기반 부족으로 실제 불가능한 항목만 미완료로 분리합니다. 필요한 API·담당·구현 여부·막힌 이유·가능한 UI 준비·완료 조건을 적습니다. 3번 엔진을 UI 담당자가 중복 작성하라는 요청이 아닙니다.
+
+### 검증과 한계
+
+- #73 주소 계약 14건, #74 관련 계약/실제 루프백 TLS·방 인증·재연결·권한/초대 97건 통과. Debug/Release 전체 각각 511 통과·실제 WDS 선택 테스트 3건 건너뜀·실패 0.
+- #73 첫 전체 검증에서는 기존 파일 취소 테스트가 1회 실패했고 재실행은 통과했습니다. #69를 철회했으므로 이 별도 간헐 결함은 미수정이며 이번 참가 변경의 해결 항목이 아닙니다.
+- 실제 UI 조작·다중 PC·WDS 표시/입력/판서 인수와 사용자 배포는 별도입니다. 기존 ZIP preview.2를 유지하며 이번 선행 수정으로 ZIP을 만들지 않습니다.
+
 ## 1. 현재 기준과 읽는 순서
 
 1. [현재 진척](./STATUS_AND_ROADMAP.md)의 9/29 기록과 이 문서를 먼저 읽습니다.

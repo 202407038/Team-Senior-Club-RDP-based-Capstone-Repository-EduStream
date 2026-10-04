@@ -255,7 +255,7 @@ public sealed class AutoReconnectTests
         }
 
         public Task<SecureSessionChannel> AuthenticateAsync(string displayName, string password = "", string? reconnectToken = null) =>
-            SecureRoomJoinClient.AuthenticateAsync("127.0.0.1", Port, displayName,
+            SecureRoomJoinClient.AuthenticateAsync("127.0.0.1", Port, SessionManager.ConnectionCode!, displayName,
                 password.AsMemory(), new InMemoryLogSink(), Wait, reconnectToken: reconnectToken);
 
         public async Task<Student> JoinAsync(string displayName, string password = "", string? reconnectToken = null)

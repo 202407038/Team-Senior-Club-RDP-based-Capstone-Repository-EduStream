@@ -63,6 +63,28 @@ public sealed class LanSessionConnectionTests
         Assert.DoesNotContain(log.Snapshot(), line => line.Contains("never-send-this"));
     }
 
+    [Fact]
+    public async Task DefaultPortApi_RejectsInvalidIpWithoutRequestingCode()
+    {
+        var error = await Assert.ThrowsAsync<SecureJoinException>(() =>
+            SecureRoomJoinClient.AuthenticateAsync("not-an-ip", "Alice",
+                ReadOnlyMemory<char>.Empty, new InMemoryLogSink()));
+        Assert.Equal(SecureJoinFailure.InvalidAddress, error.Failure);
+    }
+
+    [Fact]
+    public async Task LegacyConnectorSignature_DoesNotRequireCode_AndUsesRealTls()
+    {
+        using var certificate = ProfessorCertificateStore.CreateEphemeral();
+        await using var listener = new SecureCollaborationListener(certificate, new InMemoryLogSink());
+        var accepted = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        listener.ConnectionAccepted += _ => { accepted.TrySetResult(true); return Task.CompletedTask; };
+        listener.Start(0);
+        await using var connection = await SecureCollaborationConnector.ConnectAsync(
+            "127.0.0.1", listener.Port, "", new InMemoryLogSink(), TimeSpan.FromSeconds(5));
+        Assert.True(await accepted.Task.WaitAsync(TimeSpan.FromSeconds(5)));
+    }
+
     private static X509Certificate2 CreateCertificate(int fromDays, int toDays, string purpose, bool ca)
     {
         using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
