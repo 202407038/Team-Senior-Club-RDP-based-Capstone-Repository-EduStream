@@ -21,6 +21,7 @@ namespace EduStream.Server.ViewModels;
 /// </summary>
 public sealed class ServerViewModel : ObservableObject
 {
+    public AnnotationToolsViewModel AnnotationTools { get; } = new();
     private readonly InMemoryLogSink _logSink = new();
     private readonly SessionManager _sessionManager;
     private readonly TcpServerService _tcpServer;
