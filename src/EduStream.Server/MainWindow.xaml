@@ -138,39 +138,51 @@
                 <StackPanel>
                     <TextBlock Style="{StaticResource SectionTitle}" Text="⚙ 세션 관리" />
 
-                    <TextBlock Style="{StaticResource FieldLabel}" Margin="0,12,0,6" Text="세션 이름 / 포트" />
-                    <Grid>
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="2*" />
-                            <ColumnDefinition Width="8" />
-                            <ColumnDefinition Width="*" />
-                        </Grid.ColumnDefinitions>
-                        <TextBox Grid.Column="0" Style="{StaticResource DarkTextBox}"
-                                 IsEnabled="{Binding IsSessionOpen, Converter={StaticResource InverseBool}}"
-                                 Text="{Binding SessionName, UpdateSourceTrigger=PropertyChanged}" />
-                        <TextBox Grid.Column="2" Style="{StaticResource DarkTextBox}"
-                                 IsEnabled="{Binding IsSessionOpen, Converter={StaticResource InverseBool}}"
-                                 Text="{Binding Port, UpdateSourceTrigger=PropertyChanged}" />
-                    </Grid>
-
-                    <TextBlock Style="{StaticResource FieldLabel}" Margin="0,10,0,6" Text="접속 코드" />
+                    <TextBlock Style="{StaticResource FieldLabel}" Margin="0,12,0,6" Text="접속용 교수자 IP" />
                     <DockPanel>
                         <Button DockPanel.Dock="Right" Style="{StaticResource GhostButton}" Margin="6,0,0,0"
-                                Padding="10,0" Content="복사" Click="CopyConnectionCode_Click" />
-                        <TextBox x:Name="ConnectionCodeBox" Style="{StaticResource DarkTextBox}" IsReadOnly="True"
-                                 Text="{Binding ConnectionCode, Mode=OneWay}" />
+                                Padding="10,0" Content="복사" Click="CopyHostAddress_Click" />
+                        <Button DockPanel.Dock="Right" Style="{StaticResource GhostButton}" Margin="6,0,0,0"
+                                Padding="10,0" Content="새로고침" Click="RefreshHostAddresses_Click" />
+                        <ComboBox x:Name="HostAddressSelector" Style="{StaticResource DarkComboBox}" Height="32"
+                                  ItemsSource="{Binding HostAddressOptions}"
+                                  SelectedItem="{Binding SelectedHostAddress}"
+                                  DisplayMemberPath="Display" />
                     </DockPanel>
+                    <TextBlock Margin="0,6,0,0" FontSize="11" TextWrapping="Wrap"
+                               Foreground="{StaticResource BrushTextMuted}" Text="{Binding HostGuideText}" />
+                    <TextBlock Margin="0,2,0,0" FontSize="10" TextWrapping="Wrap"
+                               Foreground="{StaticResource BrushTextMuted}"
+                               Text="같은 네트워크의 학생만 접속할 수 있습니다. 인터넷에서 접속 가능한 주소라는 뜻은 아닙니다." />
 
-                    <Grid Margin="0,10,0,0">
+                    <Expander Header="고급 설정 (기본 포트 5000)" IsExpanded="False" Margin="0,10,0,0"
+                              Foreground="{StaticResource BrushTextSecondary}">
+                        <StackPanel Margin="0,8,0,0">
+                            <TextBlock Style="{StaticResource FieldLabel}" Text="포트 (바꾸면 학생에게도 알려 주세요)" />
+                            <TextBox Style="{StaticResource DarkTextBox}"
+                                     IsEnabled="{Binding IsSessionOpen, Converter={StaticResource InverseBool}}"
+                                     Text="{Binding Port, UpdateSourceTrigger=PropertyChanged}" />
+                        </StackPanel>
+                    </Expander>
+
+                    <Grid Margin="0,12,0,0">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*" />
                             <ColumnDefinition Width="12" />
                             <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
                         <StackPanel Grid.Column="0">
-                            <TextBlock Style="{StaticResource FieldLabel}" Text="방 비밀번호 (선택)" />
-                            <PasswordBox x:Name="RoomPasswordBox" Style="{StaticResource DarkPasswordBox}"
+                            <CheckBox Content="방 비밀번호 사용 (체크 해제 시 비밀번호 없는 방)"
+                                      Foreground="{StaticResource BrushTextSecondary}"
+                                      IsEnabled="{Binding IsSessionOpen, Converter={StaticResource InverseBool}}"
+                                      IsChecked="{Binding UseRoomPassword}" />
+                            <PasswordBox x:Name="RoomPasswordBox" Style="{StaticResource DarkPasswordBox}" Margin="0,8,0,0"
+                                         Visibility="{Binding UseRoomPassword, Converter={StaticResource BoolToVis}}"
                                          IsEnabled="{Binding IsSessionOpen, Converter={StaticResource InverseBool}}" />
+                            <TextBlock Margin="0,6,0,0" FontSize="11" TextWrapping="Wrap"
+                                       Foreground="{StaticResource BrushTextMuted}"
+                                       Visibility="{Binding IsSessionOpen, Converter={StaticResource BoolToVis}}"
+                                       Text="열린 세션의 방 비밀번호는 바꿀 수 없습니다. 바꾸려면 세션을 닫고 다시 여세요." />
                         </StackPanel>
                         <Border Grid.Column="2" Padding="14,4" Background="#162B22" CornerRadius="8"
                                 BorderBrush="#2E7D32" BorderThickness="1" VerticalAlignment="Bottom">
@@ -235,15 +247,13 @@
                         <Button DockPanel.Dock="Right" Width="72" Margin="8,0,0,0"
                                 Style="{StaticResource PrimaryButton}" Content="전송" Command="{Binding SendChatCommand}" />
                         <TextBox Style="{StaticResource DarkTextBox}"
-                                 Text="{Binding ChatInput, UpdateSourceTrigger=PropertyChanged}">
-                            <TextBox.InputBindings>
-                                <KeyBinding Key="Return" Command="{Binding SendChatCommand}" />
-                            </TextBox.InputBindings>
-                        </TextBox>
+                                 TextWrapping="Wrap" MaxHeight="90"
+                                 PreviewKeyDown="ChatInput_PreviewKeyDown"
+                                 Text="{Binding ChatInput, UpdateSourceTrigger=PropertyChanged}" />
                     </DockPanel>
                     <TextBlock Grid.Row="2" Margin="0,-18,0,0" HorizontalAlignment="Left"
                                Foreground="{StaticResource BrushTextMuted}" FontSize="10"
-                               Text="Enter 전송 · 텍스트 복사" />
+                               Text="Enter 전송 · Shift+Enter 줄바꿈 · 메시지는 드래그해서 복사" />
                 </Grid>
             </Border>
 
@@ -268,7 +278,7 @@
                 <RowDefinition Height="12" />
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="12" />
-                <RowDefinition Height="*" MinHeight="140" />
+                <RowDefinition Height="Auto" />
             </Grid.RowDefinitions>
 
             <!-- 화면 공유 -->
@@ -279,7 +289,8 @@
                             <TextBlock Text="모니터" Foreground="{StaticResource BrushTextSecondary}"
                                        VerticalAlignment="Center" Margin="0,0,6,0" FontSize="11" />
                             <!-- TODO: 실제 모니터 열거/선택은 엔진 연결 후 ViewModel에 바인딩 (지금은 고정 목록) -->
-                            <ComboBox x:Name="MonitorSelector" Style="{StaticResource DarkComboBox}" Width="100" Height="28" SelectedIndex="0">
+                            <ComboBox x:Name="MonitorSelector" Style="{StaticResource DarkComboBox}" Width="100" Height="28" SelectedIndex="0"
+                                      IsEnabled="False" ToolTip="모니터 열거·선택 API가 아직 연결되지 않아 사용할 수 없습니다.">
                                 <ComboBoxItem Content="모니터 1" />
                                 <ComboBoxItem Content="모니터 2" />
                             </ComboBox>
@@ -301,6 +312,8 @@
                                 Content="공유 멈춤" Command="{Binding StopRdpShareCommand}" />
                         <!-- TODO: 판서 엔진은 다른 담당자 영역(피드백 6번). 지금은 ON/OFF 겉모습만 토글, 실제 그리기 기능 없음 -->
                         <ToggleButton x:Name="DrawingToggle" Grid.Column="4" Height="34"
+                                      IsEnabled="False" Opacity="0.5"
+                                      ToolTip="판서 엔진이 아직 연결되지 않아 사용할 수 없습니다."
                                       Click="DrawingToggle_Click">
                             <ToggleButton.Style>
                                 <Style TargetType="ToggleButton">
@@ -350,6 +363,9 @@
                         <TextBlock Foreground="{StaticResource BrushAccentTeal}" FontSize="12" FontWeight="SemiBold"
                                    TextWrapping="Wrap" Text="{Binding RdpStatus}" />
                     </StackPanel>
+                    <TextBlock Margin="0,6,0,0" FontSize="10" TextWrapping="Wrap"
+                               Foreground="{StaticResource BrushTextMuted}"
+                               Text="모니터 선택과 판서는 화면 엔진(모니터 열거·판서 API) 연결 전이라 비활성입니다." />
 
                 </StackPanel>
             </Border>
@@ -359,22 +375,31 @@
                 <StackPanel>
                     <TextBlock Style="{StaticResource SectionTitle}" Text="📁 세션 파일" />
 
-                    <DockPanel Margin="0,10,0,0">
-                        <Button DockPanel.Dock="Right" Style="{StaticResource GhostButton}" Content="파일 선택"
-                                Command="{Binding SelectFileCommand}" />
-                        <TextBlock Text="{Binding SelectedFilePath, FallbackValue='파일을 끌어 놓거나 선택'}"
-                                   Foreground="{StaticResource BrushTextMuted}" VerticalAlignment="Center"
-                                   TextTrimming="CharacterEllipsis" />
-                    </DockPanel>
+                    <Border x:Name="FileDropZone" AllowDrop="True" Margin="0,10,0,0" Padding="10"
+                            BorderBrush="{StaticResource BrushAccentPurple}" BorderThickness="1" CornerRadius="8"
+                            Background="Transparent"
+                            DragOver="FileDropZone_DragOver" Drop="FileDropZone_Drop">
+                        <DockPanel>
+                            <Button DockPanel.Dock="Right" Style="{StaticResource GhostButton}" Content="파일 선택"
+                                    Command="{Binding SelectFileCommand}" />
+                            <TextBlock Foreground="{StaticResource BrushTextMuted}" VerticalAlignment="Center"
+                                       TextTrimming="CharacterEllipsis">
+                                <TextBlock.Style>
+                                    <Style TargetType="TextBlock">
+                                        <Setter Property="Text" Value="{Binding SelectedFilePath}" />
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding SelectedFilePath}" Value="">
+                                                <Setter Property="Text" Value="파일을 여기에 끌어 놓으면 바로 등록됩니다" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </TextBlock.Style>
+                            </TextBlock>
+                        </DockPanel>
+                    </Border>
 
-                    <WrapPanel Margin="0,8,0,0">
-                        <Button Style="{StaticResource GhostButton}" Margin="0,0,8,0"
-                                Content="강의 파일 목록에 등록" Command="{Binding RegisterSelectedFileCommand}" />
-                        <Button Style="{StaticResource GhostButton}" Margin="0,0,8,0"
-                                Content="샘플 파일 전송" Command="{Binding SendSampleFileCommand}" />
-                        <Button Style="{StaticResource GhostButton}"
-                                Content="선택 파일 즉시 전송" Command="{Binding SendSelectedFileCommand}" />
-                    </WrapPanel>
+                    <Button Style="{StaticResource GhostButton}" Margin="0,8,0,0" HorizontalAlignment="Left"
+                            Content="선택한 파일을 강의 파일 목록에 등록" Command="{Binding RegisterSelectedFileCommand}" />
 
                     <TextBlock Margin="0,8,0,0" Foreground="{StaticResource BrushTextSecondary}" FontSize="11"
                                TextWrapping="Wrap" Text="{Binding FileShareStatus}" />
@@ -394,21 +419,30 @@
                             </DataTemplate>
                         </ListBox.ItemTemplate>
                     </ListBox>
+
+                    <Expander Header="즉시 전송 (테스트용 · 일반 흐름 아님)" IsExpanded="False" Margin="0,10,0,0"
+                              Foreground="{StaticResource BrushTextMuted}">
+                        <StackPanel Margin="0,6,0,0">
+                            <TextBlock FontSize="10" TextWrapping="Wrap" Foreground="{StaticResource BrushTextMuted}"
+                                       Text="기본 흐름은 목록에 등록하면 학생이 골라 다운로드하는 방식입니다. 아래는 접속한 모든 학생에게 본문을 바로 보내는 테스트용입니다." />
+                            <WrapPanel Margin="0,6,0,0">
+                                <Button Style="{StaticResource GhostButton}" Margin="0,0,8,0"
+                                        Content="샘플 파일 전송" Command="{Binding SendSampleFileCommand}" />
+                                <Button Style="{StaticResource GhostButton}"
+                                        Content="선택 파일 즉시 전송" Command="{Binding SendSelectedFileCommand}" />
+                            </WrapPanel>
+                        </StackPanel>
+                    </Expander>
                 </StackPanel>
             </Border>
 
-            <!-- 활동 로그 -->
-            <Border Grid.Row="4" Style="{StaticResource PanelCard}">
-                <Grid>
-                    <Grid.RowDefinitions>
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="*" />
-                    </Grid.RowDefinitions>
-                    <TextBlock Grid.Row="0" Style="{StaticResource SectionTitle}" Text="📑 활동 로그" />
-                    <ListBox Grid.Row="1" Margin="0,10,0,0" Style="{StaticResource DarkListBox}"
+            <!-- 활동 로그: 작은 기본 접힘 영역. 중요한 실패는 세션 관리의 상태 안내와 화면 공유의 상태 줄에 따로 표시된다. -->
+            <Border Grid.Row="4" Style="{StaticResource PanelCard}" VerticalAlignment="Top">
+                <Expander Header="📑 활동 로그" IsExpanded="False" Foreground="{StaticResource BrushTextPrimary}">
+                    <ListBox Height="140" Margin="0,10,0,0" Style="{StaticResource DarkListBox}"
                              ScrollViewer.VerticalScrollBarVisibility="Hidden"
                              ItemsSource="{Binding ActivityLogs}" ItemTemplate="{StaticResource LogLineTemplate}" />
-                </Grid>
+                </Expander>
             </Border>
         </Grid>
 
@@ -436,7 +470,7 @@
                             <DataTemplate>
                                 <Border Margin="0,0,0,10" Background="#161822" CornerRadius="8"
                                         BorderBrush="#2A2D3D" BorderThickness="1">
-                                    <Expander x:Name="StudentExpander" IsExpanded="True" BorderThickness="0" Padding="10">
+                                    <Expander x:Name="StudentExpander" IsExpanded="False" BorderThickness="0" Padding="10">
                                         <Expander.Resources>
                                             <Style TargetType="ToggleButton">
                                                 <Setter Property="Foreground" Value="White" />

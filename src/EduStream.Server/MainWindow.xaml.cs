@@ -56,14 +56,46 @@ public partial class MainWindow : Window
         }
         finally { _closed = true; Close(); }
     }
-    private void CopyConnectionCode_Click(object sender, RoutedEventArgs e)
+    private void CopyHostAddress_Click(object sender, RoutedEventArgs e)
     {
-        if (!string.IsNullOrWhiteSpace(ConnectionCodeBox.Text))
+        if (_viewModel.SelectedHostAddress is { } option)
         {
-            System.Windows.Clipboard.SetText(ConnectionCodeBox.Text);
+            Clipboard.SetText(option.Address);
         }
     }
 
+    private void RefreshHostAddresses_Click(object sender, RoutedEventArgs e) => _viewModel.RefreshHostAddresses();
+
+    /// <summary>Enter는 전송, Shift+Enter는 줄바꿈입니다. IME 조합을 확정하는 Enter(ImeProcessed)는 건드리지 않습니다.</summary>
+    private void ChatInput_PreviewKeyDown(object sender, System.Windows.Input.KeyEventArgs e)
+    {
+        if (e.Key != System.Windows.Input.Key.Return || sender is not System.Windows.Controls.TextBox box) return;
+        if (System.Windows.Input.Keyboard.Modifiers.HasFlag(System.Windows.Input.ModifierKeys.Shift))
+        {
+            var caret = box.CaretIndex;
+            box.Text = box.Text.Insert(caret, Environment.NewLine);
+            box.CaretIndex = caret + Environment.NewLine.Length;
+        }
+        else if (_viewModel.SendChatCommand.CanExecute(null))
+        {
+            _viewModel.SendChatCommand.Execute(null);
+        }
+        e.Handled = true;
+    }
+
+    private void FileDropZone_DragOver(object sender, System.Windows.DragEventArgs e)
+    {
+        e.Effects = e.Data.GetDataPresent(System.Windows.DataFormats.FileDrop)
+            ? System.Windows.DragDropEffects.Copy
+            : System.Windows.DragDropEffects.None;
+        e.Handled = true;
+    }
+
+    private async void FileDropZone_Drop(object sender, System.Windows.DragEventArgs e)
+    {
+        if (e.Data.GetData(System.Windows.DataFormats.FileDrop) is string[] paths)
+            await _viewModel.RegisterDroppedFilesAsync(paths);
+    }
 
 private void ExpandAllStudents_Click(object sender, RoutedEventArgs e) => SetAllStudentsExpanded(true);
 private void CollapseAllStudents_Click(object sender, RoutedEventArgs e) => SetAllStudentsExpanded(false);
@@ -106,6 +138,6 @@ private void SetAllStudentsExpanded(bool expanded)
 }
 private void DrawingToggle_Click(object sender, RoutedEventArgs e)
     {
-        // TODO: 실제 판서 기능은 엔진 담당자 연결 후 구현. 지금은 ON/OFF 겉모습만 바뀝니다.
+        // 판서 엔진 연결 전에는 버튼이 비활성이라 이 핸들러가 호출되지 않습니다. 연결 후 실제 판서 ON/OFF를 여기에 둡니다.
     }
 }

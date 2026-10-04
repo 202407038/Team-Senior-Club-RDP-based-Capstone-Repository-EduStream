@@ -32,7 +32,7 @@ public sealed class ServerViewModel : ObservableObject
     private bool _shuttingDown;
     private readonly SemaphoreSlim _rdpLifecycle = new(1, 1);
     private readonly FileDistributor _fileDistributor;
-    private string _sessionName = "Capstone Live Class";
+    private string _sessionName = "EduStream 강의";
     private int _port = 5000;
     private string _chatInput = "Announcement: today's lecture note has been uploaded.";
     private string _latestScreenStatus = "Screen sharing has not started yet.";
@@ -42,7 +42,7 @@ public sealed class ServerViewModel : ObservableObject
     private bool _isSessionOpen;
     private bool _isBusy;
     private string _sessionStatus = "세션 대기 중";
-    private string _statusMessage = "세션 이름과 포트를 설정한 뒤 세션을 열어 주세요.";
+    private string _statusMessage = "방 비밀번호 사용 여부를 정한 뒤 세션을 열어 주세요.";
     private bool _isStatusError;
     private int _participantCount;
     private bool _isScreenSharing;
@@ -68,6 +68,7 @@ public sealed class ServerViewModel : ObservableObject
         _sessionManager.ChatReceived += OnChatReceived;
         _screenShareService.StatusChanged += OnScreenShareStatusChanged;
 
+        RefreshHostAddresses();
         OpenSessionCommand = new RelayCommand(() => _ = OpenSessionAsync(), () => !IsSessionOpen && !IsBusy);
         CloseSessionCommand = new RelayCommand(() => _ = CloseSessionAsync(), () => IsSessionOpen && !IsBusy && !IsRdpBusy);
         StartScreenShareCommand = new RelayCommand(() => _ = StartScreenShareAsync(), () => IsSessionOpen && !IsRdpSharing && !IsRdpBusy);
@@ -82,6 +83,47 @@ public sealed class ServerViewModel : ObservableObject
         StopRdpShareCommand = new RelayCommand(() => _ = StopRdpShareAsync(), () => IsRdpSharing && !IsBusy && !IsRdpBusy);
     }
 
+    /// <summary>학생이 입력할 교수자 IP 후보 목록입니다. 어댑터 종류는 추정값이며 인터넷 접속 가능 주소라는 뜻이 아닙니다.</summary>
+    public ObservableCollection<HostAddressOption> HostAddressOptions { get; } = [];
+
+    private HostAddressOption? _selectedHostAddress;
+
+    public HostAddressOption? SelectedHostAddress
+    {
+        get => _selectedHostAddress;
+        set { if (SetProperty(ref _selectedHostAddress, value)) OnPropertyChanged(nameof(HostGuideText)); }
+    }
+
+    /// <summary>학생 화면에 입력할 값(IP, 기본 포트가 아니면 포트 안내)을 한 줄로 보여 줍니다.</summary>
+    public string HostGuideText =>
+        SelectedHostAddress is null
+            ? "사용 가능한 네트워크 주소를 찾지 못했습니다."
+            : Port == LanSessionEndpoint.DefaultPort
+                ? $"학생 앱에 입력할 IP: {SelectedHostAddress.Address}"
+                : $"학생 앱에 입력할 IP: {SelectedHostAddress.Address} · 고급 설정 포트: {Port}";
+
+    private bool _useRoomPassword;
+
+    /// <summary>켜져 있어야 입력한 방 비밀번호를 세션에 적용합니다. 꺼져 있으면 비밀번호 없는 방으로 엽니다.</summary>
+    public bool UseRoomPassword
+    {
+        get => _useRoomPassword;
+        set => SetProperty(ref _useRoomPassword, value);
+    }
+
+    /// <summary>접속용 주소 목록을 다시 조회합니다. 이전에 고른 주소가 남아 있으면 유지합니다.</summary>
+    public void RefreshHostAddresses()
+    {
+        var all = new HostNetworkInfoService(_logSink).GetAddresses();
+        var shown = all.Where(info => info.IsJoinCandidate).ToList();
+        if (shown.Count == 0) shown = all.ToList();
+        var previous = SelectedHostAddress?.Address;
+        HostAddressOptions.Clear();
+        foreach (var info in shown) HostAddressOptions.Add(HostAddressOption.From(info));
+        SelectedHostAddress = HostAddressOptions.FirstOrDefault(o => o.Address == previous) ?? HostAddressOptions.FirstOrDefault();
+        OnPropertyChanged(nameof(HostGuideText));
+    }
+
     public string SessionName
     {
         get => _sessionName;
@@ -91,7 +133,7 @@ public sealed class ServerViewModel : ObservableObject
     public int Port
     {
         get => _port;
-        set => SetProperty(ref _port, value);
+        set { if (SetProperty(ref _port, value)) OnPropertyChanged(nameof(HostGuideText)); }
     }
 
     /// <summary>
@@ -293,7 +335,16 @@ public sealed class ServerViewModel : ObservableObject
 
         try
         {
-            var roomPassword = RoomPasswordProvider?.Invoke() ?? string.Empty;
+            // 입력칸은 항상 비운다. 체크하지 않았다면 입력값을 버리고 비밀번호 없는 방으로 연다.
+            var typedPassword = RoomPasswordProvider?.Invoke() ?? string.Empty;
+            if (UseRoomPassword && typedPassword.Length == 0)
+            {
+                SessionStatus = "세션 대기 중";
+                StatusMessage = "방 비밀번호를 입력하거나 '방 비밀번호 사용'을 해제해 주세요.";
+                IsStatusError = true;
+                return;
+            }
+            var roomPassword = UseRoomPassword ? typedPassword : string.Empty;
             _secureCertificate ??= LoadSecureCertificate();
             await _sessionManager.OpenSessionAsync(SessionName, Port, roomPassword.AsMemory(), _secureCertificate);
             _heartbeatService.Start();
@@ -301,8 +352,10 @@ public sealed class ServerViewModel : ObservableObject
             ConnectionCode = _sessionManager.ConnectionCode ?? "-";
             if (_sessionManager.FileTransfers is { } fileTransfers) fileTransfers.FileStored += OnStudentFileStored;
             SessionStatus = $"세션 Open · 포트 {Port}";
-            StatusMessage = $"'{SessionName}' 세션이 시작되었습니다. 학생에게 호스트 IP, 포트, 접속 코드를 알려 주세요." +
-                            (_sessionManager.IsRoomPasswordProtected ? " 방 비밀번호도 함께 알려 주세요." : string.Empty);
+            StatusMessage = "세션이 시작되었습니다. 학생에게 위 IP를 알려 주세요." +
+                            (_sessionManager.IsRoomPasswordProtected
+                                ? " 방 비밀번호도 함께 알려 주세요. 열린 세션의 비밀번호는 바꿀 수 없으니, 바꾸려면 세션을 닫고 다시 여세요."
+                                : " 비밀번호 없는 방입니다.");
             IsStatusError = false;
             RdpStatus = "WDS 공유 시작 후 학생을 연결해 주세요. 이미 참여한 학생은 RDP 재접속을 눌러 주세요.";
             ChatMessages.Insert(0, ChatLine.System("세션이 열렸습니다."));
@@ -563,6 +616,21 @@ public sealed class ServerViewModel : ObservableObject
         return IsRdpSharing && handoff?.ExpiresAt > DateTimeOffset.UtcNow ? handoff.Password : null;
     }
 
+    /// <summary>끌어 놓은 파일을 강의 파일 목록에 등록합니다. 본문은 학생이 요청할 때만 보냅니다.</summary>
+    public async Task RegisterDroppedFilesAsync(IEnumerable<string> paths)
+    {
+        if (!IsSessionOpen)
+        {
+            FileShareStatus = "세션을 먼저 열어 주세요.";
+            return;
+        }
+        foreach (var path in paths.Where(File.Exists))
+        {
+            SelectedFilePath = path;
+            await RegisterSelectedFileAsync();
+        }
+    }
+
     private async Task RegisterSelectedFileAsync()
     {
         var path = SelectedFilePath;
@@ -630,10 +698,15 @@ public sealed class ServerViewModel : ObservableObject
                 SessionStatus = $"세션 Open · 참가자 {ParticipantCount}명";
             }
 
-            Participants.Clear();
-            foreach (var name in _sessionManager.ParticipantNames)
+            // 전체를 지우고 다시 넣으면 학생별 펼침 상태가 사라지므로, 바뀐 항목만 더하고 뺀다.
+            var current = _sessionManager.ParticipantNames.ToList();
+            for (var i = Participants.Count - 1; i >= 0; i--)
             {
-                Participants.Add(name);
+                if (!current.Contains(Participants[i])) Participants.RemoveAt(i);
+            }
+            foreach (var name in current)
+            {
+                if (!Participants.Contains(name)) Participants.Add(name);
             }
 
             SyncLogs();
@@ -690,4 +763,22 @@ public sealed class ServerViewModel : ObservableObject
             ActivityLogs.Add(entry);
         }
     }
+}
+
+/// <summary>접속용 교수자 IP 한 건의 화면 표시용 모델입니다.</summary>
+public sealed record HostAddressOption(string Address, string Label)
+{
+    public string Display => $"{Address}  ·  {Label}";
+
+    public override string ToString() => Display;
+
+    public static HostAddressOption From(HostAddressInfo info) => new(info.Address, info.Kind switch
+    {
+        HostAddressKind.Lan => $"유선 LAN ({info.InterfaceName})",
+        HostAddressKind.Wireless => $"무선 ({info.InterfaceName})",
+        HostAddressKind.Vpn => $"VPN ({info.InterfaceName}) · 같은 VPN의 학생만",
+        HostAddressKind.Virtual => $"가상 어댑터 ({info.InterfaceName})",
+        HostAddressKind.LinkLocal => $"링크 로컬 ({info.InterfaceName})",
+        _ => "이 PC에서만 (루프백)"
+    });
 }
