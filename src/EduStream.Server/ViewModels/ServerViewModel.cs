@@ -42,13 +42,14 @@ public sealed class ServerViewModel : ObservableObject
     private bool _isSessionOpen;
     private bool _isBusy;
     private string _sessionStatus = "세션 대기 중";
-    private string _statusMessage = "세션 이름과 포트를 설정한 뒤 세션을 열어 주세요.";
+    private string _statusMessage = "방 비밀번호를 설정하거나 비워 둔 뒤 세션을 열어 주세요. 같은 LAN에서 사용합니다.";
     private bool _isStatusError;
     private int _participantCount;
     private bool _isScreenSharing;
     private X509Certificate2? _secureCertificate;
     private readonly Func<X509Certificate2>? _certificateProvider;
-    private string _connectionCode = "세션을 열면 표시됩니다.";
+    // 이전 방식: private string _connectionCode = "세션을 열면 표시됩니다.";
+    private HostAddressInfo? _selectedHostAddress;
 
     /// <param name="certificateProvider">테스트용. 지정하지 않으면 사용자 인증서 저장소의 교수자 인증서를 씁니다.</param>
     public ServerViewModel(IRdpSharingService? rdpSharing = null, Func<X509Certificate2>? certificateProvider = null)
@@ -57,6 +58,9 @@ public sealed class ServerViewModel : ObservableObject
         var serializer = new PacketSerializer();
         _tcpServer = new TcpServerService(_logSink, serializer);
         _sessionManager = new SessionManager(_logSink, _tcpServer);
+        HostAddresses = new HostNetworkInfoService(_logSink).GetAddresses();
+        _selectedHostAddress = HostAddresses.FirstOrDefault(address => address.IsJoinCandidate)
+            ?? HostAddresses.FirstOrDefault();
         _heartbeatService = new HeartbeatService(_sessionManager, _tcpServer, _logSink);
         _screenShareService = new ScreenShareService(_sessionManager, _logSink);
         _rdpSharing = rdpSharing ?? new RdpSharingService(_logSink);
@@ -94,14 +98,16 @@ public sealed class ServerViewModel : ObservableObject
         set => SetProperty(ref _port, value);
     }
 
-    /// <summary>
-    /// 학생이 참가할 때 입력하는 접속 코드(교수자 인증서 지문)입니다. 비밀값이 아니므로 화면에 표시합니다.
-    /// </summary>
-    public string ConnectionCode
+    /// <summary>실제 어댑터 주소 목록. VPN/가상/루프백 종류를 숨기지 않고 UI에 표시합니다.</summary>
+    public IReadOnlyList<HostAddressInfo> HostAddresses { get; }
+
+    public HostAddressInfo? SelectedHostAddress
     {
-        get => _connectionCode;
-        private set => SetProperty(ref _connectionCode, value);
+        get => _selectedHostAddress;
+        set => SetProperty(ref _selectedHostAddress, value);
     }
+    // 이전 코드 표시 바인딩(주석 보존):
+    // public string ConnectionCode { get => _connectionCode; private set => SetProperty(ref _connectionCode, value); }
 
     /// <summary>
     /// 방 비밀번호 입력칸을 읽고 비우는 함수입니다. 비밀번호를 ViewModel 속성에 보관하지 않기 위해 View가 제공합니다.
@@ -296,13 +302,14 @@ public sealed class ServerViewModel : ObservableObject
             await _sessionManager.OpenSessionAsync(SessionName, Port, roomPassword.AsMemory(), _secureCertificate);
             _heartbeatService.Start();
             IsSessionOpen = true;
-            ConnectionCode = _sessionManager.ConnectionCode ?? "-";
+            // 이전 UI: ConnectionCode = _sessionManager.ConnectionCode ?? "-";
             if (_sessionManager.FileTransfers is { } fileTransfers) fileTransfers.FileStored += OnStudentFileStored;
             SessionStatus = $"세션 Open · 포트 {Port}";
-            StatusMessage = $"'{SessionName}' 세션이 시작되었습니다. 학생에게 호스트 IP, 포트, 접속 코드를 알려 주세요." +
+            StatusMessage = "세션이 시작되었습니다. 같은 LAN의 학생에게 선택한 교수자 IP를 알려 주세요." +
+                            (Port == 5000 ? string.Empty : $" 학생 고급 설정의 포트도 {Port}로 맞춰 주세요.") +
                             (_sessionManager.IsRoomPasswordProtected ? " 방 비밀번호도 함께 알려 주세요." : string.Empty);
             IsStatusError = false;
-            RdpStatus = "WDS 공유 시작 후 학생을 연결해 주세요. 이미 참여한 학생은 RDP 재접속을 눌러 주세요.";
+            RdpStatus = "WDS 공유를 시작하면 승인된 학생의 화면 연결이 자동으로 진행됩니다.";
             ChatMessages.Insert(0, ChatLine.System("세션이 열렸습니다."));
             SyncLogs();
         }
@@ -334,7 +341,7 @@ public sealed class ServerViewModel : ObservableObject
                 finally { await _sessionManager.CloseSessionAsync(); }
             }
             IsSessionOpen = false;
-            ConnectionCode = "세션을 열면 표시됩니다.";
+            // 이전 UI: ConnectionCode = "세션을 열면 표시됩니다.";
             RegisteredFiles.Clear();
             IsScreenSharing = false;
             ParticipantCount = 0;
@@ -657,8 +664,8 @@ public sealed class ServerViewModel : ObservableObject
     }
 
     /// <summary>
-    /// 저장소 인증서를 쓰면 앱을 다시 켜도 접속 코드가 같습니다. 저장소를 쓸 수 없으면 이번 실행에만 쓰는 인증서로 대체하며,
-    /// 이 경우 접속 코드는 실행할 때마다 바뀝니다.
+    /// TLS용 인증서를 재사용합니다. 저장소를 쓸 수 없으면 이번 실행에만 쓰는 인증서로 대체합니다.
+    /// LAN 참가에서는 학생에게 인증서 지문이나 접속 코드를 입력시키지 않습니다.
     /// </summary>
     private X509Certificate2 LoadSecureCertificate()
     {

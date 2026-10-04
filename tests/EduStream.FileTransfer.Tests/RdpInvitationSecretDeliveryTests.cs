@@ -72,7 +72,7 @@ public sealed class RdpInvitationSecretDeliveryTests
             Assert.Equal(issued.Value, connect.Password);
             Assert.Equal("Alice", connect.Invitation.ParticipantId);
             Assert.Equal(1, passwordReads);
-            Assert.True(string.IsNullOrEmpty(vm.ConnectionCode)); // 구 UI 호환 속성에 코드 없이도 참가
+            Assert.Null(typeof(ClientViewModel).GetProperty("ConnectionCode"));
         }
         finally { await vm.ShutdownAsync(); }
     }
