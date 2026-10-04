@@ -279,7 +279,8 @@
         </Grid>
 
         <!-- ============ 2열: 화면 공유 / 세션 파일 / 활동 로그 ============ -->
-        <Grid Grid.Column="2">
+        <ScrollViewer Grid.Column="2" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+        <Grid>
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="12" />
@@ -317,7 +318,7 @@
                                 Content="공유 시작" Command="{Binding StartRdpShareCommand}" />
                         <Button Grid.Column="2" Style="{StaticResource SecondaryButton}" Height="34"
                                 Content="공유 멈춤" Command="{Binding StopRdpShareCommand}" />
-                        <!-- TODO: 판서 엔진은 다른 담당자 영역(피드백 6번). 지금은 ON/OFF 겉모습만 토글, 실제 그리기 기능 없음 -->
+                        <!-- 실제 판서 실행은 엔진 연결 전까지 비활성. 아래 설정 UI는 독립적으로 준비합니다. -->
                         <ToggleButton x:Name="DrawingToggle" Grid.Column="4" Height="34"
                                       IsEnabled="False" Opacity="0.5"
                                       ToolTip="판서 엔진이 아직 연결되지 않아 사용할 수 없습니다."
@@ -373,6 +374,46 @@
                     <TextBlock Margin="0,6,0,0" FontSize="10" TextWrapping="Wrap"
                                Foreground="{StaticResource BrushTextMuted}"
                                Text="모니터 선택과 판서는 화면 엔진(모니터 열거·판서 API) 연결 전이라 비활성입니다." />
+                    <Expander Header="판서 도구 설정 · 엔진 연결 대기"
+                              IsExpanded="False" Margin="0,10,0,0"
+                              Foreground="{StaticResource BrushTextSecondary}"
+                              DataContext="{Binding AnnotationTools}">
+                        <StackPanel Margin="0,8,0,0">
+                            <TextBlock Text="{Binding EngineStatus}" TextWrapping="Wrap"
+                                       FontSize="11" Foreground="{StaticResource BrushTextMuted}" />
+                            <WrapPanel Margin="0,8,0,0">
+                                <StackPanel Width="110" Margin="0,0,8,8">
+                                    <TextBlock Text="도구" Style="{StaticResource FieldLabel}" />
+                                    <ComboBox Style="{StaticResource DarkComboBox}" ItemsSource="{Binding Tools}"
+                                              SelectedItem="{Binding Tool}" />
+                                </StackPanel>
+                                <StackPanel Width="90" Margin="0,0,8,8">
+                                    <TextBlock Text="색상" Style="{StaticResource FieldLabel}" />
+                                    <ComboBox Style="{StaticResource DarkComboBox}" ItemsSource="{Binding Colors}"
+                                              SelectedItem="{Binding Color}" />
+                                </StackPanel>
+                                <StackPanel Width="100" Margin="0,0,0,8">
+                                    <TextBlock Text="배치 위치" Style="{StaticResource FieldLabel}" />
+                                    <ComboBox Style="{StaticResource DarkComboBox}" ItemsSource="{Binding Placements}"
+                                              SelectedItem="{Binding Placement}" />
+                                </StackPanel>
+                            </WrapPanel>
+                            <TextBlock Text="{Binding StrokeWidth, StringFormat=굵기: {0:0}}"
+                                       Foreground="{StaticResource BrushTextSecondary}" />
+                            <Slider Minimum="1" Maximum="20" TickFrequency="1" IsSnapToTickEnabled="True"
+                                    Value="{Binding StrokeWidth}" Margin="0,6,0,8"
+                                    AutomationProperties.Name="판서 굵기" />
+                            <WrapPanel IsEnabled="{Binding CanExecuteDrawing}"
+                                       ToolTip="실제 엔진 연결 후 사용 가능합니다.">
+                                <Button Style="{StaticResource GhostButton}" Content="판서 시작" Margin="0,0,6,6" />
+                                <Button Style="{StaticResource GhostButton}" Content="그림 유지하고 OFF" Margin="0,0,6,6" />
+                                <Button Style="{StaticResource GhostButton}" Content="숨기기 / 다시 표시" Margin="0,0,6,6" />
+                                <Button Style="{StaticResource GhostButton}" Content="실행 취소" Margin="0,0,6,6" />
+                                <Button Style="{StaticResource GhostButton}" Content="전체 지우기" Margin="0,0,6,6" />
+                                <Button Style="{StaticResource GhostButton}" Content="지우고 OFF" Margin="0,0,6,6" />
+                            </WrapPanel>
+                        </StackPanel>
+                    </Expander>
 
                 </StackPanel>
             </Border>
@@ -452,6 +493,8 @@
                 </Expander>
             </Border>
         </Grid>
+
+        </ScrollViewer>
 
         <!-- ============ 3열: 학생 목록 ============ -->
         <Border Grid.Column="4" Style="{StaticResource PanelCard}">
