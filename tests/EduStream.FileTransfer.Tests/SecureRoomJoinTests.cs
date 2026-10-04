@@ -103,16 +103,15 @@ public sealed class SecureRoomJoinTests
     }
 
     [Fact]
-    public async Task WrongCode_FailsBeforeSendingPassword()
+    public async Task InvalidIp_FailsBeforeSendingPassword()
     {
         await using var rig = await Rig.OpenAsync("room-pass");
-        using var other = ProfessorCertificateStore.CreateEphemeral();
 
         var error = await Assert.ThrowsAsync<SecureJoinException>(() => SecureRoomJoinClient.AuthenticateAsync(
-            "127.0.0.1", rig.Port, ConnectionCode.FromCertificate(other), "Alice", "room-pass".AsMemory(),
+            "not-an-ip", rig.Port, "Alice", "room-pass".AsMemory(),
             new InMemoryLogSink(), Wait));
 
-        Assert.Equal(SecureJoinFailure.CodeMismatch, error.Failure);
+        Assert.Equal(SecureJoinFailure.InvalidAddress, error.Failure);
         Assert.DoesNotContain(rig.Log.Snapshot(), line => line.Contains("참가 인증"));
     }
 
@@ -148,7 +147,6 @@ public sealed class SecureRoomJoinTests
     public async Task CloseSession_ClosesSecureChannelsAndStopsListener()
     {
         var rig = await Rig.OpenAsync();
-        var code = rig.SessionManager.ConnectionCode!;
         await using var secure = await rig.AuthenticateAsync("Alice");
         Assert.IsType<AckPacket>(await rig.JoinAsync("Alice", secure.JoinTicket));
 
@@ -157,7 +155,7 @@ public sealed class SecureRoomJoinTests
         await secure.Connection.Completion.WaitAsync(Wait);
         Assert.Null(rig.SessionManager.ConnectionCode);
         var error = await Assert.ThrowsAsync<SecureJoinException>(() => SecureRoomJoinClient.AuthenticateAsync(
-            "127.0.0.1", rig.Port, code, "Bob", ReadOnlyMemory<char>.Empty, new InMemoryLogSink(), Wait));
+            "127.0.0.1", rig.Port, "Bob", ReadOnlyMemory<char>.Empty, new InMemoryLogSink(), Wait));
         Assert.Equal(SecureJoinFailure.Unreachable, error.Failure);
     }
 
@@ -206,7 +204,7 @@ public sealed class SecureRoomJoinTests
     {
         await using var gateRig = await GateRig.StartAsync(ticketLifetime: TimeSpan.FromMilliseconds(100));
         await using var secure = await SecureRoomJoinClient.AuthenticateAsync("127.0.0.1", gateRig.SessionPort,
-            gateRig.Listener.ConnectionCode, "Alice", ReadOnlyMemory<char>.Empty, new InMemoryLogSink(), Wait);
+            "Alice", ReadOnlyMemory<char>.Empty, new InMemoryLogSink(), Wait);
 
         await Task.Delay(300);
 
@@ -281,7 +279,7 @@ public sealed class SecureRoomJoinTests
         }
 
         public Task<SecureSessionChannel> AuthenticateAsync(string displayName, string password = "") =>
-            SecureRoomJoinClient.AuthenticateAsync("127.0.0.1", Port, SessionManager.ConnectionCode ?? ConnectionCode.FromCertificate(Certificate),
+            SecureRoomJoinClient.AuthenticateAsync("127.0.0.1", Port,
                 displayName, password.AsMemory(), new InMemoryLogSink(), Wait);
 
         public async Task<TcpClientService> ConnectAsync()
@@ -353,7 +351,7 @@ public sealed class SecureRoomJoinTests
         }
 
         public Task<SecureCollaborationConnection> ConnectAsync() =>
-            SecureCollaborationConnector.ConnectAsync("127.0.0.1", Listener.Port, Listener.ConnectionCode,
+            SecureCollaborationConnector.ConnectAsync("127.0.0.1", Listener.Port,
                 new InMemoryLogSink(), Wait);
 
         public async ValueTask DisposeAsync()

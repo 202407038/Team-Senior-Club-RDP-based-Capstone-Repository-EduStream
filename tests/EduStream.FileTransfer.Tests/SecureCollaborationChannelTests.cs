@@ -13,7 +13,7 @@ using EduStream.Server.Services;
 namespace EduStream.FileTransfer.Tests;
 
 /// <summary>
-/// 2번 담당: 보호 채널(TLS + 접속 코드 확인 + capability 협상 + 길이 제한 프레이밍)을 로컬 루프백 실제 TLS로 검증합니다.
+/// 2번 담당: LAN 보호 채널(TLS + capability 협상 + 길이 제한 프레이밍)을 로컬 루프백 실제 TLS로 검증합니다.
 /// </summary>
 public sealed class SecureCollaborationChannelTests
 {
@@ -85,11 +85,11 @@ public sealed class SecureCollaborationChannelTests
     }
 
     [Fact]
-    public async Task CorrectCode_ConnectsAndExchangesFramesBothWays()
+    public async Task LanWithoutCode_ConnectsAndExchangesFramesBothWays()
     {
         await using var rig = await Rig.StartAsync();
 
-        await using var student = await rig.ConnectStudentAsync(rig.Listener.ConnectionCode);
+        await using var student = await rig.ConnectStudentAsync();
         var professor = await rig.Accepted.Reader.ReadAsync().AsTask().WaitAsync(Wait);
         var toProfessor = Channel.CreateUnbounded<byte[]>();
         var toStudent = Channel.CreateUnbounded<byte[]>();
@@ -107,7 +107,7 @@ public sealed class SecureCollaborationChannelTests
     public async Task ConcurrentSends_ArriveAsWholeFramesInPerSenderOrder()
     {
         await using var rig = await Rig.StartAsync();
-        await using var student = await rig.ConnectStudentAsync(rig.Listener.ConnectionCode);
+        await using var student = await rig.ConnectStudentAsync();
         var professor = await rig.Accepted.Reader.ReadAsync().AsTask().WaitAsync(Wait);
         var received = Channel.CreateUnbounded<byte[]>();
         professor.Start(frame => received.Writer.WriteAsync(frame).AsTask());
@@ -130,32 +130,20 @@ public sealed class SecureCollaborationChannelTests
         }
     }
 
-    [Fact]
-    public async Task WrongCode_IsRejectedByStudentAndNothingIsAccepted()
-    {
-        await using var rig = await Rig.StartAsync();
-        using var other = ProfessorCertificateStore.CreateEphemeral();
-
-        var error = await Assert.ThrowsAsync<CollaborationException>(
-            () => rig.ConnectStudentAsync(ConnectionCode.FromCertificate(other)));
-
-        Assert.Equal(CollaborationError.NotAuthorized, error.Code);
-        await Task.Delay(200);
-        Assert.False(rig.Accepted.Reader.TryRead(out _));
-    }
-
+    // 이전 코드 불일치/빈 코드 거부 테스트는 수동 코드 정책에 대한 검사였습니다.
+    // 2026-10-04에는 코드 인자를 제거하고 잘못된 IP/인증서 거부와 실제 TLS 왕복을 검증합니다.
     [Theory]
-    [InlineData("")]
-    [InlineData("ABCD")]
-    [InlineData("not-a-code-at-all")]
-    public async Task MalformedCode_FailsBeforeConnecting(string code)
+    [InlineData("not-an-ip")]
+    [InlineData("0.0.0.0")]
+    [InlineData("255.255.255.255")]
+    [InlineData("::")]
+    public async Task InvalidIp_FailsBeforeConnecting(string host)
     {
         await using var rig = await Rig.StartAsync();
-
-        var error = await Assert.ThrowsAsync<CollaborationException>(() => rig.ConnectStudentAsync(code));
-
+        var error = await Assert.ThrowsAsync<CollaborationException>(() =>
+            SecureCollaborationConnector.ConnectAsync(host, rig.Listener.Port, new InMemoryLogSink(), Wait));
         Assert.Equal(CollaborationError.InvalidRequest, error.Code);
-        Assert.DoesNotContain(rig.Log.Snapshot(), line => line.Contains("연결 거부"));
+        Assert.False(rig.Accepted.Reader.TryRead(out _));
     }
 
     [Fact]
@@ -176,7 +164,7 @@ public sealed class SecureCollaborationChannelTests
             do { read = await stream.ReadAsync(buffer).AsTask().WaitAsync(Wait); } while (read > 0);
         }
 
-        await using var student = await rig.ConnectStudentAsync(rig.Listener.ConnectionCode);
+        await using var student = await rig.ConnectStudentAsync();
         Assert.NotNull(await rig.Accepted.Reader.ReadAsync().AsTask().WaitAsync(Wait));
     }
 
@@ -203,7 +191,7 @@ public sealed class SecureCollaborationChannelTests
         await using var rig = await Rig.StartAsync();
         using var client = new TcpClient();
         await client.ConnectAsync("127.0.0.1", rig.Listener.Port);
-        // 테스트 전용: 서버 거부 경로만 보려고 인증서 확인을 생략한다. 제품 코드는 접속 코드 확인을 생략하지 않는다.
+        // 테스트 전용: 서버 거부 경로만 보려고 인증서 확인을 생략한다. 제품 코드의 인증서 유효기간/용도 검사는 별도 테스트한다.
         await using var ssl = new SslStream(client.GetStream(), false, (_, _, _, _) => true);
         await ssl.AuthenticateAsClientAsync(new SslClientAuthenticationOptions
         {
@@ -239,7 +227,7 @@ public sealed class SecureCollaborationChannelTests
     public async Task ListenerDispose_ClosesAcceptedConnections()
     {
         var rig = await Rig.StartAsync();
-        await using var student = await rig.ConnectStudentAsync(rig.Listener.ConnectionCode);
+        await using var student = await rig.ConnectStudentAsync();
         var professor = await rig.Accepted.Reader.ReadAsync().AsTask().WaitAsync(Wait);
         professor.Start(_ => Task.CompletedTask);
         student.Start(_ => Task.CompletedTask);
@@ -255,7 +243,7 @@ public sealed class SecureCollaborationChannelTests
     public async Task HandlerException_DoesNotCloseConnection()
     {
         await using var rig = await Rig.StartAsync();
-        await using var student = await rig.ConnectStudentAsync(rig.Listener.ConnectionCode);
+        await using var student = await rig.ConnectStudentAsync();
         var professor = await rig.Accepted.Reader.ReadAsync().AsTask().WaitAsync(Wait);
         var second = new TaskCompletionSource<byte[]>(TaskCreationOptions.RunContinuationsAsynchronously);
         var count = 0;
@@ -316,8 +304,8 @@ public sealed class SecureCollaborationChannelTests
             return Task.FromResult(rig);
         }
 
-        public Task<SecureCollaborationConnection> ConnectStudentAsync(string code) =>
-            SecureCollaborationConnector.ConnectAsync("127.0.0.1", Listener.Port, code, new InMemoryLogSink(), Wait);
+        public Task<SecureCollaborationConnection> ConnectStudentAsync() =>
+            SecureCollaborationConnector.ConnectAsync("127.0.0.1", Listener.Port, new InMemoryLogSink(), Wait);
 
         public async ValueTask DisposeAsync()
         {
