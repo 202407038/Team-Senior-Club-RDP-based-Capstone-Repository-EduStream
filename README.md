@@ -2,19 +2,17 @@
 
 ## ZIP을 풀고 바로 실행하기
 
-### [실행용 ZIP 다운로드 · EduStream-Portable-win-x64.zip](https://github.com/202407038/Team-Senior-Club-RDP-based-Capstone-Repository-EduStream/releases/download/v0.1.0-preview.3/EduStream-Portable-win-x64.zip)
+### [실행용 ZIP 다운로드 · EduStream-Portable-win-x64.zip](https://github.com/202407038/Team-Senior-Club-RDP-based-Capstone-Repository-EduStream/releases/download/v0.1.0-preview.2/EduStream-Portable-win-x64.zip)
 
 **다운로드 → 모두 압축 풀기 → EduStream 폴더 → `EduStream 교수자.exe` 또는 `EduStream 학생.exe` 더블클릭**
 
 설치나 명령어 입력 없이 실행할 수 있으며 .NET 실행 환경이 포함되어 있습니다. ZIP 안에서 바로 실행하지 말고 전체 압축을 풀어주세요. EXE 옆의 DLL과 하위 폴더도 필요하므로, 이동할 때는 폴더 전체를 옮깁니다. [실행 안내](docs/work/DESKTOP_LAUNCH.md)
 
-배포는 **실행용 ZIP만** 제공합니다. 현재 버전은 **v0.1.0-preview.3 (2026-10-04)**이며 실행 코드는 main `28bbfa9` (#68~#70) 기준입니다. 이후 문서 전용 갱신은 앱 코드 변경과 구분합니다. 코드 서명은 미적용이며 다중 PC RDP 실사용 인수는 진행 중입니다. [배포 정보](https://github.com/202407038/Team-Senior-Club-RDP-based-Capstone-Repository-EduStream/releases/tag/v0.1.0-preview.3)
+배포는 **실행용 ZIP만** 제공합니다. 현재 버전은 **v0.1.0-preview.2 (2026-09-30)**이며 실행 코드는 main `013c2d0` 기준입니다. 이후 문서 전용 갱신은 앱 코드 변경과 구분합니다. 코드 서명은 미적용이며 다중 PC RDP 실사용 인수는 진행 중입니다. [배포 정보](https://github.com/202407038/Team-Senior-Club-RDP-based-Capstone-Repository-EduStream/releases/tag/v0.1.0-preview.2)
 
-학생은 **이름·교수자 IP·방 비밀번호(있는 경우)**로 참가합니다. 접속 코드/첫 연결 확인창은 없고 포트 5000은 고급 설정에서만 바꿉니다. 교수자 IP 표시/복사, RDP 초대 자동 전달, 세션 파일 등록·선택 다운로드와 파일 취소 복구가 포함됩니다. **기본 배치는 기존 main이며 #65/#67의 최종 UI·역방향 화면·원격 입력·판서는 완료 기능이 아닙니다.**
+방 비밀번호·보호 참가 인증, RDP 초대 비밀 자동 전달, 세션 파일 등록·선택 다운로드가 포함됩니다. 신규 UI·학생 화면 역방향 공유·원격 입력·판서는 완료 기능이 아닙니다. 학생의 최초 참가에는 교수자 주소/포트/접속 코드와 설정된 방 비밀번호가 필요하며, RDP 초대 비밀번호는 정상 흐름에서 자동 전달합니다.
 
 **위 실행용 ZIP과 `Code → Download ZIP`은 다릅니다.** `Code → Download ZIP`은 개발용 소스입니다. 소스 ZIP을 받은 경우 루트의 `Download-EduStream.url`에서도 실행용 ZIP을 받을 수 있습니다.
-
-TLS 암호화·방 비밀번호·참가 권한 검사는 유지하지만 인증서 지문 대조는 하지 않습니다. **신뢰하는 교실 LAN 전용이며 상대가 실제 교수자라는 신원 보장은 제공하지 않습니다.** [실행/보안 범위](docs/work/RUN_GUIDE.md)와 [최신 UI 요구·미완료 범위](docs/work/UI_FEEDBACK_SPEC.md)를 확인합니다.
 
 ---
 
