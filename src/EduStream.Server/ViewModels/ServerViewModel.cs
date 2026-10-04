@@ -688,6 +688,22 @@ public sealed class ServerViewModel : ObservableObject
         finally { await _rdpSharing.DisposeAsync(); }
     }
 
+    /// <summary>
+    /// 학생 목록을 현재 참가자에 맞춥니다. 전체를 지우고 다시 넣으면 학생별 펼침 상태가 사라지므로,
+    /// 나간 학생만 빼고 새로 온 학생만 더합니다(Reset 알림 없음).
+    /// </summary>
+    public static void SyncParticipantList(ObservableCollection<string> target, IReadOnlyList<string> current)
+    {
+        for (var i = target.Count - 1; i >= 0; i--)
+        {
+            if (!current.Contains(target[i])) target.RemoveAt(i);
+        }
+        foreach (var name in current)
+        {
+            if (!target.Contains(name)) target.Add(name);
+        }
+    }
+
     private void OnParticipantsChanged()
     {
         System.Windows.Application.Current?.Dispatcher.Invoke(() =>
@@ -698,16 +714,7 @@ public sealed class ServerViewModel : ObservableObject
                 SessionStatus = $"세션 Open · 참가자 {ParticipantCount}명";
             }
 
-            // 전체를 지우고 다시 넣으면 학생별 펼침 상태가 사라지므로, 바뀐 항목만 더하고 뺀다.
-            var current = _sessionManager.ParticipantNames.ToList();
-            for (var i = Participants.Count - 1; i >= 0; i--)
-            {
-                if (!current.Contains(Participants[i])) Participants.RemoveAt(i);
-            }
-            foreach (var name in current)
-            {
-                if (!Participants.Contains(name)) Participants.Add(name);
-            }
+            SyncParticipantList(Participants, _sessionManager.ParticipantNames.ToList());
 
             SyncLogs();
         });
