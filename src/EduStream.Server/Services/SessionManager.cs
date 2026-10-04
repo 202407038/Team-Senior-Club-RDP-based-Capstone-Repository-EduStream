@@ -356,7 +356,7 @@ public sealed class SessionManager
     public bool IsRoomPasswordProtected => _roomPassword is not null;
 
     /// <summary>
-    /// 교수자 화면에 표시할 접속 코드입니다. 보호 채널 없이 연 세션이면 null입니다.
+    /// 구버전 진단용 인증서 지문입니다. 현재 LAN 참가 UI에서는 표시/입력을 요구하지 않습니다.
     /// </summary>
     public string? ConnectionCode => _secureListener?.ConnectionCode;
 
@@ -986,7 +986,7 @@ public sealed class SessionManager
             {
                 _logSink.Write($"[SecureJoin] 티켓 없음/만료/불일치로 참가 거부: clientId={clientId}");
                 return CreateError(ErrorCodes.JoinRejected,
-                    "보호 연결 인증이 확인되지 않았습니다. 접속 코드를 확인하고 다시 참가해 주세요.", true, packet);
+                    "보호 연결의 참가 승인이 확인되지 않았습니다. 같은 버전의 앱으로 세션에 다시 참가해 주세요.", true, packet);
             }
         }
 

@@ -95,7 +95,7 @@ public sealed class ServerRdpIntegrationTests
             var secureChannels = new List<SecureSessionChannel>();
             async Task<TcpClientService> Join(string name)
             {
-                var secure = await SecureRoomJoinClient.AuthenticateAsync("127.0.0.1", vm.Port, vm.ConnectionCode, name,
+                var secure = await SecureRoomJoinClient.AuthenticateAsync("127.0.0.1", vm.Port, name,
                     ReadOnlyMemory<char>.Empty, new InMemoryLogSink(), Wait);
                 secureChannels.Add(secure);
                 var client = new TcpClientService(new InMemoryLogSink(), serializer);

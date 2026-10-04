@@ -10,10 +10,10 @@ namespace EduStream.Client.Services;
 
 public enum SecureJoinFailure
 {
-    /// <summary>접속 코드 형식이 잘못됐습니다.</summary>
-    InvalidCode,
-    /// <summary>연결한 PC의 인증서가 접속 코드와 다릅니다(다른 PC이거나 중간 가로채기).</summary>
-    CodeMismatch,
+    /// <summary>교수자 IP 또는 포트 형식이 잘못됐습니다.</summary>
+    InvalidAddress,
+    /// <summary>TLS 서버 인증서가 없거나 만료됐거나 서버 용도가 아닙니다.</summary>
+    InvalidCertificate,
     /// <summary>방 비밀번호가 틀렸습니다. 같은 연결로 다시 시도할 수 있습니다.</summary>
     PasswordRejected,
     /// <summary>비밀번호를 여러 번 틀려 잠시 시도가 막혔습니다.</summary>
@@ -59,31 +59,35 @@ public sealed class SecureSessionChannel : IAsyncDisposable
 }
 
 /// <summary>
-/// 2번 구현: 학생 앱 참가 인증. 접속 코드로 교수자 PC를 확인한 보호 채널에서만 방 비밀번호를 보내고
+/// 학생 앱 참가 인증. 입력한 교수자 IP에 TLS로 연결한 뒤 방 비밀번호를 보내고
 /// 기존 TCP 참가에 쓸 티켓을 받습니다.
 /// </summary>
 public static class SecureRoomJoinClient
 {
     /// <param name="reconnectToken">비정상 끊김 뒤 자동 재연결할 때만 넣습니다. 넣으면 비밀번호는 보내지 않습니다.</param>
-    public static async Task<SecureSessionChannel> AuthenticateAsync(string host, int sessionPort, string connectionCode,
+    public static async Task<SecureSessionChannel> AuthenticateAsync(string host, int sessionPort,
         string displayName, ReadOnlyMemory<char> password, ILogSink logSink, TimeSpan? timeout = null,
         CancellationToken cancellationToken = default, string? reconnectToken = null)
     {
         ArgumentNullException.ThrowIfNull(logSink);
-        if (!ConnectionCode.TryNormalize(connectionCode, out _)) throw new SecureJoinException(SecureJoinFailure.InvalidCode);
+        if (sessionPort is < 1 or > 65534)
+            throw new SecureJoinException(SecureJoinFailure.InvalidAddress);
+        // 이전 수동 코드 방식(주석 보존):
+        // if (!ConnectionCode.TryNormalize(connectionCode, out _))
+        //     throw new SecureJoinException(SecureJoinFailure.InvalidCode);
 
         SecureCollaborationConnection connection;
         try
         {
             connection = await SecureCollaborationConnector.ConnectAsync(host, CollaborationPorts.ForSession(sessionPort),
-                connectionCode, logSink, timeout, cancellationToken);
+                logSink, timeout, cancellationToken);
         }
         catch (CollaborationException ex)
         {
             throw new SecureJoinException(ex.Code switch
             {
-                CollaborationError.NotAuthorized => SecureJoinFailure.CodeMismatch,
-                CollaborationError.InvalidRequest => SecureJoinFailure.InvalidCode,
+                CollaborationError.NotAuthorized => SecureJoinFailure.InvalidCertificate,
+                CollaborationError.InvalidRequest => SecureJoinFailure.InvalidAddress,
                 CollaborationError.UnsupportedCapability => SecureJoinFailure.VersionMismatch,
                 _ => SecureJoinFailure.Unreachable
             });

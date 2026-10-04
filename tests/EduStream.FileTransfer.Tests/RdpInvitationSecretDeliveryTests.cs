@@ -52,12 +52,16 @@ public sealed class RdpInvitationSecretDeliveryTests
         Assert.False(bob.Secrets.Reader.TryRead(out _));
     }
 
-    [Fact]
-    public async Task ClientViewModel_JoinAutoConnectsWithoutManualPassword()
+    [Theory]
+    [InlineData("")]
+    [InlineData("classroom-pass")]
+    public async Task ClientViewModel_JoinWithoutCode_AutoConnectsWithOptionalRoomPassword(string password)
     {
-        await using var rig = await Rig.OpenAsync();
+        await using var rig = await Rig.OpenAsync(password);
         var viewer = new RecordingViewer();
         var vm = rig.CreateViewModel("Alice", viewer);
+        var passwordReads = 0;
+        vm.RoomPasswordProvider = () => { passwordReads++; return password; };
         try
         {
             vm.JoinSessionCommand.Execute(null);
@@ -67,6 +71,8 @@ public sealed class RdpInvitationSecretDeliveryTests
             Assert.Equal(issued.Key, connect.Invitation.InvitationId);
             Assert.Equal(issued.Value, connect.Password);
             Assert.Equal("Alice", connect.Invitation.ParticipantId);
+            Assert.Equal(1, passwordReads);
+            Assert.True(string.IsNullOrEmpty(vm.ConnectionCode)); // 구 UI 호환 속성에 코드 없이도 참가
         }
         finally { await vm.ShutdownAsync(); }
     }
@@ -214,7 +220,7 @@ public sealed class RdpInvitationSecretDeliveryTests
             SessionManager = new SessionManager(log, new TcpServerService(log, new PacketSerializer()));
         }
 
-        public static async Task<Rig> OpenAsync()
+        public static async Task<Rig> OpenAsync(string roomPassword = "")
         {
             var rig = new Rig();
             for (var attempt = 0; ; attempt++)
@@ -222,7 +228,7 @@ public sealed class RdpInvitationSecretDeliveryTests
                 rig.Port = TestPortAllocator.GetFreePortPair();
                 try
                 {
-                    await rig.SessionManager.OpenSessionAsync("SecretTest", rig.Port, ReadOnlyMemory<char>.Empty, rig.Certificate);
+                    await rig.SessionManager.OpenSessionAsync("SecretTest", rig.Port, roomPassword.AsMemory(), rig.Certificate);
                     break;
                 }
                 catch (SocketException ex) when (ex.SocketErrorCode == SocketError.AddressAlreadyInUse && attempt < 5) { }
@@ -235,13 +241,12 @@ public sealed class RdpInvitationSecretDeliveryTests
         {
             HostAddress = "127.0.0.1",
             Port = Port,
-            ConnectionCode = SessionManager.ConnectionCode!,
             DisplayName = displayName
         };
 
         public async Task<Student> JoinAsync(string displayName)
         {
-            var secure = await SecureRoomJoinClient.AuthenticateAsync("127.0.0.1", Port, SessionManager.ConnectionCode!,
+            var secure = await SecureRoomJoinClient.AuthenticateAsync("127.0.0.1", Port,
                 displayName, ReadOnlyMemory<char>.Empty, new InMemoryLogSink(), Wait);
             var tcp = new TcpClientService(new InMemoryLogSink(), _serializer);
             var student = new Student(tcp, secure);
