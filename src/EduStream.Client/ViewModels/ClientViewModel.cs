@@ -276,6 +276,7 @@ public sealed class ClientViewModel : ObservableObject
         {
             if (SetProperty(ref _isConnected, value))
             {
+                UpdatePlaceholder();
                 OnPropertyChanged(nameof(IsLectureViewActive));
                 JoinSessionCommand.RaiseCanExecuteChanged();
                 DisconnectCommand.RaiseCanExecuteChanged();
@@ -293,7 +294,16 @@ public sealed class ClientViewModel : ObservableObject
     {
         if (_isReconnecting == value) return;
         _isReconnecting = value;
+        UpdatePlaceholder();
         OnPropertyChanged(nameof(IsLectureViewActive));
+    }
+
+    private void UpdatePlaceholder()
+    {
+        PlaceholderTitle = IsConnected ? "공유 화면 대기 중" :
+            _isReconnecting ? "세션 재연결 중" : "연결 대기 중";
+        PlaceholderSubtitle = IsConnected ? "세션에 참가했습니다. 공유 화면 연결 상태는 오른쪽 안내를 확인해 주세요." :
+            _isReconnecting ? "교수자 세션에 다시 연결하고 있습니다." : "세션에 참여하면 화면이 표시됩니다.";
     }
 
     public ImageSource? DisplaySource
