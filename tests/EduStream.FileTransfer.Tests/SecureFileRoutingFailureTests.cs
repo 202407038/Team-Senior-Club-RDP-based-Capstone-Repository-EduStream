@@ -88,15 +88,24 @@ public sealed partial class SecureFileRoutingWiringTests
         rig.SessionManager.FileTransfers!.FileStored += (_, _) => Interlocked.Increment(ref stored);
         using var cancellation = new CancellationTokenSource();
         var download = alice.Files.DownloadAsync(file.FileId, cancellationToken: cancellation.Token);
+
+       // 원상 복구 1 (TimeSpan.FromSeconds(10) -> Wait)
         await paused!.FirstSaved.Task.WaitAsync(Wait);
+
         Assert.Single(Directory.GetFiles(Path.Combine(rig.Root, "downloads-Alice"), "*.partial"));
         cancellation.Cancel();
+
+        // 원상 복구 2
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => download.WaitAsync(Wait));
+
         paused.Resume.TrySetResult();
         await WaitUntilAsync(() => rig.SessionManager.FileTransfers.PendingTransferCount == 0);
         Assert.Empty(Directory.GetFiles(Path.Combine(rig.Root, "downloads-Alice")));
         Assert.Equal(0, Volatile.Read(ref stored));
+
+        // 원상 복구 3
         var receipt = await alice.Files.DownloadAsync(file.FileId).WaitAsync(Wait);
+
         Assert.Equal(await File.ReadAllBytesAsync(source), await File.ReadAllBytesAsync(receipt.LocalPath));
         await WaitUntilAsync(() => Volatile.Read(ref stored) == 1);
     }

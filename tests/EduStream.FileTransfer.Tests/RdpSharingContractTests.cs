@@ -9,6 +9,7 @@ public sealed class RdpSharingContractTests
 {
     private readonly Xunit.Abstractions.ITestOutputHelper _output;
     public RdpSharingContractTests(Xunit.Abstractions.ITestOutputHelper output) => _output = output;
+
     [WdsTheory]
     [InlineData("ReviewStudent1")]
     [InlineData("ReviewStudent3")]
@@ -59,11 +60,15 @@ public sealed class RdpSharingContractTests
 
     public sealed class PasswordSession
     {
+        // 🎯 [피드백 5번 연동] 가짜 엔진에도 ColorDepth 속성을 추가하여 예외 방지!
+        public int ColorDepth { get; set; } = 24;
+
         public System.Windows.Threading.Dispatcher? Dispatcher { get; private set; }
         public void Open() { Dispatcher = System.Windows.Threading.Dispatcher.CurrentDispatcher; }
         public void Close() { }
         public PasswordInvitations Invitations { get; } = new();
     }
+
     public sealed class PasswordInvitations
     {
         public List<PasswordInvitation> Created { get; } = new();
@@ -76,6 +81,7 @@ public sealed class RdpSharingContractTests
             return invitation;
         }
     }
+
     public sealed class PasswordInvitation
     {
         public string GroupName { get; set; } = string.Empty;
@@ -95,6 +101,7 @@ public sealed class RdpSharingContractTests
         var alice = new FakeAttendee { Id = 1, RemoteName = "Spoofed", Invitation = mock.Invitations.Created[0] };
         var bob = new FakeAttendee { Id = 2, RemoteName = "Spoofed", Invitation = mock.Invitations.Created[1] };
         var unknown = new FakeAttendee { Id = 3, RemoteName = "Alice", Invitation = new() { GroupName = "unknown" } };
+
         await mock.Dispatcher!.InvokeAsync(() =>
         {
             Invoke(service, "OnConnected", alice);
@@ -102,8 +109,11 @@ public sealed class RdpSharingContractTests
             Invoke(service, "OnConnected", unknown);
             Invoke(service, "OnControlRequested", alice, 3);
         });
+
+       // 🎯 [정상 복구] 기본 정방향 참가자이므로 제어 권한(3)이 아닌 보기 전용(2) 권한을 받아야 합니다.
         Assert.Equal(2, alice.ControlLevel);
         Assert.Equal(2, bob.ControlLevel);
+
         Assert.True(unknown.Terminated);
         await service.RevokeInvitationAsync(first.InvitationId);
         Assert.True(alice.Terminated);
@@ -125,7 +135,6 @@ public sealed class RdpSharingContractTests
         public void TerminateConnection() => Terminated = true;
     }
 }
-
 
 public sealed class WdsTheoryAttribute : TheoryAttribute
 {
