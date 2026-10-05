@@ -1,8 +1,10 @@
-using System.Windows;
-using MessageBox = System.Windows.MessageBox;
-using Clipboard = System.Windows.Clipboard;
 using EduStream.Server.ViewModels;
-
+using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Media;
+using System.Windows.Threading;
+using Clipboard = System.Windows.Clipboard;
+using MessageBox = System.Windows.MessageBox;
 namespace EduStream.Server;
 
 public partial class MainWindow : Window
@@ -21,7 +23,20 @@ public partial class MainWindow : Window
             return password;
         };
         DataContext = _viewModel;
+       
         Closing += OnClosing;
+        Loaded += (_, _) =>
+        {
+            ((System.Collections.Specialized.INotifyCollectionChanged)_viewModel.ChatMessages).CollectionChanged += (s, e) =>
+            {
+                if (e.Action != System.Collections.Specialized.NotifyCollectionChangedAction.Add) return;
+                Dispatcher.BeginInvoke(new Action(() =>
+                {
+                    if (ChatListBox.Items.Count > 0)
+                        ChatListBox.ScrollIntoView(ChatListBox.Items[^1]);
+                }), DispatcherPriority.Background);
+            };
+        };
     }
 
     private bool _closed;
@@ -41,20 +56,88 @@ public partial class MainWindow : Window
         }
         finally { _closed = true; Close(); }
     }
-
-    private void CopyInvitationPassword_Click(object sender, RoutedEventArgs e)
+    private void CopyHostAddress_Click(object sender, RoutedEventArgs e)
     {
-        var password = InvitationParticipant.SelectedItem is string participant
-            ? _viewModel.GetInvitationPassword(participant) : null;
-        if (password is null)
+        if (_viewModel.SelectedHostAddress is { } option)
         {
-            MessageBox.Show("학생을 선택해 주세요. 초대가 만료됐다면 학생 앱에서 RDP 재접속을 눌러 주세요.", "EduStream");
-            return;
+            Clipboard.SetText(option.Address);
         }
-        try { Clipboard.SetText(password); }
-        catch (System.Runtime.InteropServices.ExternalException)
+    }
+
+    private void RefreshHostAddresses_Click(object sender, RoutedEventArgs e) => _viewModel.RefreshHostAddresses();
+
+    /// <summary>Enter는 전송, Shift+Enter는 줄바꿈입니다. IME 조합을 확정하는 Enter(ImeProcessed)는 건드리지 않습니다.</summary>
+    private void ChatInput_PreviewKeyDown(object sender, System.Windows.Input.KeyEventArgs e)
+    {
+        if (e.Key != System.Windows.Input.Key.Return || sender is not System.Windows.Controls.TextBox box) return;
+        if (System.Windows.Input.Keyboard.Modifiers.HasFlag(System.Windows.Input.ModifierKeys.Shift))
         {
-            MessageBox.Show("클립보드를 사용할 수 없습니다. 잠시 후 다시 시도해 주세요.", "EduStream");
+            var caret = box.CaretIndex;
+            box.Text = box.Text.Insert(caret, Environment.NewLine);
+            box.CaretIndex = caret + Environment.NewLine.Length;
         }
+        else if (_viewModel.SendChatCommand.CanExecute(null))
+        {
+            _viewModel.SendChatCommand.Execute(null);
+        }
+        e.Handled = true;
+    }
+
+    private void FileDropZone_DragOver(object sender, System.Windows.DragEventArgs e)
+    {
+        e.Effects = e.Data.GetDataPresent(System.Windows.DataFormats.FileDrop)
+            ? System.Windows.DragDropEffects.Copy
+            : System.Windows.DragDropEffects.None;
+        e.Handled = true;
+    }
+
+    private async void FileDropZone_Drop(object sender, System.Windows.DragEventArgs e)
+    {
+        if (e.Data.GetData(System.Windows.DataFormats.FileDrop) is string[] paths)
+            await _viewModel.RegisterDroppedFilesAsync(paths);
+    }
+
+private void ExpandAllStudents_Click(object sender, RoutedEventArgs e) => SetAllStudentsExpanded(true);
+private void CollapseAllStudents_Click(object sender, RoutedEventArgs e) => SetAllStudentsExpanded(false);
+
+private void SetAllStudentsExpanded(bool expanded)
+{
+    for (int i = 0; i < StudentListItems.Items.Count; i++)
+    {
+        if (StudentListItems.ItemContainerGenerator.ContainerFromIndex(i) is not FrameworkElement container)
+            continue;
+
+        var expander = FindVisualChild<Expander>(container, "StudentExpander");
+        if (expander is not null)
+        {
+            expander.IsExpanded = expanded;
+        }
+    }
+}
+
+    private static ScrollViewer? GetScrollViewer(DependencyObject depObj)
+    {
+        if (depObj is ScrollViewer sv) return sv;
+        for (int i = 0; i < VisualTreeHelper.GetChildrenCount(depObj); i++)
+        {
+            var result = GetScrollViewer(VisualTreeHelper.GetChild(depObj, i));
+            if (result != null) return result;
+        }
+        return null;
+    }
+    private static T? FindVisualChild<T>(DependencyObject parent, string name) where T : FrameworkElement
+{
+    for (int i = 0; i < VisualTreeHelper.GetChildrenCount(parent); i++)
+    {
+        var child = VisualTreeHelper.GetChild(parent, i);
+        if (child is T typed && typed.Name == name) return typed;
+        var found = FindVisualChild<T>(child, name);
+        if (found is not null) return found;
+    }
+    return null;
+}
+private void DrawingToggle_Click(object sender, RoutedEventArgs e)
+    {
+        // 판서 엔진 연결 전에는 버튼이 비활성이라 이 핸들러가 호출되지 않습니다. 연결 후 실제 판서 ON/OFF를 여기에 둡니다.
     }
 }

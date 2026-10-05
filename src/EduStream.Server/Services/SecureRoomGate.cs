@@ -11,7 +11,8 @@ namespace EduStream.Server.Services;
 /// 참가 티켓을 발급합니다. 티켓을 쓴 뒤에는 보호 채널이 그 참가자의 연결로 묶입니다.
 /// </summary>
 /// <remarks>
-/// 비밀번호 없는 방도 이 게이트를 거칩니다. 학생이 접속 코드로 교수자 PC를 확인하는 단계를 생략하지 않기 위해서입니다.
+/// 비밀번호 없는 방도 TLS 채널에서 이 게이트를 거쳐 참가 티켓과 세션 권한을 발급받습니다.
+/// LAN 모드에서는 수동 접속 코드로 서버 신원을 대조하지 않습니다.
 /// 현재 단계에서는 티켓이 평문 v1 TCP 참가 요청에 실립니다. 일회용·30초·이름 고정이라 재사용은 막지만,
 /// 채팅·화면 등 v1 트래픽 자체의 암호화는 이 PR 범위가 아닙니다.
 /// </remarks>
@@ -162,7 +163,7 @@ public sealed class SecureRoomGate : IAsyncDisposable
             else
             {
                 Encoding.UTF8.GetChars(request.Password, chars);
-                // 비밀번호 없는 방은 입력값과 관계없이 통과한다. 교수자 확인은 이미 접속 코드로 끝났다.
+                // 무비밀번호 방 정책만 허용한다. 이 뒤의 참가 티켓 발급/사용과 권한 검사는 생략하지 않는다.
                 verdict = _password?.Verify(state.Connection.RemoteAddress, chars) ?? RoomPasswordResult.Accepted;
             }
         }

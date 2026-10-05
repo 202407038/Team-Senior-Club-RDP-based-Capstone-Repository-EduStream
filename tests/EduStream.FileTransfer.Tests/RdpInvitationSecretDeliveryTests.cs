@@ -235,7 +235,6 @@ public sealed class RdpInvitationSecretDeliveryTests
         {
             HostAddress = "127.0.0.1",
             Port = Port,
-            ConnectionCode = SessionManager.ConnectionCode!,
             DisplayName = displayName
         };
 

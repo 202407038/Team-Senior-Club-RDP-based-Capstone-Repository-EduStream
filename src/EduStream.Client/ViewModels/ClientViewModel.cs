@@ -40,7 +40,7 @@ public sealed class ClientViewModel : ObservableObject
     private SecureSessionChannel? _secureChannel;
     private StudentStatusClient? _statusClient;
     // 자동 재연결(U03): 마지막 참가 정보와 교수자가 준 일회용 토큰. 비밀번호는 보관하지 않는다.
-    private sealed record JoinTarget(string Host, int Port, string Code, string DisplayName);
+    private sealed record JoinTarget(string Host, int Port, string DisplayName);
     private JoinTarget? _lastJoin;
     private string? _reconnectToken;
     private TimeSpan _reconnectWindow = ReconnectRules.DefaultWindow;
@@ -53,7 +53,6 @@ public sealed class ClientViewModel : ObservableObject
     private TaskCompletionSource<JoinAckResult>? _pendingJoinAck;
     private StudentStatus _studentStatus = StudentStatus.Initial;
     private bool _permissionNoticeShown;
-    private string _connectionCode = string.Empty;
     private RdpInvitationPacket? _activeRdpInvitation;
     // 초대(TCP)와 비밀번호(보호 채널)는 도착 순서가 정해져 있지 않아, 둘이 같은 초대로 짝지어질 때까지 보관한다.
     private readonly object _rdpAutoConnectLock = new();
@@ -175,11 +174,13 @@ public sealed class ClientViewModel : ObservableObject
         set => SetProperty(ref _port, value);
     }
 
-    /// <summary>교수자 화면의 접속 코드(XXXX-XXXX-XXXX)입니다. 연결한 PC가 그 교수자인지 확인하는 데 씁니다.</summary>
-    public string ConnectionCode
+    private bool _roomPasswordRequired;
+
+    /// <summary>방 비밀번호 입력칸을 보여 줄지 여부입니다. 비밀번호가 필요한 방으로 확인되면 켜집니다.</summary>
+    public bool RoomPasswordRequired
     {
-        get => _connectionCode;
-        set => SetProperty(ref _connectionCode, value);
+        get => _roomPasswordRequired;
+        set => SetProperty(ref _roomPasswordRequired, value);
     }
 
     /// <summary>참가 요청 뒤 서버의 참가 승인을 기다리는 최대 시간입니다. 넘기면 참가 실패로 정리합니다.</summary>
@@ -275,12 +276,36 @@ public sealed class ClientViewModel : ObservableObject
         {
             if (SetProperty(ref _isConnected, value))
             {
+                UpdatePlaceholder();
+                OnPropertyChanged(nameof(IsLectureViewActive));
                 JoinSessionCommand.RaiseCanExecuteChanged();
                 DisconnectCommand.RaiseCanExecuteChanged();
                 SendChatCommand.RaiseCanExecuteChanged();
             }
         }
     }
+
+    private bool _isReconnecting;
+
+    /// <summary>참가 중이거나 자동 재연결 중이면 강의 화면을, 아니면 참가 화면을 보여 주기 위한 값입니다.</summary>
+    public bool IsLectureViewActive => IsConnected || _isReconnecting;
+
+    private void SetReconnecting(bool value)
+    {
+        if (_isReconnecting == value) return;
+        _isReconnecting = value;
+        UpdatePlaceholder();
+        OnPropertyChanged(nameof(IsLectureViewActive));
+    }
+
+    private void UpdatePlaceholder()
+    {
+        PlaceholderTitle = IsConnected ? "공유 화면 대기 중" :
+            _isReconnecting ? "세션 재연결 중" : "연결 대기 중";
+        PlaceholderSubtitle = IsConnected ? "세션에 참가했습니다. 공유 화면 연결 상태는 오른쪽 안내를 확인해 주세요." :
+            _isReconnecting ? "교수자 세션에 다시 연결하고 있습니다." : "세션에 참여하면 화면이 표시됩니다.";
+    }
+
     public ImageSource? DisplaySource
     {
         get => _displaySource;
@@ -373,6 +398,12 @@ public sealed class ClientViewModel : ObservableObject
 
     public bool IsUnderControl => _studentStatus.UnderControl;
 
+    /// <summary>교수자 원격 제어 허용 여부입니다. 강의 화면의 허용 표시(ON/OFF)에 씁니다.</summary>
+    public bool AllowControl => _studentStatus.AllowControl;
+
+    /// <summary>교수자가 내 화면을 볼 수 있는지 여부입니다.</summary>
+    public bool AllowViewing => _studentStatus.AllowViewing;
+
     public string ControlToggleLabel => _studentStatus.AllowControl ? "원격 제어 허용 끄기" : "원격 제어 허용 켜기";
 
     public string ViewingToggleLabel => _studentStatus.AllowViewing ? "내 화면 보기 허용 끄기" : "내 화면 보기 허용 켜기";
@@ -387,12 +418,6 @@ public sealed class ClientViewModel : ObservableObject
         if (string.IsNullOrWhiteSpace(HostAddress) || Port <= 0)
         {
             ApplyJoinError(_sessionClient.CreateJoinError(HostAddress, Port, "접속 주소와 포트를 확인해 주세요."));
-            return;
-        }
-
-        if (!EduStream.Core.Network.ConnectionCode.TryNormalize(ConnectionCode, out _))
-        {
-            ApplyJoinError(_sessionClient.CreateJoinError(HostAddress, Port, "교수자 화면의 접속 코드(XXXX-XXXX-XXXX)를 입력해 주세요."));
             return;
         }
 
@@ -412,20 +437,28 @@ public sealed class ClientViewModel : ObservableObject
             _reconnectToken = null;
             _userLeaving = false;
             _sessionEnded = false;
-            _lastJoin = new JoinTarget(HostAddress, Port, ConnectionCode, DisplayName);
+            _lastJoin = new JoinTarget(HostAddress, Port, DisplayName);
 
-            // 접속 코드로 교수자 PC를 확인한 보호 채널에서만 방 비밀번호를 보내고 참가 티켓을 받는다.
-            StatusMessage = "교수자 PC를 확인하는 중입니다...";
+            // 입력한 교수자 IP로 TLS 보호 채널을 연 뒤 방 비밀번호를 보내고 참가 티켓을 받는다.
+            StatusMessage = "교수자 PC에 연결하는 중입니다...";
             var roomPassword = RoomPasswordProvider?.Invoke() ?? string.Empty;
             SecureSessionChannel secure;
             try
             {
                 secure = await SecureRoomJoinClient.AuthenticateAsync(
-                    HostAddress, Port, ConnectionCode, DisplayName, roomPassword.AsMemory(), _logSink);
+                    HostAddress, Port, DisplayName, roomPassword.AsMemory(), _logSink);
             }
             catch (SecureJoinException ex)
             {
-                ApplyJoinError(_sessionClient.CreateJoinError(HostAddress, Port, DescribeSecureJoinFailure(ex.Failure)));
+                var message = DescribeSecureJoinFailure(ex.Failure);
+                if (ex.Failure is SecureJoinFailure.PasswordRejected or SecureJoinFailure.LockedOut)
+                {
+                    // 비밀번호가 걸린 방인데 칸을 열지 않았다면 입력칸을 보여 주고 안내한다.
+                    if (ex.Failure == SecureJoinFailure.PasswordRejected && roomPassword.Length == 0 && !RoomPasswordRequired)
+                        message = "이 방은 방 비밀번호가 필요합니다. 아래 칸에 교수자가 알려 준 비밀번호를 입력해 주세요.";
+                    RoomPasswordRequired = true;
+                }
+                ApplyJoinError(_sessionClient.CreateJoinError(HostAddress, Port, message));
                 return;
             }
             if (_userLeaving || _disposing)
@@ -562,7 +595,7 @@ public sealed class ClientViewModel : ObservableObject
             DownloadStatus = "다운로드 대기 중";
             FileTransferDetail = "파일 수신 이벤트가 없습니다.";
 
-            ChatMessages.Insert(0, ChatLine.System($"{DisplayName} 님이 세션에서 나갔습니다."));
+            ChatMessages.Add(ChatLine.System($"{DisplayName} 님이 세션에서 나갔습니다."));
             _logSink.Write("세션 연결을 종료했습니다.");
             SyncLogs();
         });
@@ -824,6 +857,21 @@ public sealed class ClientViewModel : ObservableObject
                 status.ParticipantId != _rdpParticipant) return;
             IsRdpActive = status.State is RdpConnectionState.Connecting or RdpConnectionState.Reconnecting or RdpConnectionState.Connected;
             RdpStatusText = $"RDP: {status.State}" + (status.Failure != RdpFailureReason.None ? $" ({status.Failure})" : "");
+            if (status.State == RdpConnectionState.Connected)
+            {
+                ResetStatusPriority();
+                UpdateStatus("교수자 화면에 연결되었습니다.", StatusPriority.Success);
+            }
+            else if (IsConnected && status.State == RdpConnectionState.Closed)
+            {
+                ResetStatusPriority();
+                UpdateStatus("교수자 화면 공유가 끝났습니다. 다시 시작되면 자동으로 연결됩니다.", StatusPriority.Info);
+            }
+            else if (IsConnected && status.State == RdpConnectionState.Failed)
+            {
+                ResetStatusPriority();
+                UpdateStatus($"교수자 화면에 연결하지 못했습니다. ({status.Failure})", StatusPriority.Error, isError: true);
+            }
             _logSink.Write($"[RDP] 상태 변경: {status.State}");
             SyncLogs();
         });
@@ -857,7 +905,7 @@ public sealed class ClientViewModel : ObservableObject
                 LastSuccessMessage = "세션 참가 성공";
                 LastErrorMessage = "오류 없음";
                 ChatStatus = "채팅 가능";
-                ChatMessages.Insert(0, ChatLine.System($"{DisplayName} 님이 세션에 참가했습니다."));
+                ChatMessages.Add(ChatLine.System($"{DisplayName} 님이 세션에 참가했습니다."));
                 _ = SendRdpInvitationRequestAsync();
             }
             else if (packet.AckCode == AckCodes.SessionLeft)
@@ -877,7 +925,11 @@ public sealed class ClientViewModel : ObservableObject
                 // U03: 공유 재시작 시 학생 조작 없이 새 연결 ID로 초대를 다시 요청한다. 이미 받은 초대/연결은 건드리지 않는다.
                 if (IsConnected && !_disposing && _activeRdpInvitation is null && !IsRdpActive &&
                     packet.SessionId == _sessionClient.CurrentSession?.SessionId)
+                {
+                    ResetStatusPriority();
+                    UpdateStatus("교수자가 화면 공유를 시작했습니다. 연결하는 중입니다.", StatusPriority.Info);
                     _ = SendRdpInvitationRequestAsync();
+                }
             }
 
             _logSink.Write($"서버 응답 수신: {packet.AckCode} - {packet.Message}");
@@ -896,7 +948,15 @@ public sealed class ClientViewModel : ObservableObject
 
             IsConnecting = false;
 
-            UpdateStatus($"[서버 에러] {packet.Message}", StatusPriority.Error, isError: true);
+            if (IsConnected && packet.ErrorCode == ErrorCodes.RdpSharingNotStarted)
+            {
+                // 참가 직후 교수자가 아직 공유 전이면 서버가 대기열에 올려 두고, 공유가 시작되면 자동으로 다시 연결한다.
+                // 오류가 아니라 대기 상태이므로 지속되는 오류 표시로 남기지 않는다.
+                ResetStatusPriority();
+                UpdateStatus("교수자가 화면 공유를 시작하면 자동으로 연결됩니다.", StatusPriority.Info);
+            }
+            else
+                UpdateStatus($"[서버 에러] {packet.Message}", StatusPriority.Error, isError: true);
 
             if (!IsConnected)
             {
@@ -921,12 +981,12 @@ public sealed class ClientViewModel : ObservableObject
     
             if (packet.IsSystemMessage)
             {
-                ChatMessages.Insert(0, ChatLine.System(packet.Message));
+                ChatMessages.Add(ChatLine.System(packet.Message));
                 ChatStatus = $"시스템 안내 수신: {packet.Message}";
             }
             else
             {
-                ChatMessages.Insert(0, ChatLine.User(packet.Sender, packet.Message));
+                ChatMessages.Add(ChatLine.User(packet.Sender, packet.Message, isSelf: packet.Sender == DisplayName));
                 ChatStatus = $"최근 수신: {packet.Sender} - {packet.Message}";
             }
 
@@ -1119,6 +1179,9 @@ public sealed class ClientViewModel : ObservableObject
             if (IsConnected)
             {
                 wasJoined = true;
+                // 자동 재연결 대상이면 끊김 순간에도 강의 화면을 유지한다.
+                SetReconnecting(!_userLeaving && !_disposing && !_sessionEnded &&
+                                _reconnectToken is not null && _lastJoin is not null);
                 IsConnected = false;
                 IsConnecting = false;
                 HasRemoteFrame = false;
@@ -1128,7 +1191,7 @@ public sealed class ClientViewModel : ObservableObject
                 ConnectionState = "연결 끊김";
                 LastServerMessage = reason;
                 ChatStatus = "채팅 대기 중";
-                ChatMessages.Insert(0, ChatLine.System("서버와의 연결이 끊어졌습니다."));
+                ChatMessages.Add(ChatLine.System("서버와의 연결이 끊어졌습니다."));
                 _logSink.Write($"서버 연결 끊김: {reason}");
                 SyncLogs();
 
@@ -1139,6 +1202,8 @@ public sealed class ClientViewModel : ObservableObject
         if (wasJoined && !_userLeaving && !_disposing && !_sessionEnded &&
             Interlocked.Exchange(ref _reconnectToken, null) is { } token && _lastJoin is { } target)
             _ = RunReconnectAsync(target, token);
+        else if (wasJoined)
+            RunOnUiThread(() => SetReconnecting(false));
     }
 
     /// <summary>
@@ -1153,7 +1218,7 @@ public sealed class ClientViewModel : ObservableObject
         {
             IsConnecting = true;
             ConnectionState = "재연결 중...";
-            ChatMessages.Insert(0, ChatLine.System("연결이 끊겨 자동으로 다시 연결합니다."));
+            ChatMessages.Add(ChatLine.System("연결이 끊겨 자동으로 다시 연결합니다."));
         });
 
         bool rejoined;
@@ -1176,6 +1241,7 @@ public sealed class ClientViewModel : ObservableObject
         finally
         {
             Interlocked.CompareExchange(ref _reconnectCts, null, cts);
+            RunOnUiThread(() => SetReconnecting(false));
         }
 
         if (!rejoined && !_userLeaving && !_disposing)
@@ -1200,7 +1266,7 @@ public sealed class ClientViewModel : ObservableObject
         SecureSessionChannel secure;
         try
         {
-            secure = await SecureRoomJoinClient.AuthenticateAsync(target.Host, target.Port, target.Code, target.DisplayName,
+            secure = await SecureRoomJoinClient.AuthenticateAsync(target.Host, target.Port, target.DisplayName,
                 ReadOnlyMemory<char>.Empty, _logSink, cancellationToken: cancellationToken, reconnectToken: token);
         }
         catch (SecureJoinException ex) when (ex.Failure == SecureJoinFailure.Unreachable)
@@ -1427,6 +1493,8 @@ public sealed class ClientViewModel : ObservableObject
         OnPropertyChanged(nameof(PermissionSummary));
         OnPropertyChanged(nameof(ControlStatusText));
         OnPropertyChanged(nameof(IsUnderControl));
+        OnPropertyChanged(nameof(AllowControl));
+        OnPropertyChanged(nameof(AllowViewing));
         OnPropertyChanged(nameof(ControlToggleLabel));
         OnPropertyChanged(nameof(ViewingToggleLabel));
         ToggleControlPermissionCommand.RaiseCanExecuteChanged();
@@ -1438,10 +1506,10 @@ public sealed class ClientViewModel : ObservableObject
         {
             // U07: 제어 허용이 기본 ON이라는 사실을 참가 시 알린다.
             _permissionNoticeShown = true;
-            ChatMessages.Insert(0, ChatLine.System("교수자 원격 제어 허용이 켜져 있습니다. 접속 상태 옆에서 언제든 끌 수 있습니다."));
+            ChatMessages.Add(ChatLine.System("교수자 원격 제어 허용이 켜져 있습니다. 접속 상태 옆에서 언제든 끌 수 있습니다."));
         }
         if (wasUnderControl != status.UnderControl)
-            ChatMessages.Insert(0, ChatLine.System(status.UnderControl ? "교수자가 원격 제어를 시작했습니다." : "원격 제어가 끝났습니다."));
+            ChatMessages.Add(ChatLine.System(status.UnderControl ? "교수자가 원격 제어를 시작했습니다." : "원격 제어가 끝났습니다."));
     }
 
     private async Task ChangePermissionsAsync(bool allowViewing, bool allowControl)
@@ -1461,8 +1529,8 @@ public sealed class ClientViewModel : ObservableObject
 
     private static string DescribeSecureJoinFailure(SecureJoinFailure failure) => failure switch
     {
-        SecureJoinFailure.InvalidCode => "접속 코드 형식이 올바르지 않습니다. 교수자 화면의 코드를 다시 확인해 주세요.",
-        SecureJoinFailure.CodeMismatch => "접속 코드가 이 PC와 맞지 않습니다. 호스트 주소와 접속 코드를 다시 확인해 주세요.",
+        SecureJoinFailure.InvalidAddress => "교수자 IP 형식이 올바르지 않습니다. 교수자 화면에 표시된 IP와 고급 설정의 포트(기본 5000)를 확인해 주세요.",
+        SecureJoinFailure.InvalidCertificate => "교수자 앱의 TLS 인증서가 유효하지 않습니다. 교수자 PC의 시간과 인증서를 확인해 주세요.",
         SecureJoinFailure.PasswordRejected => "방 비밀번호가 올바르지 않습니다.",
         SecureJoinFailure.LockedOut => "비밀번호를 여러 번 틀려 잠시 참가할 수 없습니다. 1분 뒤 다시 시도해 주세요.",
         SecureJoinFailure.VersionMismatch => "교수자 앱과 버전이 맞지 않습니다. 같은 버전의 앱을 사용해 주세요.",

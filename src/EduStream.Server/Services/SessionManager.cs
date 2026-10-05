@@ -264,8 +264,7 @@ public sealed class SessionManager
         if (connection is null || !_participantRegistry.SetPermissions(connection.ConnectionId, allowViewing, allowControl))
             return false;
 
-        // 보기 허용을 철회한 학생은 공유 재시작 때 자동 복귀시키지 않는다(U03).
-        if (!allowViewing) _screenWaiters.TryRemove(clientId, out _);
+        // 보기 허용은 교수자가 학생 화면을 보는 권한(U06/U07)이다. 학생이 교수자 공유 화면을 받는 자동 복귀(U03)와는 무관하다.
         _logSink.Write($"[Control] 허용 변경: 대상={displayName}, 보기={allowViewing}, 제어={allowViewing && allowControl}");
         await ConfirmControlInputRevokedAsync();
         return true;
@@ -356,7 +355,7 @@ public sealed class SessionManager
     public bool IsRoomPasswordProtected => _roomPassword is not null;
 
     /// <summary>
-    /// 교수자 화면에 표시할 접속 코드입니다. 보호 채널 없이 연 세션이면 null입니다.
+    /// 구버전 진단용 인증서 지문입니다. 새 LAN API에서는 요구하지 않습니다. 기존 UI의 표시/입력 제거는 5번 후속 작업입니다.
     /// </summary>
     public string? ConnectionCode => _secureListener?.ConnectionCode;
 
@@ -986,7 +985,7 @@ public sealed class SessionManager
             {
                 _logSink.Write($"[SecureJoin] 티켓 없음/만료/불일치로 참가 거부: clientId={clientId}");
                 return CreateError(ErrorCodes.JoinRejected,
-                    "보호 연결 인증이 확인되지 않았습니다. 접속 코드를 확인하고 다시 참가해 주세요.", true, packet);
+                    "보호 연결의 참가 승인이 확인되지 않았습니다. 같은 버전의 앱으로 세션에 다시 참가해 주세요.", true, packet);
             }
         }
 
@@ -1255,14 +1254,14 @@ public sealed class SessionManager
     }
 
     /// <summary>
-    /// 현재 참가 중이고 보기를 허용한 학생만 자동 복귀 대기에 넣습니다. 연결은 대기 시점 것을 기록해
+    /// 현재 참가 중인 학생만 자동 복귀 대기에 넣습니다. 연결은 대기 시점 것을 기록해
     /// 재접속으로 교체된 연결에는 알림을 보내지 않게 합니다.
     /// </summary>
     private void TryAddScreenWaiter(string clientId)
     {
         var connection = _participantRegistry.TryGetConnection(clientId);
         if (connection is null) return;
-        if (_participantRegistry.TryResolve(connection.ConnectionId) is not { Connected: true, AllowViewing: true }) return;
+        if (_participantRegistry.TryResolve(connection.ConnectionId) is not { Connected: true }) return;
         _screenWaiters[clientId] = connection;
     }
 
@@ -1284,10 +1283,10 @@ public sealed class SessionManager
                 continue;
 
             var current = _participantRegistry.TryResolve(waitedConnection.ConnectionId);
-            if (current is not { Connected: true, AllowViewing: true } ||
+            if (current is not { Connected: true } ||
                 _participantRegistry.TryGetConnection(clientId) != waitedConnection)
             {
-                _logSink.Write($"[Rdp] 화면 복귀 대상 제외(퇴장/교체/보기 철회): clientId={clientId}");
+                _logSink.Write($"[Rdp] 화면 복귀 대상 제외(퇴장/교체): clientId={clientId}");
                 continue;
             }
 

@@ -40,7 +40,7 @@ public sealed class SecureCollaborationListener : IAsyncDisposable
         ConnectionCode = Core.Network.ConnectionCode.FromCertificate(certificate);
     }
 
-    /// <summary>교수자 화면에 표시할 접속 코드입니다.</summary>
+    /// <summary>구버전 진단/호환용 인증서 지문. 새 LAN API에서는 요구하지 않습니다. 기존 UI의 표시 제거는 5번 후속 작업입니다.</summary>
     public string ConnectionCode { get; }
 
     /// <summary>실제 수신 포트입니다. 0으로 시작하면 OS가 고른 포트입니다.</summary>
