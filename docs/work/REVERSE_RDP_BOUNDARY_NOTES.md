@@ -59,7 +59,7 @@
   coordinator.SetInputGate(gate);
   ```
 - `RemoteControlState.Professor.ParticipantId`(Guid)와 역방향 초대 `ProfessorId`(문자열) 매핑 규칙은 2번이 정합니다.
-- 판서 전송: `AnnotationStrokeWire.ToJson` / `FromJson` 페이로드를 메시지로 실어 나르면 됩니다. 전송 프로토콜은 1·2번.
+- 판서 전송: 스트로크 JSON과 `AnnotationLayerWire` 스냅샷 JSON을 함께 운반해야 합니다. 숨김·재표시·지우개·전체 삭제·실행 취소는 스냅샷입니다. `BindTransmission(engine, onPayloadReady)`가 두 종류를 같은 콜백으로 내보내며, 수신의 `ReceiveRemoteStrokeJsonAsync`가 구분합니다. 실제 네트워크 전송 프로토콜은 1·2번이며 이번 보완은 전송 메시지 접점과 독립 수신 레이어까지만 검증합니다.
 
 ### 5번 (UI / 바인딩)
 - 역방향 초대: `ReverseInvitationWire.Validate` 후 뷰어 `Connect`. `RdpViewerService`/`ClientViewModel`은 이 PR에서 수정하지 않았습니다.
@@ -67,7 +67,18 @@
   - 로컬: `overlay.BindLocalRenderer(engine)`
   - 학생 창 배치만 5번, 그리기/숨김/삭제는 스냅샷 교체
   - 수신: `overlay.ReceiveRemoteStrokeJsonAsync(json)`
+  - 포인터 좌표 확정: `controller.SubmitStrokeAsync(participantId, points)`. 선택한 도구·ARGB 색·굵기가 실제 스트로크로 변환됩니다. 지우개는 닿은 스트로크 전체를 제거하며 실행 취소로 복원합니다.
+  - `Clear(false)`는 그리기 상태를 유지한 채 지우기, `Clear(true)`는 지우고 OFF입니다. 전체 지우기와 지우개도 Undo 대상이며 복원이 판서 ON을 강제하지 않습니다.
 - 배율: `WdsSharedScreenPresentation`(`ISharedScreenPresentation`) 또는 `ApplyFitMode` → `CalculateRenderBounds` → `ApplyViewportSettings`. `PanAsync`는 WDS API가 없어 `NotSupportedException`입니다.
+- 좌표: `TranslateViewportToSource`에는 **뷰어 컨트롤 내부 좌표**를 전달합니다. 컨테이너 기준 포인터라면 `LastAppliedViewerBounds.Left/Top`을 먼저 뺍니다. SmartSizing은 전체 원본을 Bounds에 표시하므로 별도의 가상 크롭 배율을 적용하지 않습니다. 창 크기 변경 시 `SetViewportSize`로 컨테이너 크기를 갱신합니다.
+
+## 2026-10-05 팀장 보완 범위
+
+- 기존 #51 작성자·본문·브랜치를 유지하는 보완입니다. 서비스·최종 UI 연결, 로드맵 재편, ZIP 배포는 포함하지 않습니다.
+- 판서 선택 도구·색·굵기 적용, 타원·스트로크 지우개, 전체 삭제와 실행 취소 이력, 판서 ON/OFF 일관성을 보완했습니다.
+- 별도 수신 레이어에 숨김·삭제·실행 취소 스냅샷을 전달하며 백그라운드 수신은 레이어 Dispatcher에서 반영합니다. 스트로크 수신 작업은 렌더링 파이프라인 완료를 기다립니다.
+- 확대·축소 표시 크기와 역변환 좌표를 일치시키고 컨테이너 크기를 분리했습니다.
+- 제품 엔진을 사용한 로컬 회귀 검증과 실제 WDS 선택 검증 수치는 보완 댓글에 기록합니다. 어댑터 선반영이며 교수자 뷰어발 입력의 다른 PC 도달, 다중 PC 전체 UI 통합, Pan 기능 완료를 주장하지 않습니다.
 
 ## 5. 3번 미완료 / 알려진 문제
 
