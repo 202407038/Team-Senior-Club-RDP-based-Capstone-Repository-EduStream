@@ -22,6 +22,8 @@ public sealed class WdsViewportAdapter : IWdsViewportAdapter
     private double _currentZoom = 1.0;
     private Size _currentViewportSize = new(0, 0);
     private Size _sourceSize = new(0, 0);
+    private Size _containerSize = new(0, 0);
+    private FitMode _fitMode = FitMode.Fit;
     private Rectangle _currentSourceRect = Rectangle.Empty;
     private ViewportInfo _lastViewportInfo = new()
     {
@@ -61,7 +63,9 @@ public sealed class WdsViewportAdapter : IWdsViewportAdapter
     /// </summary>
     public void SetViewportSize(Size viewportSize)
     {
+        _containerSize = viewportSize;
         _currentViewportSize = viewportSize;
+        UpdateSourceCropRect();
     }
 
     /// <summary>
@@ -69,7 +73,8 @@ public sealed class WdsViewportAdapter : IWdsViewportAdapter
     /// </summary>
     public ViewportInfo ApplyFitMode(FitMode fitMode)
     {
-        var container = _currentViewportSize;
+        _fitMode = fitMode;
+        var container = _containerSize;
         var viewportInfo = _viewportFitAdapter.CalculateFitViewport(_sourceSize, container, fitMode);
         // 맞춤 결과를 기준(100%)으로 되돌린다. 이후 휠/SetZoomLevel 은 이 기준 위에서만 움직인다.
         _currentZoom = 1.0;
@@ -91,7 +96,7 @@ public sealed class WdsViewportAdapter : IWdsViewportAdapter
 
         if (_sourceSize.Width > 0 && _sourceSize.Height > 0)
         {
-            _currentViewportSize = _viewportFitAdapter.CalculateZoomedViewport(_sourceSize, _currentZoom);
+            _currentViewportSize = CalculateRenderBounds(_containerSize).Size;
         }
 
         UpdateSourceCropRect();
@@ -104,11 +109,13 @@ public sealed class WdsViewportAdapter : IWdsViewportAdapter
     /// </summary>
     public void SetZoomLevel(double zoomLevel)
     {
+        if (!double.IsFinite(zoomLevel) || zoomLevel < 0.5 || zoomLevel > 3)
+            throw new ArgumentOutOfRangeException(nameof(zoomLevel));
         _currentZoom = zoomLevel;
 
         if (_sourceSize.Width > 0 && _sourceSize.Height > 0)
         {
-            _currentViewportSize = _viewportFitAdapter.CalculateZoomedViewport(_sourceSize, _currentZoom);
+            _currentViewportSize = CalculateRenderBounds(_containerSize).Size;
         }
 
         UpdateSourceCropRect();
@@ -124,7 +131,7 @@ public sealed class WdsViewportAdapter : IWdsViewportAdapter
     }
 
     /// <summary>
-    /// 뷰어 화면 좌표를 학생 원본 데스크톱 절대 좌표로 역변환
+    /// 뷰어 컨트롤 내부 좌표를 원본 화면 좌표로 역변환. 컨테이너 여백은 호출 전에 빼야 한다.
     /// </summary>
     public Point TranslateViewportToSource(Point viewportPoint)
     {
@@ -133,15 +140,16 @@ public sealed class WdsViewportAdapter : IWdsViewportAdapter
             return Point.Empty;
         }
 
-        double ratioX = (double)_currentSourceRect.Width / _currentViewportSize.Width;
-        double ratioY = (double)_currentSourceRect.Height / _currentViewportSize.Height;
+        // SmartSizing은 원본 전체를 컨트롤 Bounds에 그린다. 가상의 크롭을 다시 적용하면 좌표가 두 번 축소된다.
+        double ratioX = (double)_sourceSize.Width / _currentViewportSize.Width;
+        double ratioY = (double)_sourceSize.Height / _currentViewportSize.Height;
 
-        int srcX = _currentSourceRect.X + (int)(viewportPoint.X * ratioX);
-        int srcY = _currentSourceRect.Y + (int)(viewportPoint.Y * ratioY);
+        int srcX = (int)(viewportPoint.X * ratioX);
+        int srcY = (int)(viewportPoint.Y * ratioY);
 
         return new Point(
-            Math.Clamp(srcX, 0, _sourceSize.Width),
-            Math.Clamp(srcY, 0, _sourceSize.Height)
+            Math.Clamp(srcX, 0, _sourceSize.Width - 1),
+            Math.Clamp(srcY, 0, _sourceSize.Height - 1)
         );
     }
 
@@ -156,13 +164,11 @@ public sealed class WdsViewportAdapter : IWdsViewportAdapter
         }
 
         // 컨테이너에 대한 맞춤 스케일 × 사용자 배율. ApplyFitMode 가 이미 넣은 절대 스케일을 다시 곱하지 않는다.
-        double fitScale = Math.Min(
-            (double)containerSize.Width / _sourceSize.Width,
-            (double)containerSize.Height / _sourceSize.Height);
-        double scale = fitScale * _currentZoom;
-
-        int renderWidth = Math.Max(1, (int)(_sourceSize.Width * scale));
-        int renderHeight = Math.Max(1, (int)(_sourceSize.Height * scale));
+        _containerSize = containerSize;
+        var fitted = _viewportFitAdapter.CalculateFitViewport(_sourceSize, containerSize, _fitMode);
+        int renderWidth = Math.Max(1, (int)(fitted.ViewportSize.Width * _currentZoom));
+        int renderHeight = Math.Max(1, (int)(fitted.ViewportSize.Height * _currentZoom));
+        _currentViewportSize = new Size(renderWidth, renderHeight);
 
         int offsetX = (containerSize.Width - renderWidth) / 2;
         int offsetY = (containerSize.Height - renderHeight) / 2;
@@ -181,20 +187,9 @@ public sealed class WdsViewportAdapter : IWdsViewportAdapter
             return;
         }
 
-        if (_currentZoom <= 1.0)
-        {
-            _currentSourceRect = new Rectangle(0, 0, _sourceSize.Width, _sourceSize.Height);
-        }
-        else
-        {
-            int visibleWidth = Math.Max(1, (int)(_sourceSize.Width / _currentZoom));
-            int visibleHeight = Math.Max(1, (int)(_sourceSize.Height / _currentZoom));
-
-            int cropX = Math.Max(0, (_sourceSize.Width - visibleWidth) / 2);
-            int cropY = Math.Max(0, (_sourceSize.Height - visibleHeight) / 2);
-
-            _currentSourceRect = new Rectangle(cropX, cropY, visibleWidth, visibleHeight);
-        }
+        _currentSourceRect = new Rectangle(0, 0, _sourceSize.Width, _sourceSize.Height);
+        if (_containerSize.Width > 0 && _containerSize.Height > 0)
+            _currentViewportSize = CalculateRenderBounds(_containerSize).Size;
     }
 
     private void NotifyViewportChanged()
@@ -311,6 +306,7 @@ public sealed class WdsViewportAdapter : IWdsViewportAdapter
 
         // 🎯 실제 적용·확인에 성공한 뒤에만 완료 이벤트 발행
         LastAppliedViewerBounds = rect;
+        _currentViewportSize = rect.Size;
         ViewerApplied?.Invoke(this, new ViewerAppliedEventArgs
         {
             ViewportInfo = new ViewportInfo
