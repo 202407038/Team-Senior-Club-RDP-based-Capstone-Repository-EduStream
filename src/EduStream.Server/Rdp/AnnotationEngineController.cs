@@ -16,6 +16,8 @@ public sealed class AnnotationEngineController : IAnnotationController
     private readonly AnnotationEngineAdapter _engine;
     private uint _argb = 0xFF000000;
     private double _thickness = 2;
+    public EduStream.Core.Collaboration.AnnotationTool CurrentTool { get; private set; }
+    public uint CurrentArgb => _argb;
 
     public AnnotationEngineController(AnnotationEngineAdapter engine)
     {
@@ -49,7 +51,10 @@ public sealed class AnnotationEngineController : IAnnotationController
 
     public void SelectTool(EduStream.Core.Collaboration.AnnotationTool tool, uint argbColor, double thickness)
     {
-        _ = tool; // 도구 선택은 다음 스트로크의 AnnotationStroke.Tool 로 전달된다. 엔진은 현재 도구를 보관하지 않는다.
+        if (!Enum.IsDefined(tool)) throw new ArgumentOutOfRangeException(nameof(tool));
+        if (!double.IsFinite(thickness) || thickness <= 0 || thickness > 256)
+            throw new ArgumentOutOfRangeException(nameof(thickness));
+        CurrentTool = tool;
         _argb = argbColor;
         _thickness = thickness;
     }
@@ -64,6 +69,30 @@ public sealed class AnnotationEngineController : IAnnotationController
 
     public byte CurrentAlpha => (byte)((_argb >> 24) & 0xFF);
     public int CurrentStrokeWidth => Math.Max(1, (int)Math.Round(_thickness));
+
+    /// <summary>UI는 포인터 좌표만 넘긴다. 선택 도구·색·굵기는 엔진 어댑터가 적용한다.</summary>
+    public Task SubmitStrokeAsync(string participantId, System.Collections.Generic.IReadOnlyList<Point> points,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(points);
+        if (points.Count < 2) throw new ArgumentException("판서에는 점이 두 개 이상 필요합니다.", nameof(points));
+        return _engine.ReceiveStrokeAsync(new AnnotationStroke
+        {
+            ParticipantId = participantId,
+            Tool = CurrentTool switch
+            {
+                EduStream.Core.Collaboration.AnnotationTool.Pen => AnnotationTool.Pen,
+                EduStream.Core.Collaboration.AnnotationTool.Line => AnnotationTool.Line,
+                EduStream.Core.Collaboration.AnnotationTool.Rectangle => AnnotationTool.Rectangle,
+                EduStream.Core.Collaboration.AnnotationTool.Ellipse => AnnotationTool.Circle,
+                EduStream.Core.Collaboration.AnnotationTool.Eraser => AnnotationTool.Eraser,
+                _ => throw new ArgumentOutOfRangeException()
+            },
+            Color = new AnnotationColor((byte)(_argb >> 16), (byte)(_argb >> 8), (byte)_argb, CurrentAlpha),
+            StrokeWidth = CurrentStrokeWidth,
+            Points = System.Linq.Enumerable.ToArray(points)
+        }, cancellationToken);
+    }
 }
 
 /// <summary>
@@ -84,6 +113,7 @@ public sealed class WdsSharedScreenPresentation : ISharedScreenPresentation
     public Task FitAsync(CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
+        _adapter.SetViewportSize(_containerSize());
         _adapter.ApplyFitMode(FitMode.Fit);
         ApplyCurrent();
         return Task.CompletedTask;
@@ -95,6 +125,7 @@ public sealed class WdsSharedScreenPresentation : ISharedScreenPresentation
         cancellationToken.ThrowIfCancellationRequested();
         _ = normalizedX;
         _ = normalizedY;
+        _adapter.SetViewportSize(_containerSize());
         _adapter.SetZoomLevel(factor);
         ApplyCurrent();
         return Task.CompletedTask;

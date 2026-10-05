@@ -136,7 +136,8 @@ public enum AnnotationLayerChange
 {
     VisibilityChanged,
     Cleared,
-    Undone
+    Undone,
+    Erased
 }
 
 /// <summary>

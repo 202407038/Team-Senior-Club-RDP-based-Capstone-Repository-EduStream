@@ -21,6 +21,7 @@ public sealed class AnnotationOverlayLayer : IDisposable
     private readonly int _pixelWidth;
     private readonly int _pixelHeight;
     private bool _disposed;
+    private readonly System.Collections.Generic.Dictionary<Guid, AnnotationStroke> _strokes = new();
 
     public Canvas Canvas { get; }
     public Window? HostWindow { get; private set; }
@@ -67,18 +68,21 @@ public sealed class AnnotationOverlayLayer : IDisposable
     /// <summary>엔진 렌더/전송 핸들러에 그대로 넘길 수 있는 그리기 함수.</summary>
     public Task ApplyStrokeAsync(AnnotationStroke stroke)
     {
-        Draw(stroke);
-        return Task.CompletedTask;
+        return OnUiAsync(() => Draw(stroke));
     }
 
     /// <summary>엔진 레이어 스냅샷으로 출력을 통째로 교체한다.</summary>
     public Task ReplaceAllAsync(AnnotationLayerSnapshot snapshot)
     {
         ArgumentNullException.ThrowIfNull(snapshot);
-        Canvas.Children.Clear();
-        foreach (var stroke in snapshot.VisibleStrokes) Draw(stroke);
-        Canvas.UpdateLayout();
-        return Task.CompletedTask;
+        return OnUiAsync(() =>
+        {
+            Canvas.Children.Clear();
+            _strokes.Clear();
+            if (snapshot.IsVisible)
+                foreach (var stroke in snapshot.VisibleStrokes) Draw(stroke);
+            Canvas.UpdateLayout();
+        });
     }
 
     /// <summary>
@@ -105,17 +109,45 @@ public sealed class AnnotationOverlayLayer : IDisposable
             onPayloadReady?.Invoke(json, target);
             return ApplyStrokeAsync(stroke);
         });
-        engine.AddLayerSyncHandler(ReplaceAllAsync);
+        engine.AddLayerSyncHandler(async snapshot =>
+        {
+            // 그림 추가뿐 아니라 숨김·삭제·실행 취소도 동일한 수신 접점에 전달한다.
+            onPayloadReady?.Invoke(AnnotationLayerWire.ToJson(snapshot), string.Empty);
+            await ReplaceAllAsync(snapshot);
+        });
     }
 
     /// <summary>2번이 전달한 JSON 스트로크를 학생 레이어에 반영할 때 사용.</summary>
     public Task ReceiveRemoteStrokeJsonAsync(string json)
-        => ApplyStrokeAsync(AnnotationStrokeWire.FromJson(json));
+    {
+        using var document = System.Text.Json.JsonDocument.Parse(json);
+        return document.RootElement.TryGetProperty("Kind", out _)
+            ? ReplaceAllAsync(AnnotationLayerWire.FromJson(json))
+            : ApplyStrokeAsync(AnnotationStrokeWire.FromJson(json));
+    }
+
+    private Task OnUiAsync(Action action)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (Canvas.Dispatcher.CheckAccess()) { action(); return Task.CompletedTask; }
+        return Canvas.Dispatcher.InvokeAsync(action).Task;
+    }
 
     public void Draw(AnnotationStroke stroke)
     {
+        Canvas.Dispatcher.VerifyAccess();
         var points = stroke.Points;
         if (points.Count < 2) throw new InvalidOperationException("선/도형은 점이 2개 이상 필요합니다.");
+        if (stroke.Tool == AnnotationTool.Eraser)
+        {
+            foreach (var item in _strokes.Values.Where(s => AnnotationStrokeGeometry.HitByEraser(s, stroke)).ToArray())
+                _strokes.Remove(item.StrokeId);
+            var remaining = _strokes.Values.ToArray();
+            Canvas.Children.Clear();
+            _strokes.Clear();
+            foreach (var item in remaining) Draw(item);
+            return;
+        }
 
         var c = stroke.Color;
         var brush = new SolidColorBrush(WpfColor.FromArgb(c.A, c.R, c.G, c.B));
@@ -130,10 +162,17 @@ public sealed class AnnotationOverlayLayer : IDisposable
                 Stroke = brush, StrokeThickness = stroke.StrokeWidth
             },
             AnnotationTool.Rectangle => CreateRectangle(first, last, brush, stroke.StrokeWidth),
+            AnnotationTool.Circle => CreateEllipse(first, last, brush, stroke.StrokeWidth),
             AnnotationTool.Pen => CreatePolyline(points, brush, stroke.StrokeWidth),
             _ => throw new NotSupportedException($"오버레이가 지원하지 않는 도구입니다: {stroke.Tool}")
         };
 
+        // 같은 스트로크가 재전달되어도 중복해서 그리지 않는다.
+        foreach (var existing in Canvas.Children.OfType<FrameworkElement>()
+                     .Where(e => e.Tag is Guid id && id == stroke.StrokeId).ToArray())
+            Canvas.Children.Remove(existing);
+        ((FrameworkElement)element).Tag = stroke.StrokeId;
+        _strokes[stroke.StrokeId] = stroke;
         Canvas.Children.Add(element);
         Canvas.UpdateLayout();
     }
@@ -190,6 +229,38 @@ public sealed class AnnotationOverlayLayer : IDisposable
         var polyline = new Polyline { Stroke = brush, StrokeThickness = width };
         foreach (var p in points) polyline.Points.Add(new System.Windows.Point(p.X, p.Y));
         return polyline;
+    }
+
+    private static Ellipse CreateEllipse(System.Drawing.Point first, System.Drawing.Point last, WpfBrush brush, int width)
+    {
+        var ellipse = new Ellipse { Width = Math.Abs(last.X-first.X), Height = Math.Abs(last.Y-first.Y),
+            Stroke = brush, StrokeThickness = width };
+        Canvas.SetLeft(ellipse, Math.Min(first.X,last.X));
+        Canvas.SetTop(ellipse, Math.Min(first.Y,last.Y));
+        return ellipse;
+    }
+}
+
+/// <summary>서로 다른 프로세스의 판서 레이어를 교체하기 위한 버전 있는 페이로드.</summary>
+public static class AnnotationLayerWire
+{
+    private sealed record Payload(string Kind, int Version, AnnotationLayerChange Change,
+        bool IsVisible, long ContentRevision, string[] Strokes);
+
+    public static string ToJson(AnnotationLayerSnapshot snapshot) =>
+        System.Text.Json.JsonSerializer.Serialize(new Payload("annotation-layer", 1, snapshot.Change,
+            snapshot.IsVisible, snapshot.ContentRevision,
+            snapshot.VisibleStrokes.Select(AnnotationStrokeWire.ToJson).ToArray()));
+
+    public static AnnotationLayerSnapshot FromJson(string json)
+    {
+        var payload = System.Text.Json.JsonSerializer.Deserialize<Payload>(json)
+            ?? throw new ArgumentException("판서 레이어를 읽지 못했습니다.", nameof(json));
+        if (payload.Kind != "annotation-layer" || payload.Version != 1 || payload.Strokes == null)
+            throw new ArgumentException("지원하지 않는 판서 레이어 계약입니다.", nameof(json));
+        return new AnnotationLayerSnapshot { Change = payload.Change, IsVisible = payload.IsVisible,
+            ContentRevision = payload.ContentRevision,
+            VisibleStrokes = payload.Strokes.Select(AnnotationStrokeWire.FromJson).ToArray() };
     }
 }
 

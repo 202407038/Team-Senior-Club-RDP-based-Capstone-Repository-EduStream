@@ -19,7 +19,7 @@ public sealed class AnnotationEngineAdapter : IAnnotationEngineAdapter
     private readonly List<Func<AnnotationStroke, string, Task>> _transmissionPipeline = new();
     private readonly List<Func<AnnotationStroke, Point[], Task>> _rendererHandlers = new();
     private readonly List<Func<AnnotationLayerSnapshot, Task>> _layerSyncHandlers = new();
-    private readonly Stack<AnnotationStroke> _undoStack = new();
+    private readonly Stack<IReadOnlyList<AnnotationStroke>> _undoStack = new();
     private readonly object _syncRoot = new();
 
     private bool _isEngineActive = false;
@@ -43,8 +43,6 @@ public sealed class AnnotationEngineAdapter : IAnnotationEngineAdapter
     public AnnotationEngineAdapter(IAnnotationManager annotationManager)
     {
         _annotationManager = annotationManager ?? throw new ArgumentNullException(nameof(annotationManager));
-        _annotationManager.OnStrokeRendered += OnStrokeRenderedFromManager;
-        _annotationManager.OnStrokeDispatched += OnStrokeDispatchedFromManager;
     }
 
     public Task ActivateEngineAsync(CancellationToken cancellationToken = default)
@@ -98,7 +96,21 @@ public sealed class AnnotationEngineAdapter : IAnnotationEngineAdapter
             }
         }
 
-        await _annotationManager.AddStrokeAsync(stroke, cancellationToken);
+        var before = await _annotationManager.GetAllStrokesAsync(cancellationToken);
+        lock (_syncRoot) _undoStack.Push(before.ToArray());
+        if (stroke.Tool == AnnotationTool.Eraser)
+        {
+            foreach (var item in before.Where(item => AnnotationStrokeGeometry.HitByEraser(item, stroke)))
+                await _annotationManager.DeleteStrokeAsync(item.StrokeId, cancellationToken);
+            lock (_syncRoot) _currentState = _currentState.ContentChanged();
+            await PushLayerSyncAsync(AnnotationLayerChange.Erased, cancellationToken);
+        }
+        else
+        {
+            await _annotationManager.AddStrokeAsync(stroke, cancellationToken);
+            await RenderStrokeAsync(new StrokeRenderedEventArgs { Stroke = stroke });
+            await DispatchStrokeAsync(new StrokeDispatchedEventArgs { Stroke = stroke, TargetParticipantId = string.Empty });
+        }
     }
 
     public void AddRenderHandler(Func<AnnotationStroke, Task> handler)
@@ -169,7 +181,7 @@ public sealed class AnnotationEngineAdapter : IAnnotationEngineAdapter
         }
     }
 
-    private async void OnStrokeRenderedFromManager(object? sender, StrokeRenderedEventArgs e)
+    private async Task RenderStrokeAsync(StrokeRenderedEventArgs e)
     {
         Func<AnnotationStroke, Task>[] renderCopy;
         Func<AnnotationStroke, Point[], Task>[] rendererCopy;
@@ -177,8 +189,6 @@ public sealed class AnnotationEngineAdapter : IAnnotationEngineAdapter
         lock (_syncRoot)
         {
             if (!_isEngineActive) return;
-
-            _undoStack.Push(e.Stroke);
             renderCopy = _renderPipeline.ToArray();
             rendererCopy = _rendererHandlers.ToArray();
             _currentState = _currentState.ContentChanged();
@@ -234,7 +244,7 @@ public sealed class AnnotationEngineAdapter : IAnnotationEngineAdapter
         }
     }
 
-    private async void OnStrokeDispatchedFromManager(object? sender, StrokeDispatchedEventArgs e)
+    private async Task DispatchStrokeAsync(StrokeDispatchedEventArgs e)
     {
         Func<AnnotationStroke, string, Task>[] transmissionCopy;
 
@@ -284,7 +294,7 @@ public sealed class AnnotationEngineAdapter : IAnnotationEngineAdapter
 
         lock (_syncRoot)
         {
-            _currentState = _currentState with { IsVisible = isVisible };
+            _currentState = _currentState.ContentChanged() with { IsVisible = isVisible };
         }
 
         EngineStateChanged?.Invoke(this, new EngineStateChangedEventArgs
@@ -304,12 +314,14 @@ public sealed class AnnotationEngineAdapter : IAnnotationEngineAdapter
 
     public async Task ClearAllStrokesAsync(CancellationToken cancellationToken = default)
     {
+        var before = await _annotationManager.GetAllStrokesAsync(cancellationToken);
+        lock (_syncRoot) _undoStack.Push(before.ToArray());
         await _annotationManager.ClearAllStrokesAsync(cancellationToken);
 
         lock (_syncRoot)
         {
-            _undoStack.Clear();
-            _currentState = _currentState.ClearAndStop();
+            // 전체 지우기는 그리기 ON/OFF와 독립적이다. 지우고 OFF는 컨트롤러에서 명시한다.
+            _currentState = _currentState.ContentChanged();
         }
 
         EngineStateChanged?.Invoke(this, new EngineStateChangedEventArgs
@@ -323,19 +335,22 @@ public sealed class AnnotationEngineAdapter : IAnnotationEngineAdapter
 
     public async Task UndoAsync(CancellationToken cancellationToken = default)
     {
-        AnnotationStroke? lastStroke = null;
+        IReadOnlyList<AnnotationStroke>? previous = null;
         lock (_syncRoot)
         {
             if (_undoStack.Count > 0)
             {
-                lastStroke = _undoStack.Pop();
+                previous = _undoStack.Pop();
                 _currentState = _currentState.ContentChanged();
             }
         }
 
-        if (lastStroke != null)
+        if (previous != null)
         {
-            await _annotationManager.DeleteStrokeAsync(lastStroke.StrokeId, cancellationToken);
+            // 재구성 중 개별 추가 이벤트를 송출하지 않고 최종 스냅샷 한 번으로 동기화한다.
+            await _annotationManager.ClearAllStrokesAsync(cancellationToken);
+            foreach (var stroke in previous)
+                await _annotationManager.AddStrokeAsync(stroke, cancellationToken);
 
             EngineStateChanged?.Invoke(this, new EngineStateChangedEventArgs
             {
