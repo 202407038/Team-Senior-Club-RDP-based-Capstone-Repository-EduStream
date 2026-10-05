@@ -223,21 +223,12 @@ public class AdapterDefectRegressionTests
         {
             await pipeline.ConnectAsync();
 
-            // 입력 게이트: 실제 네이티브 이벤트를 받았을 때만 입력 엔진 대상을 열고/닫는다.
-            // (운영 코드의 IRemoteInputGate 는 2번 소유이므로, 여기서는 같은 계약을 이벤트 구독으로 재현)
-            ctx.BeforeRecord += e =>
-            {
-                switch (e.Kind)
-                {
-                    case ReverseAttendeeEventKind.ControlGranted:
-                        pipeline.InjectInputAsync(e.ProfessorId).GetAwaiter().GetResult();
-                        break;
-                    case ReverseAttendeeEventKind.ControlRevoked:
-                    case ReverseAttendeeEventKind.Disconnected:
-                        pipeline.BlockInputAsync(e.ProfessorId).GetAwaiter().GetResult();
-                        break;
-                }
-            };
+            // 2번 IRemoteInputGate 계약 → 3번 WDS Grant/Revoke + (선택) OS 입력 파이프라인.
+            // 이벤트 구독으로 대체하지 않는다. 뷰어발 WDS 입력 경로는 이 게이트가 열지 않는다.
+            var gate = new ReverseWdsRemoteInputGate(
+                ctx.Host,
+                _ => ReverseE2EContext.ProfessorId,
+                pipeline);
 
             // ── 1~5단계 ──
             await ctx.Step1_StartStudentSharingAsync();
@@ -245,6 +236,8 @@ public class AdapterDefectRegressionTests
             ctx.Step3_ProfessorRequestsConnection();
             await ctx.Step4_AwaitNativeApprovalAsync();
             await ctx.Step5_AwaitRealDisplayAsync();
+
+            var controlState = CreateGateState(ctx.SessionId);
 
             // ── 6단계: 제어 권한 부여와 입력 ──
             // 6-a) 호스트 허용 없이 교수자 뷰어가 제어를 요청해도 ControlLevel 은 올라가지 않는다.
@@ -256,8 +249,8 @@ public class AdapterDefectRegressionTests
             await Assert.ThrowsAsync<InputPipelineException>(() =>
                 pipeline.InjectMouseMoveAsync(ReverseE2EContext.ProfessorId, originalCursor.X, originalCursor.Y));
 
-            // 6-b) 호스트(학생)가 허용 → 실제 호스트 COM 의 ControlLevel 이 3 으로 읽힌다.
-            await ctx.Host.GrantControlAsync(ReverseE2EContext.ProfessorId);
+            // 6-b) IRemoteInputGate.GrantAsync → 실제 호스트 COM 의 ControlLevel 이 3 으로 읽힌다.
+            await gate.GrantAsync(controlState, CancellationToken.None);
             var granted = await ctx.Events.WaitAsync(ReverseE2EContext.NativeEventTimeout, ReverseAttendeeEventKind.ControlGranted);
             Assert.Equal(ReverseSessionManager.ControlLevelInteractive, granted.ControlLevel);
             Assert.Equal(ReverseSessionManager.ControlLevelInteractive,
@@ -275,7 +268,7 @@ public class AdapterDefectRegressionTests
             AssertCursorNear(target);
 
             // ── 7단계: 권한 회수 → 추가 입력 차단 → 종료 → 자원 정리 ──
-            await ctx.Host.RevokeControlAsync(ReverseE2EContext.ProfessorId);
+            await gate.RevokeAsync(controlState.Revoke(), CancellationToken.None);
             var revoked = await ctx.Events.WaitAsync(ReverseE2EContext.NativeEventTimeout, ReverseAttendeeEventKind.ControlRevoked);
             Assert.Equal(ReverseSessionManager.ControlLevelView, revoked.ControlLevel);
             Assert.Equal(ReverseSessionManager.ControlLevelView,
@@ -341,6 +334,7 @@ public class AdapterDefectRegressionTests
         var area = ctx.Layout.Annotation;
         var viewer = new ProfessorViewerHarness(new Wpf.Rect(area.Left, area.Top, 320, 240));
         viewer.Show();
+        ctx.RetainAttempt(viewer);
         return viewer;
     }
 
@@ -381,6 +375,13 @@ public class AdapterDefectRegressionTests
         return layer;
     }
 
+    /// <summary>거부 COM 콜백이 스택에서 빠진 뒤에만 다음 접속을 연다. 뷰어 해제는 공유 세션 Stop 이후.</summary>
+    private static async Task DisposeRefusedViewerAsync(ProfessorViewerHarness viewer)
+    {
+        _ = viewer;
+        await Dispatcher.Yield();
+    }
+
     private static void AssertNoExtraApproval(ReverseE2EContext ctx, int expectedApprovals, int expectedActive, string what)
     {
         Log($"[호스트 이벤트] {what}: [{ctx.Events.Describe()}] / 활성 {ctx.Host.ActiveAttendeeCount}, 매핑 {ctx.Host.PendingInvitationCount}, 상태 {ctx.Host.CurrentState}");
@@ -399,11 +400,12 @@ public class AdapterDefectRegressionTests
             await ctx.Step2_CreateAndDeliverInvitationAsync();
             var validString = ctx.Invitation!.ConnectionString;
 
-            // (a) 올바른 연결 문자열 + 틀린 비밀번호
-            using (var wrongPassword = NewAttemptViewer(ctx))
+            // (a) 올바른 연결 문자열 + 틀린 비밀번호 — 거부 후 정리까지 확인
             {
+                var wrongPassword = NewAttemptViewer(ctx);
                 var error = TryConnect(wrongPassword, validString, ReverseE2EContext.ProfessorId, "wrong-" + ctx.Password);
                 await AssertAttemptIsRefusedAsync(wrongPassword, error, "틀린 비밀번호");
+                await DisposeRefusedViewerAsync(wrongPassword);
             }
             AssertNoExtraApproval(ctx, 0, 0, "틀린 비밀번호");
 
@@ -411,10 +413,11 @@ public class AdapterDefectRegressionTests
             Assert.Contains("ID=\"", validString);
             var tampered = validString.Replace("ID=\"", "ID=\"00", StringComparison.Ordinal);
             Assert.NotEqual(validString, tampered);
-            using (var tamperedViewer = NewAttemptViewer(ctx))
             {
+                var tamperedViewer = NewAttemptViewer(ctx);
                 var error = TryConnect(tamperedViewer, tampered, ReverseE2EContext.ProfessorId, ctx.Password);
                 await AssertAttemptIsRefusedAsync(tamperedViewer, error, "변조된 연결 문자열");
+                await DisposeRefusedViewerAsync(tamperedViewer);
             }
             AssertNoExtraApproval(ctx, 0, 0, "변조된 연결 문자열");
 
@@ -448,10 +451,11 @@ public class AdapterDefectRegressionTests
                 () => $"만료된 초대의 매핑이 정리되지 않았습니다. (남은 매핑 {ctx.Host.PendingInvitationCount})");
 
             // 사전 검증을 우회해 그대로 접속해도 승인되지 않는다.
-            using (var late = NewAttemptViewer(ctx))
             {
+                var late = NewAttemptViewer(ctx);
                 var error = TryConnect(late, received.ConnectionString, ReverseE2EContext.ProfessorId, ctx.Password);
                 await AssertAttemptIsRefusedAsync(late, error, "만료된 초대");
+                await DisposeRefusedViewerAsync(late);
             }
             AssertNoExtraApproval(ctx, 0, 0, "만료된 초대");
             Assert.Equal(ReverseSessionState.Hosting, ctx.Host.CurrentState);
@@ -476,10 +480,11 @@ public class AdapterDefectRegressionTests
                 ctx.SessionId, ctx.SharingId, "other-professor", Guid.NewGuid(), "other-" + ctx.Password, DateTimeOffset.UtcNow.AddMinutes(5)));
 
             // 같은 초대 정보를 가로챈 두 번째 접속자는 승인되지 않는다.
-            using (var intruder = NewAttemptViewer(ctx))
             {
+                var intruder = NewAttemptViewer(ctx);
                 var error = TryConnect(intruder, ctx.Invitation!.ConnectionString, ReverseE2EContext.ProfessorId, ctx.Password);
                 await AssertAttemptIsRefusedAsync(intruder, error, "두 번째 접속자");
+                await DisposeRefusedViewerAsync(intruder);
             }
 
             // 정상 접속자는 그대로 연결되어 있고 권한(ControlLevel=3)도 유지된다.
@@ -506,10 +511,11 @@ public class AdapterDefectRegressionTests
             await ctx.Events.WaitAsync(ReverseE2EContext.NativeEventTimeout, ReverseAttendeeEventKind.Disconnected);
             Assert.Equal(0, ctx.Host.PendingInvitationCount);
 
-            using (var reuse = NewAttemptViewer(ctx))
             {
+                var reuse = NewAttemptViewer(ctx);
                 var error = TryConnect(reuse, ctx.Invitation!.ConnectionString, ReverseE2EContext.ProfessorId, ctx.Password);
                 await AssertAttemptIsRefusedAsync(reuse, error, "소진된 초대 재사용");
+                await DisposeRefusedViewerAsync(reuse);
             }
 
             AssertNoExtraApproval(ctx, 1, 0, "소진된 초대 재사용");
@@ -546,10 +552,11 @@ public class AdapterDefectRegressionTests
             Assert.NotEqual(firstInvitation.ConnectionString, ctx.Invitation.ConnectionString);
 
             // 이전 세션에서 받았던 초대는 새 세션에서 통하지 않는다.
-            using (var stale = NewAttemptViewer(ctx))
             {
+                var stale = NewAttemptViewer(ctx);
                 var error = TryConnect(stale, firstInvitation.ConnectionString, ReverseE2EContext.ProfessorId, ctx.Password);
                 await AssertAttemptIsRefusedAsync(stale, error, "이전 세션의 초대");
+                await DisposeRefusedViewerAsync(stale);
             }
             AssertNoExtraApproval(ctx, 0, 0, "이전 세션의 초대");
 
@@ -584,7 +591,7 @@ public class AdapterDefectRegressionTests
         var surfaceSize = viewer.Surface.ClientSize;
         var sourceSize = Forms.Screen.PrimaryScreen!.Bounds.Size;
 
-        // ── 배율: 실제 어댑터(휠/맞춤) + 실제 AxRDPViewer ──
+        // ── 배율: 맞춤 → 휠 축소 → 맞춤 복귀 (중복 배율 적용 없이) ──
         var viewportAdapter = new WdsViewportAdapter(new WheelScrollAdapter(), new ViewportFitAdapter());
         viewportAdapter.SetAxViewer(viewer.Viewer);
         viewportAdapter.SetSourceSize(sourceSize);
@@ -592,8 +599,12 @@ public class AdapterDefectRegressionTests
         var appliedEvents = new List<ViewerAppliedEventArgs>();
         viewportAdapter.ViewerApplied += (_, e) => appliedEvents.Add(e);
 
-        // (1) 100%: 컨테이너에 맞춘 크기로 실제 뷰어가 리사이즈된다.
+        // (1) 맞춤: ApplyFitMode 후 CalculateRenderBounds 가 맞춤 스케일을 한 번만 적용한다.
+        viewportAdapter.ApplyFitMode(FitMode.Fit);
         var fit = viewportAdapter.CalculateRenderBounds(surfaceSize);
+        double expectedFit = Math.Min((double)surfaceSize.Width / sourceSize.Width, (double)surfaceSize.Height / sourceSize.Height);
+        Assert.InRange(fit.Width, (int)(sourceSize.Width * expectedFit) - 1, (int)(sourceSize.Width * expectedFit) + 1);
+        Assert.InRange(fit.Height, (int)(sourceSize.Height * expectedFit) - 1, (int)(sourceSize.Height * expectedFit) + 1);
         viewportAdapter.ApplyViewportSettings(fit);
         Assert.Equal(fit, viewer.Viewer.Bounds);
         Assert.True((bool)((dynamic)viewer.Viewer).SmartSizing, "SmartSizing 이 실제 컨트롤에서 true 로 읽혀야 합니다.");
@@ -632,21 +643,27 @@ public class AdapterDefectRegressionTests
         AssertPixelNear(viewer.Surface.PointToScreen(new Point(Math.Max(1, half.X / 2), surfaceSize.Height / 2)), viewer.Surface.BackColor);
         AssertPixelNear(viewer.Surface.PointToScreen(new Point(half.Right + Math.Max(1, (surfaceSize.Width - half.Right) / 2), surfaceSize.Height / 2)), viewer.Surface.BackColor);
 
-        // ── 판서: 엔진 → (교수자 로컬 레이어 렌더 + 학생 화면 전송) → 공유 화면에 픽셀로 반영 ──
+        // (3) 맞춤 복귀: 사용자 배율이 1.0 으로 돌아가고 뷰어가 다시 맞춤 크기가 된다.
+        viewportAdapter.ApplyFitMode(FitMode.Fit);
+        var restored = viewportAdapter.CalculateRenderBounds(surfaceSize);
+        Assert.Equal(fit, restored);
+        viewportAdapter.ApplyViewportSettings(restored);
+        Assert.Equal(restored, viewer.Viewer.Bounds);
+        Assert.Equal(3, appliedEvents.Count);
+
+        // ── 판서: 제품 오버레이 엔진 (테스트 전용 캔버스가 아님) ──
         var annotation = ctx.Layout.Annotation;
         var annotationManager = new AnnotationManager();
         var engine = new AnnotationEngineAdapter(annotationManager);
-        var localLayer = new AnnotationSurface(annotation.Width, annotation.Height);          // 교수자 로컬 판서 레이어
-        using var studentOverlay = new StudentAnnotationOverlay(annotation);                   // 학생(공유 대상) 화면 위 오버레이
+        var localLayer = new AnnotationOverlayLayer(annotation.Width, annotation.Height);
+        using var studentOverlay = AnnotationOverlayLayer.CreateDesktopOverlay(annotation, "[EduStream E2E] 학생 판서 오버레이");
+        var transmittedPayloads = new List<string>();
 
         int rendered = 0, dispatched = 0;
         engine.OnStrokeRendered += (_, _) => Interlocked.Increment(ref rendered);
         engine.OnStrokeDispatched += (_, _) => Interlocked.Increment(ref dispatched);
-        engine.AddRendererHandler((stroke, _) => { localLayer.Draw(stroke); return Task.CompletedTask; });
-        engine.AddTransmissionHandler((stroke, _) => { studentOverlay.Surface.Draw(stroke); return Task.CompletedTask; });
-        // 숨김/재표시/전체 삭제/실행 취소는 두 출력(교수자 로컬 레이어, 학생 화면 오버레이)에 같은 스냅샷으로 반영된다.
-        engine.AddLayerSyncHandler(localLayer.ReplaceAll);
-        engine.AddLayerSyncHandler(studentOverlay.Surface.ReplaceAll);
+        localLayer.BindLocalRenderer(engine);
+        studentOverlay.BindTransmission(engine, (json, _) => transmittedPayloads.Add(json));
         var syncEvents = new List<AnnotationLayerSyncedEventArgs>();
         engine.OnLayerSynced += (_, e) => { lock (syncEvents) syncEvents.Add(e); };
         await engine.ActivateEngineAsync();
@@ -684,8 +701,10 @@ public class AdapterDefectRegressionTests
         Assert.Equal(2, localLayer.ShapeCount);
 
         // (b) 학생 화면 오버레이에도 그려졌다
-        Assert.True(studentOverlay.Surface.CountPixels(IsCyan) > 1000, "학생 화면 오버레이에 선이 그려지지 않았습니다.");
-        Assert.True(studentOverlay.Surface.CountPixels(IsYellow) > 1000, "학생 화면 오버레이에 도형이 그려지지 않았습니다.");
+        Assert.True(studentOverlay.CountPixels(IsCyan) > 1000, "학생 화면 오버레이에 선이 그려지지 않았습니다.");
+        Assert.True(studentOverlay.CountPixels(IsYellow) > 1000, "학생 화면 오버레이에 도형이 그려지지 않았습니다.");
+        Assert.Equal(2, transmittedPayloads.Count);
+        Assert.Equal(ReverseE2EContext.ProfessorId, AnnotationStrokeWire.FromJson(transmittedPayloads[0]).ParticipantId);
 
         // (c) 공유 대상 화면에 반영됐다: 오버레이는 뷰어 창 밖(학생 데스크톱)에만 있으므로, 뷰어 영역에서 새로 생긴
         //     시안/노랑 픽셀은 WDS 로 전달된 원격 화면 이미지에서만 나올 수 있다.
@@ -702,9 +721,9 @@ public class AdapterDefectRegressionTests
         await engine.SetLayerVisibilityAsync(false);
         Assert.False(annotationManager.IsLayerVisible);
         Assert.Equal(0, localLayer.ShapeCount);
-        Assert.Equal(0, studentOverlay.Surface.ShapeCount);
+        Assert.Equal(0, studentOverlay.ShapeCount);
         Assert.Equal(0, localLayer.CountPixels(IsCyan) + localLayer.CountPixels(IsYellow));
-        Assert.Equal(0, studentOverlay.Surface.CountPixels(IsCyan) + studentOverlay.Surface.CountPixels(IsYellow));
+        Assert.Equal(0, studentOverlay.CountPixels(IsCyan) + studentOverlay.CountPixels(IsYellow));
         await WaitUntilAsync(() =>
         {
             afterCyan = ScanScreen(area, IsCyan).Count;
@@ -727,7 +746,7 @@ public class AdapterDefectRegressionTests
         Assert.Equal(renderedBeforeHiddenStroke, Volatile.Read(ref rendered)); // 그리지 않았으니 완료 이벤트도 없다
         Assert.Equal(3, (await annotationManager.GetAllStrokesAsync()).Count);
         Assert.Equal(0, localLayer.ShapeCount);
-        Assert.Equal(0, studentOverlay.Surface.ShapeCount);
+        Assert.Equal(0, studentOverlay.ShapeCount);
         await Task.Delay(1500); // 화면 전달 지연보다 길게 기다린 뒤에도 뷰어에 나타나면 안 된다
         Assert.True(ScanScreen(area, IsRed).Count - beforeRed < 10, "숨긴 상태에서 그린 스트로크가 공유 화면에 나타났습니다.");
 
@@ -735,7 +754,7 @@ public class AdapterDefectRegressionTests
         await engine.SetLayerVisibilityAsync(true);
         Assert.True(annotationManager.IsLayerVisible);
         Assert.Equal(3, localLayer.ShapeCount);
-        Assert.Equal(3, studentOverlay.Surface.ShapeCount);
+        Assert.Equal(3, studentOverlay.ShapeCount);
         Assert.True(localLayer.CountPixels(IsCyan) > 1000 && localLayer.CountPixels(IsYellow) > 1000 && localLayer.CountPixels(IsRed) > 1000,
             "재표시 후 로컬 레이어에 3개 스트로크가 모두 복원되지 않았습니다.");
         int redNow = 0;
@@ -752,10 +771,10 @@ public class AdapterDefectRegressionTests
         await engine.ClearAllStrokesAsync();
         Assert.Empty(await annotationManager.GetAllStrokesAsync());
         Assert.Equal(0, localLayer.ShapeCount);
-        Assert.Equal(0, studentOverlay.Surface.ShapeCount);
+        Assert.Equal(0, studentOverlay.ShapeCount);
         await engine.SetLayerVisibilityAsync(true);
         Assert.Equal(0, localLayer.ShapeCount);
-        Assert.Equal(0, studentOverlay.Surface.ShapeCount);
+        Assert.Equal(0, studentOverlay.ShapeCount);
         await WaitUntilAsync(() =>
         {
             afterCyan = ScanScreen(area, IsCyan).Count;
@@ -816,8 +835,8 @@ public class AdapterDefectRegressionTests
 
         Assert.NotNull(applied); // 적용 실패는 ReverseScreenShareAdapter 가 삼키므로 완료 이벤트로 성공을 확인한다.
         Assert.True(viewer.SmartSizing);
-        Assert.Equal(new Rectangle(240, 135, 480, 270), viewer.Bounds);
-        Assert.Equal(new Size(480, 270), applied!.ViewportInfo.ViewportSize);
+        Assert.Equal(new Rectangle(0, 0, 960, 540), viewer.Bounds);
+        Assert.Equal(new Size(960, 540), applied!.ViewportInfo.ViewportSize);
         Assert.Equal(viewer.Bounds, viewportAdapter.LastAppliedViewerBounds);
     }
 
@@ -1073,6 +1092,17 @@ public class AdapterDefectRegressionTests
             $"축소된 뷰어 바깥 영역이 비어 있어야 합니다. 위치={screenPoint}, 기대={expected}, 실제={actual}");
     }
 
+    /// <summary>2번 IRemoteInputGate 가 넘기는 RemoteControlState 최소 유효 값. 교수자 ID 매핑은 게이트 생성자가 담당한다.</summary>
+    private static EduStream.Core.Collaboration.RemoteControlState CreateGateState(Guid sessionId)
+    {
+        var professor = new EduStream.Core.Collaboration.ParticipantConnection(
+            sessionId, Guid.NewGuid(), Guid.NewGuid(), EduStream.Core.Collaboration.ParticipantRole.Professor);
+        var student = new EduStream.Core.Collaboration.ParticipantConnection(
+            sessionId, Guid.NewGuid(), Guid.NewGuid(), EduStream.Core.Collaboration.ParticipantRole.Student);
+        var snapshot = new EduStream.Core.Collaboration.ParticipantSnapshot(student, ReverseE2EContext.StudentId, true, true, true, 1);
+        return EduStream.Core.Collaboration.RemoteControlState.Request(professor, snapshot, Guid.NewGuid());
+    }
+
     private static Point PickOffsetPoint(Point origin)
     {
         var bounds = Forms.Screen.PrimaryScreen!.Bounds;
@@ -1178,6 +1208,10 @@ public class AdapterDefectRegressionTests
     private sealed class ProfessorViewerHarness : IDisposable
     {
         private bool _disposed;
+        private readonly EventHandler _onEstablished;
+        private readonly EventHandler _onFailed;
+        private readonly AxRDPCOMAPILib._IRDPSessionEvents_OnConnectionTerminatedEventHandler _onTerminated;
+        private readonly AxRDPCOMAPILib._IRDPSessionEvents_OnErrorEventHandler _onError;
 
         public Wpf.Window Window { get; }
         public Forms.Panel Surface { get; }
@@ -1191,10 +1225,14 @@ public class AdapterDefectRegressionTests
             Surface = new Forms.Panel { BackColor = Color.FromArgb(24, 24, 24), Dock = Forms.DockStyle.Fill };
             Viewer = new AxRDPCOMAPILib.AxRDPViewer();
 
-            Viewer.OnConnectionEstablished += (_, _) => Established.TrySetResult(true);
-            Viewer.OnConnectionFailed += (_, _) => Failed.TrySetResult("OnConnectionFailed");
-            Viewer.OnConnectionTerminated += (_, _) => Terminated.TrySetResult(true);
-            Viewer.OnError += (_, _) => Failed.TrySetResult("OnError");
+            _onEstablished = (_, _) => Established.TrySetResult(true);
+            _onFailed = (_, _) => Failed.TrySetResult("OnConnectionFailed");
+            _onTerminated = (_, _) => Terminated.TrySetResult(true);
+            _onError = (_, _) => Failed.TrySetResult("OnError");
+            Viewer.OnConnectionEstablished += _onEstablished;
+            Viewer.OnConnectionFailed += _onFailed;
+            Viewer.OnConnectionTerminated += _onTerminated;
+            Viewer.OnError += _onError;
 
             ((ISupportInitialize)Viewer).BeginInit();
             Surface.Controls.Add(Viewer);
@@ -1244,139 +1282,47 @@ public class AdapterDefectRegressionTests
         {
             if (_disposed) return;
             _disposed = true;
-            try { Viewer.Disconnect(); } catch { /* 이미 끊김 */ }
-            try { Surface.Controls.Remove(Viewer); Viewer.Dispose(); } catch { }
+
+            Viewer.OnConnectionEstablished -= _onEstablished;
+            Viewer.OnConnectionFailed -= _onFailed;
+            Viewer.OnConnectionTerminated -= _onTerminated;
+            Viewer.OnError -= _onError;
+
+            // IRDPSRAPIViewer 는 이미 Failed/Terminated 인데 Disconnect 를 다시 치면 COM 이 멈춘다.
+            // 연결이 살아 있을 때만 끊고, 컨트롤 해제는 항상 수행한다.
+            if (IsConnectionLive())
+            {
+                try { Viewer.Disconnect(); } catch { /* 이미 끊김 */ }
+            }
+
+            try
+            {
+                if (!Viewer.IsDisposed)
+                {
+                    Surface.Controls.Remove(Viewer);
+                    Viewer.Dispose();
+                }
+            }
+            catch { /* 표시 컨트롤 이미 해제 */ }
             try { Window.Close(); } catch { }
         }
-    }
 
-    /// <summary>판서 스트로크를 WPF 도형으로 실제로 그리고, 렌더 결과를 비트맵 픽셀로 확인할 수 있는 캔버스</summary>
-    private sealed class AnnotationSurface
-    {
-        private readonly int _width;
-        private readonly int _height;
-
-        public WpfControls.Canvas Canvas { get; }
-        public int ShapeCount => Canvas.Children.Count;
-
-        public AnnotationSurface(double width, double height)
+        private bool IsConnectionLive()
         {
-            _width = (int)width;
-            _height = (int)height;
-            Canvas = new WpfControls.Canvas { Width = width, Height = height };
-            Canvas.Measure(new Wpf.Size(width, height));
-            Canvas.Arrange(new Wpf.Rect(0, 0, width, height));
-        }
-
-        /// <summary>엔진의 레이어 스냅샷으로 출력을 통째로 교체한다 (숨김=빈 목록, 재표시=보존된 전체, 삭제=빈 목록).</summary>
-        public Task ReplaceAll(AnnotationLayerSnapshot snapshot)
-        {
-            Canvas.Children.Clear();
-            foreach (var stroke in snapshot.VisibleStrokes) Draw(stroke);
-            Canvas.UpdateLayout();
-            return Task.CompletedTask;
-        }
-
-        public void Draw(AnnotationStroke stroke)
-        {
-            var points = stroke.Points;
-            if (points.Count < 2) throw new InvalidOperationException("선/도형은 점이 2개 이상 필요합니다.");
-
-            var c = stroke.Color;
-            var brush = new WpfMedia.SolidColorBrush(WpfMedia.Color.FromArgb(c.A, c.R, c.G, c.B));
-            var first = points[0];
-            var last = points[points.Count - 1];
-
-            Wpf.UIElement element;
-            switch (stroke.Tool)
+            try
             {
-                case AnnotationTool.Line:
-                    element = new WpfShapes.Line
-                    {
-                        X1 = first.X, Y1 = first.Y, X2 = last.X, Y2 = last.Y,
-                        Stroke = brush, StrokeThickness = stroke.StrokeWidth
-                    };
-                    break;
-
-                case AnnotationTool.Rectangle:
-                    var rectangle = new WpfShapes.Rectangle
-                    {
-                        Width = Math.Abs(last.X - first.X),
-                        Height = Math.Abs(last.Y - first.Y),
-                        Stroke = brush,
-                        StrokeThickness = stroke.StrokeWidth
-                    };
-                    WpfControls.Canvas.SetLeft(rectangle, Math.Min(first.X, last.X));
-                    WpfControls.Canvas.SetTop(rectangle, Math.Min(first.Y, last.Y));
-                    element = rectangle;
-                    break;
-
-                case AnnotationTool.Pen:
-                    var polyline = new WpfShapes.Polyline { Stroke = brush, StrokeThickness = stroke.StrokeWidth };
-                    foreach (var p in points) polyline.Points.Add(new Wpf.Point(p.X, p.Y));
-                    element = polyline;
-                    break;
-
-                default:
-                    throw new NotSupportedException($"테스트 렌더러가 지원하지 않는 도구입니다: {stroke.Tool}");
+                return Viewer.IsHandleCreated
+                    && !Viewer.IsDisposed
+                    && Established.Task.IsCompletedSuccessfully
+                    && !Terminated.Task.IsCompleted
+                    && !Failed.Task.IsCompleted;
             }
-
-            Canvas.Children.Add(element);
-            Canvas.UpdateLayout();
-        }
-
-        /// <summary>캔버스를 실제로 렌더링한 비트맵에서 조건에 맞는 불투명 픽셀 수를 센다.</summary>
-        public int CountPixels(Func<byte, byte, byte, bool> match)
-        {
-            var bitmap = new WpfMedia.Imaging.RenderTargetBitmap(_width, _height, 96, 96, WpfMedia.PixelFormats.Pbgra32);
-            bitmap.Render(Canvas);
-
-            int stride = _width * 4;
-            var buffer = new byte[stride * _height];
-            bitmap.CopyPixels(buffer, stride, 0);
-
-            int count = 0;
-            for (int i = 0; i < buffer.Length; i += 4)
+            catch
             {
-                if (buffer[i + 3] == 255 && match(buffer[i + 2], buffer[i + 1], buffer[i]))
-                    count++;
+                return false;
             }
-            return count;
         }
     }
-
-    /// <summary>학생(공유 대상) 데스크톱 위에 뜨는 투명 판서 오버레이. 이 창의 내용이 WDS 로 교수자 뷰어에 전달된다.</summary>
-    private sealed class StudentAnnotationOverlay : IDisposable
-    {
-        private readonly Wpf.Window _window;
-        public AnnotationSurface Surface { get; }
-
-        public StudentAnnotationOverlay(Wpf.Rect bounds)
-        {
-            Surface = new AnnotationSurface(bounds.Width, bounds.Height);
-            _window = new Wpf.Window
-            {
-                Title = "[EduStream E2E] 학생 판서 오버레이 (자동 종료)",
-                WindowStyle = Wpf.WindowStyle.None,
-                ResizeMode = Wpf.ResizeMode.NoResize,
-                AllowsTransparency = true,
-                Background = WpfMedia.Brushes.Transparent,
-                ShowInTaskbar = false,
-                ShowActivated = false,
-                Topmost = true,
-                WindowStartupLocation = Wpf.WindowStartupLocation.Manual,
-                Left = bounds.Left, Top = bounds.Top, Width = bounds.Width, Height = bounds.Height,
-                Content = Surface.Canvas
-            };
-            _window.Show();
-        }
-
-        public void Dispose()
-        {
-            try { _window.Content = null; _window.Close(); } catch { }
-        }
-    }
-
     /// <summary>
     /// 7단계 중 1~5단계를 "실제 WDS 세션 + 실제 AxRDPViewer + 실제 화면 픽셀"로 수행하는 컨텍스트.
     /// 각 Step 안의 Assert 가 해당 단계의 통과 조건이며, 상태 강제 주입이나 OnConnectedAsync 직접 호출은 없다.
@@ -1398,7 +1344,7 @@ public class AdapterDefectRegressionTests
         public ReverseInvitationPacket? Invitation { get; private set; }
         public ReverseInvitationWire? Received { get; private set; }
         public ProfessorViewerHarness? Viewer { get; private set; }
-
+        private readonly List<ProfessorViewerHarness> _attempts = new();
         private Wpf.Window? _marker;
 
         /// <summary>이벤트 기록보다 먼저 실행되는 구독 지점 (입력 게이트처럼 이벤트 직후 즉시 반응해야 하는 코드용)</summary>
@@ -1514,12 +1460,19 @@ public class AdapterDefectRegressionTests
             Assert.True(count >= 30);
         }
 
+        public void RetainAttempt(ProfessorViewerHarness viewer) => _attempts.Add(viewer);
+
         public async ValueTask DisposeAsync()
         {
-            try { Viewer?.Dispose(); } catch { }
-            try { _marker?.Close(); } catch { }
+            // 거절된 뷰어를 공유 세션이 살아있는 동안 OleClose 하면 WDS COM 이 멈춘다.
+            // 세션을 먼저 종료한 뒤에 뷰어를 해제한다.
             try { await Host.StopReverseSharingAsync(); }
             catch (Exception ex) { System.Diagnostics.Trace.TraceError($"[E2E] 정리 중 종료 실패: {ex}"); }
+            await Dispatcher.Yield();
+            foreach (var attempt in _attempts)
+                try { attempt.Dispose(); } catch { }
+            try { Viewer?.Dispose(); } catch { }
+            try { _marker?.Close(); } catch { }
             Host.Dispose();
         }
     }

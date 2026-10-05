@@ -75,7 +75,9 @@ public class WdsViewportAdapterTests
         // Assert
         Assert.NotNull(result);
         Assert.True(result.ZoomLevel > 0);
-        Assert.Equal(result.ZoomLevel, wdsAdapter.CurrentZoom);
+        // ApplyFitMode 이후 CurrentZoom 은 맞춤 대비 사용자 배율(1.0)이다. 절대 스케일은 result.ZoomLevel.
+        Assert.Equal(1.0, wdsAdapter.CurrentZoom);
+        Assert.InRange(result.ZoomLevel, 0.66, 0.67); // 1920x1080 → 1280x720 = 2/3
     }
 
     [Fact]
