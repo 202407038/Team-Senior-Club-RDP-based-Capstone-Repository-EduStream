@@ -92,7 +92,7 @@ public sealed class SharingRestartRestoreTests
     }
 
     [Fact]
-    public async Task StudentWhoRevokedViewing_IsNotNotified()
+    public async Task StudentWhoRevokedMyScreenViewing_IsStillRestored()
     {
         await using var rig = await Rig.OpenAsync();
         var alice = await rig.JoinAsync("Alice");
@@ -102,18 +102,37 @@ public sealed class SharingRestartRestoreTests
         await rig.RequestInvitationAsync(bob, Guid.NewGuid());
         await rig.SessionManager.DetachRdpSharingAsync();
 
+        // 내 화면 보기 허용(학생→교수자)을 꺼도 교수자 공유 화면 수신 복귀에는 영향이 없어야 한다.
         Assert.True(await rig.SessionManager.UpdateParticipantPermissionsAsync("Alice", allowViewing: false, allowControl: false));
+        Assert.Equal(2, rig.SessionManager.ScreenWaiterCount);
+
+        rig.SessionManager.AttachRdpSharing(rig.Sharing, Guid.NewGuid());
+
+        await alice.SharingStarted.Reader.ReadAsync().AsTask().WaitAsync(Wait);
+        await bob.SharingStarted.Reader.ReadAsync().AsTask().WaitAsync(Wait);
+        Assert.Equal(0, rig.SessionManager.ScreenWaiterCount);
+    }
+
+    [Fact]
+    public async Task ViewingRevokedWhileSharing_ThenRestart_StudentIsRestored()
+    {
+        await using var rig = await Rig.OpenAsync();
+        var alice = await rig.JoinAsync("Alice");
+        rig.SessionManager.AttachRdpSharing(rig.Sharing, Guid.NewGuid());
+        Assert.IsType<RdpInvitationPacket>(await rig.RequestInvitationAsync(alice, Guid.NewGuid()));
+
+        Assert.True(await rig.SessionManager.UpdateParticipantPermissionsAsync("Alice", allowViewing: false, allowControl: false));
+        await rig.SessionManager.DetachRdpSharingAsync();
         Assert.Equal(1, rig.SessionManager.ScreenWaiterCount);
 
         rig.SessionManager.AttachRdpSharing(rig.Sharing, Guid.NewGuid());
 
-        await bob.SharingStarted.Reader.ReadAsync().AsTask().WaitAsync(Wait);
-        await Task.Delay(100);
-        Assert.False(alice.SharingStarted.Reader.TryRead(out _));
+        await alice.SharingStarted.Reader.ReadAsync().AsTask().WaitAsync(Wait);
+        Assert.IsType<RdpInvitationPacket>(await rig.RequestInvitationAsync(alice, Guid.NewGuid()));
     }
 
     [Fact]
-    public async Task ViewingRevokedBeforeRequest_IsNotQueued()
+    public async Task ViewingRevokedBeforeRequest_IsStillQueued()
     {
         await using var rig = await Rig.OpenAsync();
         var alice = await rig.JoinAsync("Alice");
@@ -121,11 +140,11 @@ public sealed class SharingRestartRestoreTests
 
         await rig.RequestInvitationAsync(alice, Guid.NewGuid());
 
-        Assert.Equal(0, rig.SessionManager.ScreenWaiterCount);
+        Assert.Equal(1, rig.SessionManager.ScreenWaiterCount);
     }
 
     [Fact]
-    public async Task ViewingOffThenOnBeforeSharing_IsRequeued_AndNotifiedWhenSharingStarts()
+    public async Task ViewingOffThenOnBeforeSharing_KeepsWaiter_AndNotifiedWhenSharingStarts()
     {
         await using var rig = await Rig.OpenAsync();
         var alice = await rig.JoinAsync("Alice");
@@ -133,29 +152,13 @@ public sealed class SharingRestartRestoreTests
         Assert.Equal(1, rig.SessionManager.ScreenWaiterCount);
 
         Assert.True(await rig.SessionManager.UpdateParticipantPermissionsAsync("Alice", allowViewing: false, allowControl: false));
-        Assert.Equal(0, rig.SessionManager.ScreenWaiterCount);
+        Assert.Equal(1, rig.SessionManager.ScreenWaiterCount);
         Assert.True(await rig.SessionManager.UpdateParticipantPermissionsAsync("Alice", allowViewing: true, allowControl: false));
         Assert.Equal(1, rig.SessionManager.ScreenWaiterCount);
 
         rig.SessionManager.AttachRdpSharing(rig.Sharing, Guid.NewGuid());
 
         await alice.SharingStarted.Reader.ReadAsync().AsTask().WaitAsync(Wait);
-    }
-
-    [Fact]
-    public async Task ViewingOnWhileSharingWithoutInvitation_NotifiesImmediately()
-    {
-        await using var rig = await Rig.OpenAsync();
-        var alice = await rig.JoinAsync("Alice");
-        Assert.True(await rig.SessionManager.UpdateParticipantPermissionsAsync("Alice", allowViewing: false, allowControl: false));
-        rig.SessionManager.AttachRdpSharing(rig.Sharing, Guid.NewGuid());
-        await Task.Delay(100);
-        Assert.False(alice.SharingStarted.Reader.TryRead(out _));
-
-        Assert.True(await rig.SessionManager.UpdateParticipantPermissionsAsync("Alice", allowViewing: true, allowControl: false));
-
-        var notice = await alice.SharingStarted.Reader.ReadAsync().AsTask().WaitAsync(Wait);
-        Assert.Equal(rig.SessionManager.CurrentSession!.SessionId, notice.SessionId);
     }
 
     [Fact]
@@ -317,10 +320,8 @@ public sealed class SharingRestartRestoreTests
         finally { release.TrySetResult(); }
     }
 
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task PendingInvitation_DoesNotRestoreAfterPermissionWithdrawalOrSessionClose(bool closeSession)
+    [Fact]
+    public async Task PendingInvitation_DoesNotRestoreAfterSessionClose()
     {
         await using var rig = await Rig.OpenAsync();
         var alice = await rig.JoinAsync("Alice");
@@ -334,10 +335,8 @@ public sealed class SharingRestartRestoreTests
             await entered.Task.WaitAsync(Wait);
             await rig.SessionManager.DetachRdpSharingAsync();
             Assert.Equal(1, rig.SessionManager.ScreenWaiterCount);
-            if (closeSession) await rig.CloseAsync();
-            else await rig.SessionManager.UpdateParticipantPermissionsAsync("Alice", false, false);
+            await rig.CloseAsync();
             Assert.Equal(0, rig.SessionManager.ScreenWaiterCount);
-            if (!closeSession) rig.SessionManager.AttachRdpSharing(rig.Sharing, Guid.NewGuid());
             release.TrySetResult();
             await WaitUntilAsync(() => !rig.Sharing.RevokedInvitations.IsEmpty);
             Assert.Equal(0, rig.SessionManager.RdpInvitationCount);
