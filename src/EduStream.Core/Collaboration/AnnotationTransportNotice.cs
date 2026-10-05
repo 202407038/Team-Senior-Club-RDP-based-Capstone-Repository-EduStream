@@ -70,7 +70,9 @@ public sealed record AnnotationTransportNotice(Guid SessionId, Guid SharingId, G
         var participant = stroke.GetProperty("ParticipantId").GetString();
         if (id == Guid.Empty || !ReverseRdpInvitationNotice.ValidIdentity(participant!) ||
             stroke.GetProperty("CreatedAt").GetDateTimeOffset() == default ||
-            stroke.GetProperty("Tool").GetString() is not ("Pen" or "Highlighter" or "Eraser" or "Line" or "Rectangle" or "Ellipse") ||
+            // Core의 UI 도구 Ellipse는 기존 엔진 wire에서 Circle로 직렬화된다.
+            // 엔진이 표시하지 못하는 Highlighter/Arrow/Text는 전달 전에 거부한다.
+            stroke.GetProperty("Tool").GetString() is not ("Pen" or "Eraser" or "Line" or "Rectangle" or "Circle") ||
             stroke.GetProperty("StrokeWidth").GetInt32() is < 1 or > 256)
             throw new ArgumentException("판서 스트로크 속성이 잘못되었습니다.");
         foreach (var component in new[] { "R", "G", "B", "A" })
@@ -78,7 +80,7 @@ public sealed record AnnotationTransportNotice(Guid SessionId, Guid SharingId, G
                 throw new ArgumentException("판서 색상이 잘못되었습니다.");
         _ = stroke.GetProperty("IsVisible").GetBoolean();
         var points = stroke.GetProperty("Points");
-        if (points.ValueKind != JsonValueKind.Array || points.GetArrayLength() is < 1 or > MaxPointsPerStroke)
+        if (points.ValueKind != JsonValueKind.Array || points.GetArrayLength() is < 2 or > MaxPointsPerStroke)
             throw new ArgumentException("판서 좌표 수가 잘못되었습니다.");
         foreach (var point in points.EnumerateArray())
         {
