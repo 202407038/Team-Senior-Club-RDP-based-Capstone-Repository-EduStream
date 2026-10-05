@@ -88,6 +88,19 @@ public sealed class CoreEngineHandoffTests
         Assert.DoesNotContain(secret.Password, secret.ToString());
     }
 
+    [Fact]
+    public void SharingRestart_SameConnectionRejectsPreviousSharingGeneration()
+    {
+        var old = Invitation();
+        var current = old with { SharingId = Guid.NewGuid(), InvitationId = Guid.NewGuid() };
+        current.ValidateForSharing(current.SessionId, current.SharingId, current.ProfessorId,
+            current.ConnectionId, current.StudentId, DateTimeOffset.UtcNow);
+        Assert.Throws<ArgumentException>(() => old.ValidateForSharing(current.SessionId, current.SharingId,
+            current.ProfessorId, current.ConnectionId, current.StudentId, DateTimeOffset.UtcNow));
+        Assert.Throws<ArgumentException>(() => current.ValidateForSharing(current.SessionId, Guid.Empty,
+            current.ProfessorId, current.ConnectionId, current.StudentId, DateTimeOffset.UtcNow));
+    }
+
     private static AnnotationStroke Stroke() => new()
     {
         ParticipantId = "professor", Tool = EduStream.Server.Rdp.AnnotationTool.Rectangle,
@@ -127,12 +140,18 @@ public sealed class CoreEngineHandoffTests
     [InlineData("width")]
     [InlineData("duplicate")]
     [InlineData("oversize")]
+    [InlineData("one_point")]
+    [InlineData("ellipse_alias")]
+    [InlineData("highlighter")]
     public void Annotation_RejectsMalformedOrExcessivePayload(string kind)
     {
         var root = JsonNode.Parse(AnnotationStrokeWire.ToJson(Stroke()))!;
         if (kind == "points") root["Points"] = JsonNode.Parse("[[1]]");
         if (kind == "tool") root["Tool"] = "999";
         if (kind == "width") root["StrokeWidth"] = 0;
+        if (kind == "one_point") root["Points"] = JsonNode.Parse("[[1,2]]");
+        if (kind == "ellipse_alias") root["Tool"] = "Ellipse";
+        if (kind == "highlighter") root["Tool"] = "Highlighter";
         var json = root.ToJsonString();
         if (kind == "duplicate") json = json.Insert(1, "\"Tool\":\"Pen\",");
         if (kind == "oversize") json = new string('x', AnnotationTransportNotice.MaxPayloadBytes + 1);
