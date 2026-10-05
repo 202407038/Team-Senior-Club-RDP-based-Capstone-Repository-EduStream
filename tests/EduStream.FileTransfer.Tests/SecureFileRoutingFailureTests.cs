@@ -75,11 +75,14 @@ public sealed partial class SecureFileRoutingWiringTests
         await WaitUntilAsync(() => Volatile.Read(ref stored) == 1);
     }
 
-    [Fact]
-    public async Task CancelAfterFirstSavedChunk_RemovesPartialAndAllowsNewRequest()
+    [Theory]
+    [InlineData(2)]
+    [InlineData(12)]
+    [InlineData(32)]
+    public async Task CancelAfterFirstSavedChunk_RemovesPartialAndAllowsNewRequest(int chunkCount)
     {
         await using var rig = await Rig.OpenAsync();
-        var source = await rig.WriteSourceAsync(FileTransferRules.DefaultChunkSize * 12);
+        var source = await rig.WriteSourceAsync(FileTransferRules.DefaultChunkSize * chunkCount);
         var file = await rig.SessionManager.RegisterFileAsync(source);
         PausedDownloader? paused = null;
         var alice = await rig.JoinAsync("Alice", inner => paused = new PausedDownloader(inner));
@@ -89,13 +92,12 @@ public sealed partial class SecureFileRoutingWiringTests
         using var cancellation = new CancellationTokenSource();
         var download = alice.Files.DownloadAsync(file.FileId, cancellationToken: cancellation.Token);
 
-       // 원상 복구 1 (TimeSpan.FromSeconds(10) -> Wait)
+        // 실제 디스크에 첫 청크가 기록된 뒤 취소한다.
         await paused!.FirstSaved.Task.WaitAsync(Wait);
 
         Assert.Single(Directory.GetFiles(Path.Combine(rig.Root, "downloads-Alice"), "*.partial"));
         cancellation.Cancel();
 
-        // 원상 복구 2
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => download.WaitAsync(Wait));
 
         paused.Resume.TrySetResult();
@@ -103,11 +105,48 @@ public sealed partial class SecureFileRoutingWiringTests
         Assert.Empty(Directory.GetFiles(Path.Combine(rig.Root, "downloads-Alice")));
         Assert.Equal(0, Volatile.Read(ref stored));
 
-        // 원상 복구 3
         var receipt = await alice.Files.DownloadAsync(file.FileId).WaitAsync(Wait);
 
         Assert.Equal(await File.ReadAllBytesAsync(source), await File.ReadAllBytesAsync(receipt.LocalPath));
         await WaitUntilAsync(() => Volatile.Read(ref stored) == 1);
+    }
+
+    [Fact]
+    public async Task CancelPausedStudent_OtherStudentAndSameConnectionRetryKeepWorking()
+    {
+        await using var rig = await Rig.OpenAsync();
+        var source = await rig.WriteSourceAsync(FileTransferRules.DefaultChunkSize * 20 + 37);
+        var file = await rig.SessionManager.RegisterFileAsync(source);
+        PausedDownloader? paused = null;
+        var alice = await rig.JoinAsync("Alice", inner => paused = new PausedDownloader(inner));
+        var bob = await rig.JoinAsync("Bob");
+        await WaitUntilAsync(() => alice.Files.Catalog?.Files.Count == 1 && bob.Files.Catalog?.Files.Count == 1);
+        var stored = new System.Collections.Concurrent.ConcurrentBag<FileStoredNotice>();
+        rig.SessionManager.FileTransfers!.FileStored += (_, notice) => stored.Add(notice);
+        using var cancellation = new CancellationTokenSource();
+        var aliceFirst = alice.Files.DownloadAsync(file.FileId, cancellationToken: cancellation.Token);
+        await paused!.FirstSaved.Task.WaitAsync(Wait);
+
+        // Alice의 수신 버퍼가 막혀도 별도 학생 연결과 디스크 저장은 완료되어야 한다.
+        var bobReceipt = await bob.Files.DownloadAsync(file.FileId).WaitAsync(Wait);
+        var expected = await File.ReadAllBytesAsync(source);
+        Assert.Equal(expected, await File.ReadAllBytesAsync(bobReceipt.LocalPath));
+        cancellation.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => aliceFirst.WaitAsync(Wait));
+        paused.Resume.TrySetResult();
+        await WaitUntilAsync(() => rig.SessionManager.FileTransfers.PendingTransferCount == 0);
+        Assert.Empty(Directory.GetFiles(Path.Combine(rig.Root, "downloads-Alice")));
+        Assert.False(alice.Secure.Connection.IsClosed);
+        Assert.False(bob.Secure.Connection.IsClosed);
+
+        var aliceRetry = await alice.Files.DownloadAsync(file.FileId).WaitAsync(Wait);
+        Assert.Equal(expected, await File.ReadAllBytesAsync(aliceRetry.LocalPath));
+        await WaitUntilAsync(() => stored.Count == 2 && rig.SessionManager.FileTransfers.PendingTransferCount == 0);
+        Assert.Contains(stored, n => n.RequestId == bobReceipt.RequestId && n.Sha256 == bobReceipt.Sha256);
+        Assert.Contains(stored, n => n.RequestId == aliceRetry.RequestId && n.Sha256 == aliceRetry.Sha256);
+        Assert.Equal(0, alice.Files.PendingDownloadCount);
+        Assert.Equal(0, bob.Files.PendingDownloadCount);
+        Assert.Empty(Directory.GetFiles(rig.Root, "*.partial", SearchOption.AllDirectories));
     }
 
     [Fact]
