@@ -17,6 +17,8 @@ public sealed class WdsViewportAdapter : IWdsViewportAdapter
     private readonly IViewportFitAdapter _viewportFitAdapter;
     private readonly List<Func<ViewportInfo, Task>> _viewerHandlers = new();
 
+    // _currentZoom 은 "맞춤(fit) 대비 사용자 배율"이다. 1.0 = 컨테이너에 맞춘 100%.
+    // ApplyFitMode 가 계산한 절대 스케일(예: 0.5)을 여기에 넣으면 CalculateRenderBounds 가 한 번 더 곱한다.
     private double _currentZoom = 1.0;
     private Size _currentViewportSize = new(0, 0);
     private Size _sourceSize = new(0, 0);
@@ -67,12 +69,15 @@ public sealed class WdsViewportAdapter : IWdsViewportAdapter
     /// </summary>
     public ViewportInfo ApplyFitMode(FitMode fitMode)
     {
-        var viewportInfo = _viewportFitAdapter.CalculateFitViewport(_sourceSize, _currentViewportSize, fitMode);
-        _currentZoom = viewportInfo.ZoomLevel;
+        var container = _currentViewportSize;
+        var viewportInfo = _viewportFitAdapter.CalculateFitViewport(_sourceSize, container, fitMode);
+        // 맞춤 결과를 기준(100%)으로 되돌린다. 이후 휠/SetZoomLevel 은 이 기준 위에서만 움직인다.
+        _currentZoom = 1.0;
         _currentViewportSize = viewportInfo.ViewportSize;
         _currentSourceRect = viewportInfo.SourceRect;
 
         NotifyViewportChanged();
+        // 호출자에게는 절대 맞춤 스케일(예: 1920→960 이면 0.5)을 그대로 돌려준다.
         return viewportInfo;
     }
 
@@ -150,12 +155,14 @@ public sealed class WdsViewportAdapter : IWdsViewportAdapter
             return Rectangle.Empty;
         }
 
-        double scaleX = (double)containerSize.Width / _sourceSize.Width;
-        double scaleY = (double)containerSize.Height / _sourceSize.Height;
-        double fitScale = Math.Min(scaleX, scaleY) * _currentZoom;
+        // 컨테이너에 대한 맞춤 스케일 × 사용자 배율. ApplyFitMode 가 이미 넣은 절대 스케일을 다시 곱하지 않는다.
+        double fitScale = Math.Min(
+            (double)containerSize.Width / _sourceSize.Width,
+            (double)containerSize.Height / _sourceSize.Height);
+        double scale = fitScale * _currentZoom;
 
-        int renderWidth = (int)(_sourceSize.Width * fitScale);
-        int renderHeight = (int)(_sourceSize.Height * fitScale);
+        int renderWidth = Math.Max(1, (int)(_sourceSize.Width * scale));
+        int renderHeight = Math.Max(1, (int)(_sourceSize.Height * scale));
 
         int offsetX = (containerSize.Width - renderWidth) / 2;
         int offsetY = (containerSize.Height - renderHeight) / 2;
