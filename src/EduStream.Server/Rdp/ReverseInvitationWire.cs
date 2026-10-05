@@ -2,6 +2,7 @@ using System;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using EduStream.Core.Collaboration;
 
 namespace EduStream.Server.Rdp;
 
@@ -22,10 +23,10 @@ namespace EduStream.Server.Rdp;
 /// </summary>
 public sealed class ReverseInvitationWire
 {
-    public const int CurrentContractVersion = 1;
-    public const string ProviderName = "windows-desktop-sharing";
-    public const string StudentToProfessorDirection = "student-to-professor";
-    public const int MaximumConnectionStringBytes = 64 * 1024;
+    public const int CurrentContractVersion = ReverseRdpInvitationNotice.CurrentVersion;
+    public const string ProviderName = ReverseRdpInvitationNotice.ProviderName;
+    public const string StudentToProfessorDirection = ReverseRdpInvitationNotice.StudentToProfessor;
+    public const int MaximumConnectionStringBytes = ReverseRdpInvitationNotice.MaxConnectionStringBytes;
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -103,6 +104,31 @@ public sealed class ReverseInvitationWire
 
     public string ToJson() => JsonSerializer.Serialize(this, JsonOptions);
 
+    /// <summary>기존 엔진 DTO와 공통 보호 채널 계약 사이의 무손실 매핑입니다. 라우팅은 수행하지 않습니다.</summary>
+    public ReverseRdpInvitationNotice ToContract() => new()
+    {
+        ContractVersion = ContractVersion, Provider = Provider, Direction = Direction,
+        SessionId = SessionId, SharingId = SharingId, InvitationId = InvitationId, ConnectionId = ConnectionId,
+        ProfessorId = ProfessorId, StudentId = StudentId, ParticipantId = ParticipantId,
+        ConnectionString = ConnectionString, DataLength = DataLength, ExpiresAt = ExpiresAt,
+        ControlMode = (ReverseRdpControlMode)ControlMode, ViewOnly = ViewOnly
+    };
+
+    public static ReverseInvitationWire FromContract(ReverseRdpInvitationNotice notice)
+    {
+        ArgumentNullException.ThrowIfNull(notice);
+        notice.Validate();
+        return new ReverseInvitationWire
+        {
+            ContractVersion = notice.ContractVersion, Provider = notice.Provider, Direction = notice.Direction,
+            SessionId = notice.SessionId, SharingId = notice.SharingId, InvitationId = notice.InvitationId,
+            ConnectionId = notice.ConnectionId, ProfessorId = notice.ProfessorId, StudentId = notice.StudentId,
+            ParticipantId = notice.ParticipantId, ConnectionString = notice.ConnectionString,
+            DataLength = notice.DataLength, ExpiresAt = notice.ExpiresAt,
+            ControlMode = (ReverseControlMode)notice.ControlMode, ViewOnly = notice.ViewOnly
+        };
+    }
+
     /// <summary>
     /// JSON → DTO. 필수 항목이 하나라도 없으면 <see cref="JsonException"/> 이 발생합니다.
     /// (값의 의미 검증은 <see cref="Validate"/> 로 별도 수행)
@@ -123,40 +149,7 @@ public sealed class ReverseInvitationWire
     public void Validate(Guid expectedSessionId, string expectedProfessorId, Guid expectedConnectionId,
         DateTimeOffset now, string? expectedStudentId = null)
     {
-        if (ContractVersion != CurrentContractVersion ||
-            !string.Equals(Provider, ProviderName, StringComparison.Ordinal) ||
-            !string.Equals(Direction, StudentToProfessorDirection, StringComparison.Ordinal))
-            throw new ArgumentException("지원하지 않는 역방향 RDP 초대 계약입니다.");
-
-        if (SessionId == Guid.Empty || SharingId == Guid.Empty ||
-            InvitationId == Guid.Empty || ConnectionId == Guid.Empty)
-            throw new ArgumentException("세션/공유/초대/연결 ID는 비어 있을 수 없습니다.");
-
-        if (string.IsNullOrWhiteSpace(ProfessorId) || string.IsNullOrWhiteSpace(StudentId))
-            throw new ArgumentException("ProfessorId 와 StudentId 가 필요합니다.");
-
-        if (!string.Equals(ParticipantId, ProfessorId, StringComparison.Ordinal))
-            throw new ArgumentException("역방향 초대의 ParticipantId 는 ProfessorId 와 같아야 합니다.");
-
-        if (SessionId != expectedSessionId || ConnectionId != expectedConnectionId ||
-            !string.Equals(ProfessorId, expectedProfessorId, StringComparison.Ordinal) ||
-            (expectedStudentId is not null && !string.Equals(StudentId, expectedStudentId, StringComparison.Ordinal)))
-            throw new ArgumentException("현재 세션/교수자/연결 시도와 일치하지 않습니다.");
-
-        if (ExpiresAt <= now)
-            throw new ArgumentException("만료된 초대입니다.");
-
-        if (!Enum.IsDefined(ControlMode))
-            throw new ArgumentException("알 수 없는 제어 모드입니다.");
-
-        if (ViewOnly != (ControlMode == ReverseControlMode.ViewOnly))
-            throw new ArgumentException("ViewOnly 표시가 ControlMode 와 모순됩니다.");
-
-        if (string.IsNullOrWhiteSpace(ConnectionString))
-            throw new ArgumentException("연결 문자열이 필요합니다.");
-
-        var length = Encoding.UTF8.GetByteCount(ConnectionString);
-        if (length > MaximumConnectionStringBytes || DataLength != length)
-            throw new ArgumentException("연결 문자열 길이가 유효하지 않습니다.");
+        ToContract().ValidateForConnection(expectedSessionId, expectedProfessorId, expectedConnectionId,
+            expectedStudentId ?? StudentId, now);
     }
 }
