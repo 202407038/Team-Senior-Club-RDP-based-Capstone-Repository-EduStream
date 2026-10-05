@@ -41,9 +41,8 @@
 ## 4. 타 담당에게 필요한 작업 (3번은 수정하지 않음)
 
 ### 1번 (Core / 계약)
-- 역방향 초대를 전송 메시지로 실어 나를 계약 위치를 결정해 주세요.
-  - 선택지 A: Core에 역방향 전용 패킷/검증을 두고 위 필드를 그대로 사용.
-  - 선택지 B: `ReverseInvitationWire`를 Core로 이동(3번은 이동 후 참조만 변경).
+- 2026-10-05 #77에서 선택지 A를 구현·게시했습니다(main 병합 대기). Core `ReverseRdpInvitationNotice` / `ReverseRdpInvitationSecretNotice` 및 Kind 15·16을 사용하고, 기존 엔진은 `ReverseInvitationWire.ToContract/FromContract`로 변환합니다.
+- 판서는 기존 JSON을 Core `AnnotationTransportNotice`(Kind 17)로 운반합니다. [현재 API·연결 순서·검증 범위](./POST_PR51_CORE_FILE_HANDOFF.md)를 따릅니다. 실제 인증 라우팅/렌더러 소비까지 구현했다는 뜻은 아닙니다.
 - 정방향 `RdpInvitationPacket`에 `ProfessorId`/`StudentId`를 추가하거나 `ViewOnly`를 풀지 마세요. 정방향 보기 전용 보장이 깨집니다.
 
 ### 2번 (Server 서비스 / 정책)
