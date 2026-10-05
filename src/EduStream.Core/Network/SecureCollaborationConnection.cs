@@ -12,6 +12,8 @@ public sealed class SecureCollaborationConnection : ICollaborationChannel, IAsyn
     private readonly Stream _stream;
     private readonly IDisposable? _transport;
     private readonly ILogSink _logSink;
+    private readonly TimeSpan _frameWriteTimeout;
+    public static readonly TimeSpan DefaultFrameWriteTimeout = TimeSpan.FromSeconds(15);
     private readonly SemaphoreSlim _sendLock = new(1, 1);
     private readonly CancellationTokenSource _lifetime = new();
     private readonly TaskCompletionSource _completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -21,11 +23,16 @@ public sealed class SecureCollaborationConnection : ICollaborationChannel, IAsyn
     /// <param name="stream">인증이 끝난 SslStream.</param>
     /// <param name="transport">스트림과 함께 닫을 하위 소켓(TcpClient 등).</param>
     /// <param name="remoteAddress">상대 IP. 비밀번호 시도 제한 키로 씁니다.</param>
-    public SecureCollaborationConnection(Stream stream, IDisposable? transport, ILogSink logSink, string? remoteAddress = null)
+    /// <param name="frameWriteTimeout">프레임 하나의 최대 송신 시간. 요청 취소와 별개이며 초과 시 연결을 닫습니다.</param>
+    public SecureCollaborationConnection(Stream stream, IDisposable? transport, ILogSink logSink,
+        string? remoteAddress = null, TimeSpan? frameWriteTimeout = null)
     {
         _stream = stream ?? throw new ArgumentNullException(nameof(stream));
         _transport = transport;
         _logSink = logSink ?? throw new ArgumentNullException(nameof(logSink));
+        _frameWriteTimeout = frameWriteTimeout ?? DefaultFrameWriteTimeout;
+        if (_frameWriteTimeout <= TimeSpan.Zero || _frameWriteTimeout.TotalMilliseconds > int.MaxValue)
+            throw new ArgumentOutOfRangeException(nameof(frameWriteTimeout));
         RemoteAddress = remoteAddress ?? "unknown";
     }
 
@@ -62,13 +69,24 @@ public sealed class SecureCollaborationConnection : ICollaborationChannel, IAsyn
             // 요청 취소는 프레임을 쓰기 전까지만 적용한다. TLS 본문의 일부만 쓰고 취소하면
             // 다음 요청 헤더가 이전 본문에 섞여 같은 연결의 다운로드/제어 메시지까지 망가진다.
             linked.Token.ThrowIfCancellationRequested();
+            using var frameLifetime = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token);
+            frameLifetime.CancelAfter(_frameWriteTimeout);
+            var write = CollaborationFraming.WriteAsync(_stream, frame, frameLifetime.Token);
             try
             {
-                await CollaborationFraming.WriteAsync(_stream, frame, _lifetime.Token);
+                // 토큰을 무시하는 하위 Stream도 송신 잠금을 영원히 점유할 수 없게 한다.
+                await write.WaitAsync(frameLifetime.Token);
+            }
+            catch (OperationCanceledException) when (frameLifetime.IsCancellationRequested && !_lifetime.IsCancellationRequested)
+            {
+                ObserveLateFailure(write);
+                await DisposeAsync();
+                throw new TimeoutException("보호 채널 프레임 송신 시간이 초과되어 연결을 닫았습니다.");
             }
             catch
             {
                 // 실제 IO 실패 후에는 어디까지 전송됐는지 알 수 없으므로 재사용하지 않는다.
+                ObserveLateFailure(write);
                 await DisposeAsync();
                 throw;
             }
@@ -78,6 +96,10 @@ public sealed class SecureCollaborationConnection : ICollaborationChannel, IAsyn
             _sendLock.Release();
         }
     }
+
+    private static void ObserveLateFailure(Task write) =>
+        _ = write.ContinueWith(task => { _ = task.Exception; }, CancellationToken.None,
+            TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
 
     private async Task ReceiveLoopAsync(Func<byte[], Task> onFrame)
     {

@@ -32,7 +32,7 @@ public sealed record ReverseRdpInvitationNotice
     public required ReverseRdpControlMode ControlMode { get; init; }
     public required bool ViewOnly { get; init; }
 
-    /// <summary>구조 검사. 유효기간·인증된 연결과의 대조는 ValidateForConnection으로 별도 수행합니다.</summary>
+    /// <summary>구조 검사. 신규 수신부는 ValidateForSharing으로 유효기간·현재 연결·공유 세대까지 대조합니다.</summary>
     public void Validate()
     {
         if (ContractVersion != CurrentVersion || Provider != ProviderName || Direction != StudentToProfessor ||
@@ -53,6 +53,15 @@ public sealed record ReverseRdpInvitationNotice
         if (SessionId != sessionId || ProfessorId != professorId || ConnectionId != connectionId ||
             StudentId != studentId || ExpiresAt <= now)
             throw new ArgumentException("현재 연결과 일치하지 않거나 만료된 역방향 초대입니다.");
+    }
+
+    /// <summary>연결은 유지한 채 공유를 재시작한 경우까지 대조합니다. 신규 수신 라우터는 이 검사를 사용합니다.</summary>
+    public void ValidateForSharing(Guid sessionId, Guid sharingId, string professorId, Guid connectionId,
+        string studentId, DateTimeOffset now)
+    {
+        ValidateForConnection(sessionId, professorId, connectionId, studentId, now);
+        if (sharingId == Guid.Empty || SharingId != sharingId)
+            throw new ArgumentException("현재 공유 세대와 일치하지 않는 역방향 초대입니다.");
     }
 
     public override string ToString() =>
