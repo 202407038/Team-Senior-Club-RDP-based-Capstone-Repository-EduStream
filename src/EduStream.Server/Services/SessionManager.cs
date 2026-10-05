@@ -264,40 +264,10 @@ public sealed class SessionManager
         if (connection is null || !_participantRegistry.SetPermissions(connection.ConnectionId, allowViewing, allowControl))
             return false;
 
-        // 보기 허용을 철회한 학생은 공유 재시작 때 자동 복귀시키지 않는다(U03).
-        if (!allowViewing) _screenWaiters.TryRemove(clientId, out _);
-        else await ResumeViewingForClientAsync(clientId, displayName);
+        // 보기 허용은 교수자가 학생 화면을 보는 권한(U06/U07)이다. 학생이 교수자 공유 화면을 받는 자동 복귀(U03)와는 무관하다.
         _logSink.Write($"[Control] 허용 변경: 대상={displayName}, 보기={allowViewing}, 제어={allowViewing && allowControl}");
         await ConfirmControlInputRevokedAsync();
         return true;
-    }
-
-    /// <summary>
-    /// 학생이 보기 허용을 다시 켰을 때 화면을 받을 수 있게 되돌립니다. 공유가 아직 없으면 시작 때 자동 복귀하도록
-    /// 대기에 올리고, 이미 공유 중이면서 초대가 없으면 학생에게 초대 재요청 알림을 보냅니다.
-    /// </summary>
-    private async Task ResumeViewingForClientAsync(string clientId, string displayName)
-    {
-        Guid sessionId;
-        bool sharing;
-        lock (_sessionLock)
-        {
-            if (CurrentSession is null) return;
-            sessionId = CurrentSession.SessionId;
-            sharing = _rdpSharingService is not null && _sharingLifetime is { IsCancellationRequested: false };
-            if (!sharing)
-            {
-                TryAddScreenWaiter(clientId);
-                return;
-            }
-        }
-        if (_rdpInvitations.ContainsKey(displayName)) return;
-        await _tcpServer.SendToClientAsync(clientId, PacketFactory.CreateAck(
-            senderId: "Server",
-            ackCode: AckCodes.RdpSharingStarted,
-            message: "화면 공유가 시작되었습니다.",
-            sessionId: sessionId));
-        _logSink.Write($"[Rdp] 보기 허용 복구 후 화면 복귀 알림: clientId={clientId}");
     }
 
     /// <summary>
@@ -1284,14 +1254,14 @@ public sealed class SessionManager
     }
 
     /// <summary>
-    /// 현재 참가 중이고 보기를 허용한 학생만 자동 복귀 대기에 넣습니다. 연결은 대기 시점 것을 기록해
+    /// 현재 참가 중인 학생만 자동 복귀 대기에 넣습니다. 연결은 대기 시점 것을 기록해
     /// 재접속으로 교체된 연결에는 알림을 보내지 않게 합니다.
     /// </summary>
     private void TryAddScreenWaiter(string clientId)
     {
         var connection = _participantRegistry.TryGetConnection(clientId);
         if (connection is null) return;
-        if (_participantRegistry.TryResolve(connection.ConnectionId) is not { Connected: true, AllowViewing: true }) return;
+        if (_participantRegistry.TryResolve(connection.ConnectionId) is not { Connected: true }) return;
         _screenWaiters[clientId] = connection;
     }
 
@@ -1313,10 +1283,10 @@ public sealed class SessionManager
                 continue;
 
             var current = _participantRegistry.TryResolve(waitedConnection.ConnectionId);
-            if (current is not { Connected: true, AllowViewing: true } ||
+            if (current is not { Connected: true } ||
                 _participantRegistry.TryGetConnection(clientId) != waitedConnection)
             {
-                _logSink.Write($"[Rdp] 화면 복귀 대상 제외(퇴장/교체/보기 철회): clientId={clientId}");
+                _logSink.Write($"[Rdp] 화면 복귀 대상 제외(퇴장/교체): clientId={clientId}");
                 continue;
             }
 
