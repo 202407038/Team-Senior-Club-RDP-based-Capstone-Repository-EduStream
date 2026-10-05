@@ -31,6 +31,7 @@ namespace EduStream.Client.ViewModels;
 public sealed class ClientViewModel : ObservableObject
 {
     private readonly InMemoryLogSink _logSink = new();
+    private readonly object _activityLogSync = new();
     private readonly SessionClient _sessionClient;
     private readonly ScreenRenderer _screenRenderer;
     private readonly FileReceiver _fileReceiver;
@@ -1555,11 +1556,18 @@ public sealed class ClientViewModel : ObservableObject
 
     private void SyncLogs()
     {
-        ActivityLogs.Clear();
-        foreach (var entry in _logSink.Snapshot().Reverse())
+        // 실제 앱에서는 UI Dispatcher로 보내고, Application이 없는 테스트/호스트에서도
+        // 종료와 수신 콜백이 같은 ObservableCollection을 Clear/Add로 동시에 바꾸지 않게 한다.
+        // Dispatcher 대기 전에 잠금을 잡으면 UI 스레드와 교착할 수 있으므로 안쪽에서 직렬화한다.
+        RunOnUiThread(() =>
         {
-            ActivityLogs.Add(entry);
-        }
+            lock (_activityLogSync)
+            {
+                ActivityLogs.Clear();
+                foreach (var entry in _logSink.Snapshot().Reverse())
+                    ActivityLogs.Add(entry);
+            }
+        });
     }
 
     /// <summary>
