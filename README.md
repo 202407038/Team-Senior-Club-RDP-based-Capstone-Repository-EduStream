@@ -51,6 +51,7 @@ dotnet test EduStream.sln --no-build
 
 - [실행 및 설정 가이드](docs/work/RUN_GUIDE.md)
 - [현재 상태와 로드맵](docs/work/STATUS_AND_ROADMAP.md)
+- [#51 반영 후 공통 기반·통합 인계](docs/work/POST_PR51_CORE_FILE_HANDOFF.md) — #77 공통 보완·#80 로그 경합 수정·#78 파일 회귀의 main 반영과 담당별 남은 연결 작업을 구분합니다. 배포 ZIP과 소스 기준은 다릅니다.
 - [#63까지의 세션 기반·3번 RDP 상세 인계](docs/work/SESSION_RDP_HANDOFF_PR57.md) — 보호 인증·파일 앱 연결·초대 비밀 자동 전달과 남은 실제 엔진/UI 인수를 구분합니다.
 - [1·4번 후속 검증](docs/work/CORE_FILE_INTEGRATION_READINESS.md) — #62·#63 main 반영 및 검증, 루프백 TLS/TCP와 실제 WDS 인수 범위를 구분합니다.
 - [1·4번 선행 구현 인계](docs/work/FINAL_CORE_FILE_HANDOFF.md) · [최종 통합·QA 체크리스트](docs/work/FINAL_ACCEPTANCE_CHECKLIST.md) — #48·#49 코드 준비와 실제 연동/최종 인수를 구분합니다.

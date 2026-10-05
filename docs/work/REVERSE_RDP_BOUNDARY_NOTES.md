@@ -38,17 +38,18 @@
 
 수신 측은 `ReverseInvitationWire.FromJson()` 후 반드시 `Validate(기대 세션, 기대 교수자, 기대 연결, 현재 시각, 기대 학생)`을 통과시킨 뒤 접속해야 합니다. 빈 값을 임의 ID로 채우거나 검증을 건너뛰는 방식은 쓰지 않습니다.
 
+10/5 공통 계약 재검토 추가 지침: 신규 보호 채널 수신부는 Core `ValidateForSharing`으로 **현재 공유 세대까지** 대조한 후 비밀을 검사하고 엔진에 넘깁니다. 같은 연결에서 공유만 재시작한 경우 기존 연결 검사만으로는 부족합니다. 이 API는 #77에 포함하여 main에 병합됐습니다. [최신 인계와 담당별 남은 일](./POST_PR51_CORE_FILE_HANDOFF.md)을 우선합니다.
+
 ## 4. 타 담당에게 필요한 작업 (3번은 수정하지 않음)
 
 ### 1번 (Core / 계약)
-- 역방향 초대를 전송 메시지로 실어 나를 계약 위치를 결정해 주세요.
-  - 선택지 A: Core에 역방향 전용 패킷/검증을 두고 위 필드를 그대로 사용.
-  - 선택지 B: `ReverseInvitationWire`를 Core로 이동(3번은 이동 후 참조만 변경).
+- 2026-10-05 #77에서 선택지 A를 구현·검증하고 main에 병합했습니다. Core `ReverseRdpInvitationNotice` / `ReverseRdpInvitationSecretNotice` 및 Kind 15·16을 사용하고, 기존 엔진은 `ReverseInvitationWire.ToContract/FromContract`로 변환합니다.
+- 판서는 기존 JSON을 Core `AnnotationTransportNotice`(Kind 17)로 운반합니다. [현재 API·연결 순서·검증 범위](./POST_PR51_CORE_FILE_HANDOFF.md)를 따릅니다. 실제 인증 라우팅/렌더러 소비까지 구현했다는 뜻은 아닙니다.
 - 정방향 `RdpInvitationPacket`에 `ProfessorId`/`StudentId`를 추가하거나 `ViewOnly`를 풀지 마세요. 정방향 보기 전용 보장이 깨집니다.
 
 ### 2번 (Server 서비스 / 정책)
 - 학생 → 교수자 방향의 초대 전달 경로가 아직 없습니다. E2E는 JSON 왕복만 검증합니다.
-- `IRemoteInputGate` 구현체는 3번이 `ReverseWdsRemoteInputGate`로 제공했습니다. 2번은 서비스/UI를 고치지 말고 아래처럼 붙이면 됩니다.
+- `IRemoteInputGate` 구현체는 3번이 `ReverseWdsRemoteInputGate`로 제공했습니다. 2번은 자신의 정책/서비스 연결을 구현합니다. 아래는 연결 예제이며 UI 바인딩은 5번, 실제 학생 호스트/뷰어 기술 배치와 수명은 3번이 담당합니다.
   ```
   var gate = new ReverseWdsRemoteInputGate(
       reverseSession.GrantControlAsync,
@@ -62,7 +63,7 @@
 - 판서 전송: 스트로크 JSON과 `AnnotationLayerWire` 스냅샷 JSON을 함께 운반해야 합니다. 숨김·재표시·지우개·전체 삭제·실행 취소는 스냅샷입니다. `BindTransmission(engine, onPayloadReady)`가 두 종류를 같은 콜백으로 내보내며, 수신의 `ReceiveRemoteStrokeJsonAsync`가 구분합니다. 실제 네트워크 전송 프로토콜은 1·2번이며 이번 보완은 전송 메시지 접점과 독립 수신 레이어까지만 검증합니다.
 
 ### 5번 (UI / 바인딩)
-- 역방향 초대: `ReverseInvitationWire.Validate` 후 뷰어 `Connect`. `RdpViewerService`/`ClientViewModel`은 이 PR에서 수정하지 않았습니다.
+- 역방향 초대: 2번의 현재 연결·공유·비밀 검증 결과와 3번 뷰어 연결 API를 UI에 바인딩합니다. 인증 검사를 ViewModel에 중복 구현하지 않습니다. `RdpViewerService`의 기술 변경은 3번, `ClientViewModel`의 표시 연결은 5번이며 #51에서는 두 파일을 수정하지 않았습니다.
 - 판서: `AnnotationEngineController`(`IAnnotationController`)와 `AnnotationOverlayLayer`를 붙이세요.
   - 로컬: `overlay.BindLocalRenderer(engine)`
   - 학생 창 배치만 5번, 그리기/숨김/삭제는 스냅샷 교체
@@ -84,7 +85,7 @@
 
 | 항목 | 상태 |
 | --- | --- |
-| `IRemoteInputGate` → WDS Grant/Revoke | 제공됨 (`ReverseWdsRemoteInputGate`). 2번 서비스/UI 연결은 대기 |
+| `IRemoteInputGate` → WDS Grant/Revoke | 제공됨 (`ReverseWdsRemoteInputGate`). 2번 정책/서비스와 5번 UI 연결은 대기 |
 | WDS 뷰어에서 발생한 마우스/키보드 입력 | **미검증.** 검증한 것은 (1) 게이트 → COM ControlLevel 3↔2, (2) 같은 PC `WindowsNativeInputPipeline` 커서. 두 경로는 다름 |
 | `OnAttendeeConnected` 내부 검증의 거부 경로 | 거부 시나리오는 WDS 엔진 계층에서 먼저 거부됨. 매니저 자체 `Rejected` 분기는 실제 엔진으로 미유발 |
 | 거부 경로 E2E 행 | 테스트 정리 순서. 거절된 `AxRDPViewer` 를 공유 세션이 살아있는 동안 Dispose/Disconnect 하면 WDS COM 이 멈춤. 거절은 이벤트로 확인한 뒤, 세션 `StopReverseSharingAsync` 이후에 뷰어를 Dispose/Close 한다. 객체 누수·창 숨김 없음. 2026-10-05 재검증: `Reverse_InvalidInvitation` 6회와 만료·침입·소진·재접속 포함 5건이 연속 통과했고 testhost 중단은 없었다. 제품 `Grant`/`Revoke` 경로의 행은 이 재현에서 확인되지 않음 |
