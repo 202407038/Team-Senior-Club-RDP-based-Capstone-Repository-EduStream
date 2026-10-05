@@ -434,7 +434,7 @@ public class AnnotationEngineAdapterTests
     }
 
     [Fact]
-    public async Task ClearAllStrokesAsync_ShouldClearUndoStack()
+    public async Task ClearAllStrokesAsync_ShouldRemainUndoable()
     {
         // Arrange
         var annotationManager = new AnnotationManager();
@@ -458,10 +458,10 @@ public class AnnotationEngineAdapterTests
         var allStrokes = await engineAdapter.GetAllStrokesAsync();
         Assert.Empty(allStrokes);
 
-        // Undo도 실행 불가능해야 함
+        // Core 계약상 전체 지우기도 실행 취소 대상이다.
         await engineAdapter.UndoAsync();
         var strokesAfterUndo = await engineAdapter.GetAllStrokesAsync();
-        Assert.Empty(strokesAfterUndo);
+        Assert.Equal(stroke.StrokeId, Assert.Single(strokesAfterUndo).StrokeId);
     }
     [Fact]
     public async Task ActivateAndDeactivateEngine_ShouldUpdateDrawingStateWhilePreservingVisibility()
