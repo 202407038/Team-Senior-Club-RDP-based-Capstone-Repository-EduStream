@@ -288,6 +288,11 @@ public sealed class SessionMultiClientTests
 
         Assert.DoesNotContain("Alice", rig.SessionManager.ParticipantNames);
         Assert.Contains("Bob", rig.SessionManager.ParticipantNames);
+        // 인원 제거와 leave ACK 뒤에도 서버의 시스템 채팅 송신/로그 기록은 진행 중일 수 있다.
+        // 참가자 수 감소만 기다린 뒤 즉시 로그를 검사하면 정상 이탈도 간헐 실패한다.
+        await WaitUntilAsync(
+            () => rig.ServerLog.Snapshot().Any(e => e.Contains("Alice님이 세션에서 나갔습니다")),
+            DefaultWait);
         Assert.Contains(rig.ServerLog.Snapshot(), e => e.Contains("Alice님이 세션에서 나갔습니다"));
 
         // 남은 Bob은 계속 정상 동작해야 한다.
