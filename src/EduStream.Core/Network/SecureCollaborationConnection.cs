@@ -51,13 +51,27 @@ public sealed class SecureCollaborationConnection : ICollaborationChannel, IAsyn
     public async Task SendAsync(byte[] frame, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(frame);
+        if (frame.Length == 0 || frame.Length > CollaborationMessageCodec.MaxFrameBytes)
+            throw new CollaborationException(CollaborationError.ResourceLimit);
         ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _lifetime.Token);
         await _sendLock.WaitAsync(linked.Token);
         try
         {
             ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
-            await CollaborationFraming.WriteAsync(_stream, frame, linked.Token);
+            // 요청 취소는 프레임을 쓰기 전까지만 적용한다. TLS 본문의 일부만 쓰고 취소하면
+            // 다음 요청 헤더가 이전 본문에 섞여 같은 연결의 다운로드/제어 메시지까지 망가진다.
+            linked.Token.ThrowIfCancellationRequested();
+            try
+            {
+                await CollaborationFraming.WriteAsync(_stream, frame, _lifetime.Token);
+            }
+            catch
+            {
+                // 실제 IO 실패 후에는 어디까지 전송됐는지 알 수 없으므로 재사용하지 않는다.
+                await DisposeAsync();
+                throw;
+            }
         }
         finally
         {
