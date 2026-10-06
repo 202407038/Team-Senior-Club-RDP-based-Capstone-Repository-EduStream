@@ -376,6 +376,8 @@ public sealed class StudentReverseShareServiceTests
         public bool Disposed { get; private set; }
         public int ActiveViewerCount { get; set; }
         public long ConnectionRevision { get; set; }
+        public Task ApplyControlAsync(string professorId, bool grant) => Task.CompletedTask;
+        public Task<int?> GetControlLevelAsync(string professorId) => Task.FromResult<int?>(null);
         public Exception? DisposeFailure { get; set; }
 
         public Task<Guid> StartAsync(Guid sessionId, CancellationToken cancellationToken = default)

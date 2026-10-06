@@ -10,6 +10,8 @@ public interface IStudentShareHost : IAsyncDisposable
 {
     int ActiveViewerCount { get; }
     long ConnectionRevision { get; }
+    Task ApplyControlAsync(string professorId, bool grant);
+    Task<int?> GetControlLevelAsync(string professorId);
     Task<Guid> StartAsync(Guid sessionId, CancellationToken cancellationToken = default);
 
     Task<ReverseRdpInvitationNotice> CreateInvitationAsync(Guid sessionId, Guid sharingId, string professorId,
@@ -32,6 +34,9 @@ public sealed class StudentDesktopShareHost : IStudentShareHost
     }
     public int ActiveViewerCount => _host.Session.ActiveAttendeeCount;
     public long ConnectionRevision => Interlocked.Read(ref _connectionRevision);
+    public Task ApplyControlAsync(string professorId, bool grant) =>
+        grant ? _host.GrantControlAsync(professorId) : _host.RevokeControlAsync(professorId);
+    public Task<int?> GetControlLevelAsync(string professorId) => _host.Session.GetAttendeeControlLevelAsync(professorId);
 
     public Task<Guid> StartAsync(Guid sessionId, CancellationToken cancellationToken = default) =>
         _host.StartAsync(sessionId, cancellationToken);
@@ -76,6 +81,8 @@ public sealed class StudentReverseShareService : IAsyncDisposable
     private Guid _sharingId;
     private DateTimeOffset _expiresAt;
     private long _hostRevision;
+    private readonly Queue<Guid> _stoppedSharingOrder = new();
+    private readonly HashSet<Guid> _stoppedSharings = new();
 
     /// <summary>공유 시작/종료 시 발생합니다(공유 중 여부, 사용자 안내 문구).</summary>
     public event Action<bool, string>? SharingChanged;
@@ -141,6 +148,51 @@ public sealed class StudentReverseShareService : IAsyncDisposable
 
     /// <summary>현재 권한을 변경하지 않고 초대 만료·viewer 이탈·실패한 종료를 재점검한다.</summary>
     public Task RefreshAsync() => ReconcileAsync();
+
+    /// <summary>공유 수명과 같은 잠금에서 실제 native 적용 및 결과를 확인한다. #89 공통 규격만 사용한다.</summary>
+    public async Task<RemoteInputResultNotice> ApplyInputAsync(RemoteInputCommandNotice command, bool allowControl)
+    {
+        var applied = false;
+        var error = CollaborationError.PermissionDenied;
+        await _order.WaitAsync().ConfigureAwait(false);
+        try
+        {
+            RemoteInputRules.Validate(command);
+            var target = _reverse.Target;
+            if (_disposed || target is null || command.SessionId != target.SessionId ||
+                command.ProfessorId != target.ProfessorId)
+                error = CollaborationError.StaleConnection;
+            else if (command.Action == RemoteInputAction.Revoke && _stoppedSharings.Contains(command.SharingId))
+                applied = true; // 이 서비스가 실제 종료를 확인한 세대에만 멱등 성공.
+            else if (command.SharingId != _sharingId || _host is null || _hostTarget != target)
+                error = CollaborationError.StaleConnection;
+            else if (command.Action == RemoteInputAction.Revoke || (allowControl && _allowViewing && _localAllowViewing && !_stopFailed))
+            {
+                var grant = command.Action == RemoteInputAction.Grant;
+                await _host.ApplyControlAsync(target.ProfessorId, grant).ConfigureAwait(false);
+                var level = await _host.GetControlLevelAsync(target.ProfessorId).ConfigureAwait(false);
+                applied = grant ? level == ReverseSessionManager.ControlLevelInteractive :
+                    level is null or ReverseSessionManager.ControlLevelView;
+            }
+        }
+        catch (Exception ex) { _logSink.Write("[Reverse] 원격 입력 적용 실패: " + ex.GetType().Name); }
+        finally { _order.Release(); }
+        return new RemoteInputResultNotice(command.CommandId, command.SessionId, command.Action, applied, applied ? null : error);
+    }
+
+    public async Task RevokeCurrentInputAsync()
+    {
+        await _order.WaitAsync().ConfigureAwait(false);
+        try
+        {
+            if (_host is null || _hostTarget is null) return;
+            await _host.ApplyControlAsync(_hostTarget.ProfessorId, false).ConfigureAwait(false);
+            if (await _host.GetControlLevelAsync(_hostTarget.ProfessorId).ConfigureAwait(false) is not
+                (null or ReverseSessionManager.ControlLevelView))
+                throw new InvalidOperationException("실제 입력 차단 상태를 확인하지 못했습니다.");
+        }
+        finally { _order.Release(); }
+    }
 
     private async Task RefreshLoopAsync()
     {
@@ -276,6 +328,11 @@ public sealed class StudentReverseShareService : IAsyncDisposable
             _host = null;
             _hostTarget = null;
             _invitationId = Guid.Empty;
+            if (_sharingId != Guid.Empty && _stoppedSharings.Add(_sharingId))
+            {
+                _stoppedSharingOrder.Enqueue(_sharingId);
+                if (_stoppedSharingOrder.Count > 256) _stoppedSharings.Remove(_stoppedSharingOrder.Dequeue());
+            }
             _sharingId = Guid.Empty;
             _stopFailed = false;
         }
