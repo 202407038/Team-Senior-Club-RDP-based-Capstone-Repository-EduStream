@@ -82,33 +82,44 @@ public sealed class AnnotationDesktopWindow : IDisposable
         Add("전체 지우기", () => _engine.ClearAllStrokesAsync());
         Add("지우고 OFF", async () => { await _engine.ClearAllStrokesAsync(); SetDrawing(false); });
         _toolsPanel.Children.Add(actions); _toolsPanel.Children.Add(_status);
-        _toolbar.Closing += (_, e) => { if (!_disposed) { e.Cancel = true; SetDrawing(false); } };
+        _toolbar.Closing += (_, e) =>
+        {
+            if (_disposed) return;
+            // 창 객체는 재사용하되 X를 누른 도구창은 실제로 숨긴다. 판서는 보존한다.
+            e.Cancel = true;
+            SetDrawing(false);
+            _toolbar.Hide();
+        };
         _overlay.PreviewKeyDown += (_, e) => { if (e.Key == Key.Escape) { SetDrawing(false); e.Handled = true; } };
+        _toolbar.PreviewKeyDown += (_, e) => { if (e.Key == Key.Escape) { SetDrawing(false); e.Handled = true; } };
         _layer.Canvas.MouseLeftButtonDown += (_, e) =>
         {
             if (!_drawing || _busy) return;
+            if (!_engine.CurrentState.IsVisible)
+            {
+                _status.Text = "판서가 숨겨져 있습니다. 숨김 / 표시를 눌러 표시한 뒤 그려 주세요.";
+                e.Handled = true; return;
+            }
+            SelectCurrentTool();
             _points.Clear(); AddPoint(e.GetPosition(_layer.Canvas)); _layer.Canvas.CaptureMouse(); e.Handled = true;
         };
         _layer.Canvas.MouseMove += (_, e) =>
         {
-            if (_layer.Canvas.IsMouseCaptured && _points.Count < 4095) AddPoint(e.GetPosition(_layer.Canvas));
+            if (!_layer.Canvas.IsMouseCaptured) return;
+            // 긴 드래그에서도 끝점은 계속 이동한다. 메모리는 한 스트로크당 4096점으로 제한한다.
+            if (_points.Count >= 4095) _points.RemoveAt(_points.Count - 1);
+            AddPoint(e.GetPosition(_layer.Canvas));
+            _layer.ShowPreview(_controller.CreateStroke("professor", _points));
         };
         _layer.Canvas.MouseLeftButtonUp += async (_, e) =>
         {
             if (!_layer.Canvas.IsMouseCaptured) return;
-            AddPoint(e.GetPosition(_layer.Canvas)); _layer.Canvas.ReleaseMouseCapture();
-            var points = _points.ToArray(); _points.Clear();
-            await RunAsync(async () =>
-            {
-                var tool = tools.Tool switch { "직선" => EduStream.Core.Collaboration.AnnotationTool.Line,
-                    "사각형" => EduStream.Core.Collaboration.AnnotationTool.Rectangle, "타원" => EduStream.Core.Collaboration.AnnotationTool.Ellipse,
-                    "지우개" => EduStream.Core.Collaboration.AnnotationTool.Eraser, _ => EduStream.Core.Collaboration.AnnotationTool.Pen };
-                uint color = tools.Color switch { "빨강" => 0xFFFF4040, "파랑" => 0xFF4080FF, "초록" => 0xFF40CC60,
-                    "검정" => 0xFF000000, "흰색" => 0xFFFFFFFF, _ => 0xFFFFFF00 };
-                _controller.SelectTool(tool, color, tools.StrokeWidth);
-                await _controller.SubmitStrokeAsync("professor", points);
-            });
+            AddPoint(e.GetPosition(_layer.Canvas));
+            var points = _points.ToArray();
+            CancelGesture();
+            await RunAsync(() => _controller.SubmitStrokeAsync("professor", points));
         };
+        _layer.Canvas.LostMouseCapture += (_, _) => { _points.Clear(); _layer.ClearPreview(); };
         _tools.PropertyChanged += ToolsChanged;
         _overlay.Show();
         // Owner는 소유 창의 HWND가 생성된 뒤 설정한다. 판서층을 클릭해도 도구창이 그 아래로 내려가지 않는다.
@@ -120,6 +131,19 @@ public sealed class AnnotationDesktopWindow : IDisposable
 
     private void AddPoint(System.Windows.Point p) => _points.Add(new Point(
         (int)Math.Clamp(p.X, 0, _monitor.Width - 1), (int)Math.Clamp(p.Y, 0, _monitor.Height - 1)));
+    private void SelectCurrentTool()
+    {
+        var tool = _tools.Tool switch { "직선" => EduStream.Core.Collaboration.AnnotationTool.Line,
+            "사각형" => EduStream.Core.Collaboration.AnnotationTool.Rectangle, "타원" => EduStream.Core.Collaboration.AnnotationTool.Ellipse,
+            "지우개" => EduStream.Core.Collaboration.AnnotationTool.Eraser, _ => EduStream.Core.Collaboration.AnnotationTool.Pen };
+        uint color = _tools.Color switch { "빨강" => 0xFFFF4040, "파랑" => 0xFF4080FF, "초록" => 0xFF40CC60,
+            "검정" => 0xFF000000, "흰색" => 0xFFFFFFFF, _ => 0xFFFFFF00 };
+        _controller.SelectTool(tool, color, _tools.StrokeWidth);
+    }
+    private void CancelGesture()
+    {
+        _points.Clear(); _layer.ClearPreview(); _layer.Canvas.ReleaseMouseCapture();
+    }
     private void ToolsChanged(object? sender, PropertyChangedEventArgs e) { if (e.PropertyName == nameof(AnnotationToolsViewModel.Placement)) PlaceToolbar(); }
     private void PlaceToolbar()
     {
@@ -137,6 +161,11 @@ public sealed class AnnotationDesktopWindow : IDisposable
     public void SetDrawing(bool enabled)
     {
         if (_disposed) return;
+        if (enabled && !_toolbar.IsVisible)
+        {
+            _toolbar.Show();
+            PlaceToolbar();
+        }
         _drawing = enabled;
         _controller.SetDrawing(enabled);
         // 완전 투명한 layered 창은 OS hit test에서 밑 창으로 통과할 수 있다.
@@ -149,7 +178,7 @@ public sealed class AnnotationDesktopWindow : IDisposable
         SetWindowLong(hwnd, -20, enabled ? style & ~0x20 : style | 0x20); // OFF는 그림을 보존하고 마우스를 아래 앱으로 통과시킨다.
         _drawingButton.Content = enabled ? "그림 유지하고 OFF" : "그리기 ON";
         _status.Text = enabled ? "그리기 중 · Esc로 화면 조작 복귀" : "화면 조작 중 · 그림 유지";
-        if (!enabled) { _layer.Canvas.ReleaseMouseCapture(); _points.Clear(); }
+        if (!enabled) CancelGesture();
         DrawingChanged?.Invoke(enabled);
     }
     private async Task RunAsync(Func<Task> action)
