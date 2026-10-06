@@ -101,8 +101,16 @@ public sealed class AnnotationEngineController : IAnnotationController
 /// </summary>
 public sealed class WdsSharedScreenPresentation : ISharedScreenPresentation
 {
+    /// <summary>AxRDPViewer 가 제공하지 않는 이동. 성공으로 처리하지 않습니다.</summary>
+    public const string PanNotSupportedMessage =
+        "WDS AxRDPViewer에는 화면을 임의로 이동하는 API가 없습니다. 사용할 수 있는 조작은 맞춤(FitAsync)과 배율(ZoomAsync)뿐입니다.";
+
     private readonly WdsViewportAdapter _adapter;
     private readonly Func<System.Drawing.Size> _containerSize;
+    private MonitorInfo? _sharedMonitor;
+
+    /// <summary>항상 false. PanAsync 는 이 제약을 예외로 알립니다.</summary>
+    public bool PanSupported => false;
 
     public WdsSharedScreenPresentation(WdsViewportAdapter adapter, Func<System.Drawing.Size> containerSize)
     {
@@ -131,10 +139,16 @@ public sealed class WdsSharedScreenPresentation : ISharedScreenPresentation
         return Task.CompletedTask;
     }
 
+    /// <summary>이 공유가 보여주는 모니터. 좌표 변환의 원점으로 씁니다.</summary>
+    public void SetSharedMonitor(MonitorInfo? sharedMonitor) => _sharedMonitor = sharedMonitor;
+
+    /// <summary>뷰어 좌표를 공유 데스크톱 절대 좌표로 변환합니다. 논리 좌표의 배율은 교수자 뷰어 모니터를 씁니다.</summary>
+    public System.Drawing.Point MapViewerPointToDesktop(System.Drawing.Point viewerPoint, bool viewerPointIsLogical = false, MonitorInfo? viewerMonitor = null)
+        => _adapter.TranslateViewerPointToDesktop(viewerPoint, _sharedMonitor, viewerPointIsLogical, viewerMonitor: viewerMonitor);
+
     public Task PanAsync(double normalizedDeltaX, double normalizedDeltaY,
         CancellationToken cancellationToken = default)
-        => Task.FromException(new NotSupportedException(
-            "WDS AxRDPViewer 는 임의 이동(Pan) API 를 제공하지 않습니다. UI_ENGINE_DEPENDENCIES.md 참고."));
+        => Task.FromException(new NotSupportedException(PanNotSupportedMessage));
 
     public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 

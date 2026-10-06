@@ -1,7 +1,7 @@
 using System.Collections.Generic;
 using System.Drawing;
 
-namespace EduStream.Server.Rdp
+namespace EduStream.ShareHost
 {
     /// <summary>
     /// 모니터 DPI 스케일링 보정 어댑터 인터페이스

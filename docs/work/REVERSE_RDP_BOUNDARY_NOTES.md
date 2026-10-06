@@ -2,13 +2,18 @@
 
 작성 주체: 3번 [화면 송신 / RDP]. 이 문서는 3번이 **실제로 구현한 것**, **일부러 건드리지 않은 것**, **다른 담당이 해야 연결되는 것**을 구분해 기록합니다. 다른 담당 코드는 수정하지 않았고, 필요한 필드·함수·책임 경계만 아래에 적습니다. 이 문서의 어떤 항목도 "전체 완료"를 뜻하지 않습니다. 검증 수치는 PR 본문에 적습니다.
 
-## 1. 3번이 수정/추가한 파일 (3번 영역: `Server/Rdp`, 테스트)
+## 1. 3번이 수정/추가한 파일 (3번 영역: `ShareHost`, `ShareViewer`, `Server/Rdp`, 테스트)
+
+학생 PC의 송신 호스트는 `EduStream.ShareHost`, 교수자 PC의 수신 뷰어는 `EduStream.ShareViewer`입니다. 학생 앱은 `EduStream.Server`를 참조하지 않습니다. 뷰포트·판서·원격 입력 게이트는 `Server/Rdp`에 있습니다. 호출 순서는 [역방향 화면 공유 호출 예제](./REVERSE_SHARING_CALL_EXAMPLE.md)를 따릅니다.
 
 | 파일 | 내용 |
 | --- | --- |
-| `src/EduStream.Server/Rdp/ReverseSessionManager.cs` | `ConnectionString` 키 매핑 테이블, 실제 `OnAttendeeConnected` 이벤트에서 ProfessorId/StudentId/만료/세대/중복 검증 후 승인·거부, 호스트 허용(`GrantControlAsync`)·회수(`RevokeControlAsync`), 실패/종료/이탈 시 매핑 정리 |
-| `src/EduStream.Server/Rdp/ReverseInvitationWire.cs` (신규) | 역방향 초대 전용 계약 DTO. 필수 필드 유실 시 역직렬화 즉시 실패 |
-| `src/EduStream.Server/Rdp/IReverseSessionManager.cs` | 기존 인터페이스 유지, `ReverseControlMode`와 `InvitationId`만 추가 |
+| `src/EduStream.ShareHost/StudentDesktopHost.cs` | 학생 PC에서 이 PC 데스크톱 호스트 하나를 엽니다. 초대 생성은 Core `ReverseRdpInvitationNotice`를 반환하고, 비밀번호는 계약에 넣지 않습니다. |
+| `src/EduStream.ShareHost/ReverseSessionManager.cs` | `ConnectionString` 키 매핑 테이블, 실제 `OnAttendeeConnected` 이벤트에서 ProfessorId/StudentId/만료/세대/중복 검증 후 승인·거부, 호스트 허용(`GrantControlAsync`)·회수(`RevokeControlAsync`), 실패/종료/이탈 시 매핑 정리 |
+| `src/EduStream.ShareHost/ReverseInvitationWire.cs` | 역방향 초대 전용 계약 DTO. 필수 필드 유실 시 역직렬화 즉시 실패. Core 계약과 `ToContract`/`FromContract`로 변환 |
+| `src/EduStream.ShareHost/IReverseSessionManager.cs` | 기존 인터페이스 유지, `ReverseControlMode`와 `InvitationId`만 추가 |
+| `src/EduStream.ShareHost/MonitorDpiAdapter.cs`, `IMonitorDpiAdapter.cs` | 공유 대상 모니터의 원점·크기·DPI. 뷰어가 있는 교수자 모니터와 별개입니다. |
+| `src/EduStream.ShareViewer/ProfessorReception.cs` | 교수자 PC에서 학생 연결 문자열로 뷰어만 붙입니다. `RDPSession`을 열지 않습니다. `ReleaseAsync`는 연결 중에도 Disconnect를 요청하고 실제 실패/종료 이벤트 후 UI 큐에서 이벤트 해제·부모 제거·Dispose를 완료합니다. 시간 초과·취소·해제 실패를 완료로 표시하지 않으며 재시도할 뷰어를 보존합니다. |
 | `src/EduStream.Server/Rdp/WdsViewportAdapter.cs` | `ApplyViewportSettings` 실적용 확인. `ApplyFitMode` 이후 `CurrentZoom`은 맞춤 대비 사용자 배율(1.0). `CalculateRenderBounds`는 맞춤 스케일을 한 번만 곱함 |
 | `src/EduStream.Server/Rdp/ReverseWdsRemoteInputGate.cs` | 2번 `IRemoteInputGate` → 3번 `GrantControlAsync`/`RevokeControlAsync` 연결. OS 입력 파이프라인은 선택이며 뷰어발 WDS 입력과 구분 |
 | `src/EduStream.Server/Rdp/AnnotationOverlayLayer.cs`, `AnnotationStrokeWire` | 제품용 판서 오버레이·전송 JSON. 5번은 창 배치, 1·2번은 JSON 전달 |
@@ -40,6 +45,8 @@
 
 10/5 공통 계약 재검토 추가 지침: 신규 보호 채널 수신부는 Core `ValidateForSharing`으로 **현재 공유 세대까지** 대조한 후 비밀을 검사하고 엔진에 넘깁니다. 같은 연결에서 공유만 재시작한 경우 기존 연결 검사만으로는 부족합니다. 이 API는 #77에 포함하여 main에 병합됐습니다. [최신 인계와 담당별 남은 일](./POST_PR51_CORE_FILE_HANDOFF.md)을 우선합니다.
 
+학생 앱이 Server 프로젝트를 참조하지 않고 이 엔진을 부르는 순서는 [역방향 화면 공유 호출 예제](./REVERSE_SHARING_CALL_EXAMPLE.md)에 있습니다.
+
 ## 4. 타 담당에게 필요한 작업 (3번은 수정하지 않음)
 
 ### 1번 (Core / 계약)
@@ -63,6 +70,7 @@
 - 판서 전송: 스트로크 JSON과 `AnnotationLayerWire` 스냅샷 JSON을 함께 운반해야 합니다. 숨김·재표시·지우개·전체 삭제·실행 취소는 스냅샷입니다. `BindTransmission(engine, onPayloadReady)`가 두 종류를 같은 콜백으로 내보내며, 수신의 `ReceiveRemoteStrokeJsonAsync`가 구분합니다. 실제 네트워크 전송 프로토콜은 1·2번이며 이번 보완은 전송 메시지 접점과 독립 수신 레이어까지만 검증합니다.
 
 ### 5번 (UI / 바인딩)
+- 뷰어 종료: 학생 호스트 종료 후 `await reception.ReleaseAsync(studentId)` 또는 `await connection.ReleaseAfterSharingStoppedAsync()`를 사용합니다. 연결 성공을 기다릴 필요는 없지만 **수신 측 종료 확인과 Dispose 완료 전 창을 닫거나 컨트롤을 직접 폐기하지 않습니다.** UI 스레드에서 `.Wait()`/`.Result`를 쓰지 않습니다. 연결을 시작한 WDS 컨트롤은 기존 동기 `Release`가 아니라 비동기 경로로 종료합니다. [호출 예제](./REVERSE_SHARING_CALL_EXAMPLE.md)를 참고하세요.
 - 역방향 초대: 2번의 현재 연결·공유·비밀 검증 결과와 3번 뷰어 연결 API를 UI에 바인딩합니다. 인증 검사를 ViewModel에 중복 구현하지 않습니다. `RdpViewerService`의 기술 변경은 3번, `ClientViewModel`의 표시 연결은 5번이며 #51에서는 두 파일을 수정하지 않았습니다.
 - 판서: `AnnotationEngineController`(`IAnnotationController`)와 `AnnotationOverlayLayer`를 붙이세요.
   - 로컬: `overlay.BindLocalRenderer(engine)`

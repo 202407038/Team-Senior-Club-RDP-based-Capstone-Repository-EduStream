@@ -18,6 +18,7 @@
 
   <ItemGroup>
     <Using Include="Xunit" />
+    <Using Include="EduStream.ShareHost" />
   </ItemGroup>
 
   <ItemGroup>
@@ -34,6 +35,8 @@
     <ProjectReference Include="..\..\src\EduStream.Core\EduStream.Core.csproj" />
     <ProjectReference Include="..\..\src\EduStream.Client\EduStream.Client.csproj" />
     <ProjectReference Include="..\..\src\EduStream.Server\EduStream.Server.csproj" />
+    <ProjectReference Include="..\..\src\EduStream.ShareHost\EduStream.ShareHost.csproj" />
+    <ProjectReference Include="..\..\src\EduStream.ShareViewer\EduStream.ShareViewer.csproj" />
     <ProjectReference Include="..\..\tools\EduStream.ContractTestDoubles\EduStream.ContractTestDoubles.csproj" />
   </ItemGroup>
 

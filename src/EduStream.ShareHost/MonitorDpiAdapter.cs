@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.Drawing;
 using System.Runtime.InteropServices;
 
-namespace EduStream.Server.Rdp;
+namespace EduStream.ShareHost;
 
 public sealed class MonitorDpiAdapter : IMonitorDpiAdapter
 {

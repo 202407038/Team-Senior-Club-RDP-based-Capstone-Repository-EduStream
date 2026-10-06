@@ -4,7 +4,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using EduStream.Core.Collaboration;
 
-namespace EduStream.Server.Rdp;
+namespace EduStream.ShareHost;
 
 /// <summary>
 /// 학생(호스트) → 교수자(뷰어) 역방향 초대의 JSON 전송 계약.

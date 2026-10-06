@@ -7,7 +7,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Threading;
 
-namespace EduStream.Server.Rdp;
+namespace EduStream.ShareHost;
 
 /// <summary>역방향 세션에서 네이티브 WDS 이벤트가 만든 참석자 생명주기 종류</summary>
 public enum ReverseAttendeeEventKind
@@ -116,6 +116,7 @@ public sealed class ReverseSessionManager : IReverseSessionManager, IDisposable
     private Guid _sessionId = Guid.Empty;
     private Guid _reverseSharingId = Guid.Empty;
     private string _hostStudentId = string.Empty;
+    private MonitorInfo? _sharedMonitor;
     private string _approvedTargetProfessorId = string.Empty;
     private bool _controlPermitted;
     private bool _tearingDown;
@@ -141,6 +142,12 @@ public sealed class ReverseSessionManager : IReverseSessionManager, IDisposable
         get { lock (_stateLock) return _approvedAttendees.Count; }
     }
 
+    /// <summary>이번 공유에 적용한 모니터. 지정하지 않았으면 null 이며 WDS 기본 데스크톱 전체를 공유합니다.</summary>
+    public MonitorInfo? SharedMonitor
+    {
+        get { lock (_stateLock) return _sharedMonitor; }
+    }
+
     public event EventHandler<FrameReceivedEventArgs>? FrameReceived;
 
     /// <summary>실제 네이티브 이벤트(연결/이탈/제어 요청)와 호스트 제어 허용·회수 결과 알림</summary>
@@ -148,7 +155,21 @@ public sealed class ReverseSessionManager : IReverseSessionManager, IDisposable
 
     // ───────────────────────── 세션 시작 ─────────────────────────
 
-    public async Task<Guid> StartReverseSharingAsync(Guid sessionId, string studentId, CancellationToken cancellationToken = default)
+    public Task<Guid> StartReverseSharingAsync(Guid sessionId, string studentId, CancellationToken cancellationToken = default)
+        => StartReverseSharingCoreAsync(sessionId, studentId, null, cancellationToken);
+
+    /// <summary>
+    /// 선택한 모니터 사각형만 공유합니다. 열거 결과의 물리 픽셀 경계를 WDS SetDesktopSharedRect 에 넣습니다.
+    /// </summary>
+    public Task<Guid> StartReverseSharingAsync(Guid sessionId, string studentId, MonitorInfo shareMonitor, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(shareMonitor);
+        if (shareMonitor.Width <= 0 || shareMonitor.Height <= 0)
+            throw new ArgumentException("공유할 모니터의 크기가 없습니다.", nameof(shareMonitor));
+        return StartReverseSharingCoreAsync(sessionId, studentId, shareMonitor, cancellationToken);
+    }
+
+    private async Task<Guid> StartReverseSharingCoreAsync(Guid sessionId, string studentId, MonitorInfo? shareMonitor, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
         ObjectDisposedException.ThrowIf(_isDisposed, this);
@@ -162,13 +183,14 @@ public sealed class ReverseSessionManager : IReverseSessionManager, IDisposable
 
             _state = ReverseSessionState.Hosting; // 동시 Start 차단을 위해 먼저 선점
             _tearingDown = false;
+            _sharedMonitor = null;
         }
 
         try
         {
             var dispatcher = StartStaThread();
             return await dispatcher
-                .InvokeAsync(() => OpenSessionOnSta(sessionId, studentId), DispatcherPriority.Normal, cancellationToken)
+                .InvokeAsync(() => OpenSessionOnSta(sessionId, studentId, shareMonitor), DispatcherPriority.Normal, cancellationToken)
                 .Task.ConfigureAwait(false);
         }
         catch
@@ -178,7 +200,7 @@ public sealed class ReverseSessionManager : IReverseSessionManager, IDisposable
         }
     }
 
-    private Guid OpenSessionOnSta(Guid sessionId, string studentId)
+    private Guid OpenSessionOnSta(Guid sessionId, string studentId, MonitorInfo? shareMonitor)
     {
         // 레지스트리(CLSID) 미등록과 실제 Open 실패를 구분해서 보고한다.
         Type? rdpType = Type.GetTypeFromProgID("RDPCOMAPILib.RDPSession")
@@ -215,7 +237,25 @@ public sealed class ReverseSessionManager : IReverseSessionManager, IDisposable
 
             dynamic dyn = session;
             dyn.ColorDepth = 24;
+            if (shareMonitor != null)
+            {
+                int right = shareMonitor.Left + shareMonitor.Width;
+                int bottom = shareMonitor.Top + shareMonitor.Height;
+                try
+                {
+                    dyn.SetDesktopSharedRect(shareMonitor.Left, shareMonitor.Top, right, bottom);
+                }
+                catch (Exception ex)
+                {
+                    throw new InvalidOperationException(
+                        $"선택한 모니터({shareMonitor.Left},{shareMonitor.Top},{shareMonitor.Width}x{shareMonitor.Height})를 WDS 공유 영역으로 적용하지 못했습니다.", ex);
+                }
+            }
             dyn.Open();
+        }
+        catch (InvalidOperationException)
+        {
+            throw;
         }
         catch (Exception ex)
         {
@@ -228,6 +268,7 @@ public sealed class ReverseSessionManager : IReverseSessionManager, IDisposable
             _sessionId = sessionId;
             _reverseSharingId = sharingId = Guid.NewGuid();
             _hostStudentId = studentId;
+            _sharedMonitor = shareMonitor;
             _approvedTargetProfessorId = string.Empty;
             _controlPermitted = false;
         }
@@ -840,6 +881,7 @@ public sealed class ReverseSessionManager : IReverseSessionManager, IDisposable
                 _sessionId = Guid.Empty;
                 _reverseSharingId = Guid.Empty;
                 _hostStudentId = string.Empty;
+                _sharedMonitor = null;
                 _approvedTargetProfessorId = string.Empty;
                 _controlPermitted = false;
                 _tearingDown = false;

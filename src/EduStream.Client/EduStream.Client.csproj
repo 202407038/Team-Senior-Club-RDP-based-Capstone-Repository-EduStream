@@ -2,6 +2,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\EduStream.Core\EduStream.Core.csproj" />
+    <ProjectReference Include="..\EduStream.ShareHost\EduStream.ShareHost.csproj" />
   </ItemGroup>
 
   <ItemGroup>

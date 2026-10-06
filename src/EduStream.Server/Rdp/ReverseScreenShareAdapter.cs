@@ -81,6 +81,16 @@ public sealed class ReverseScreenShareAdapter : IReverseScreenShareAdapter
         return result;
     }
 
+    /// <summary>열거한 모니터를 이 공유의 대상으로 적용합니다. 구현체가 ReverseSessionManager 일 때만 동작합니다.</summary>
+    public async Task<Guid> StartReverseSharingAsync(Guid sessionId, string studentId, MonitorInfo shareMonitor, CancellationToken cancellationToken = default)
+    {
+        if (_reverseSessionManager is not ReverseSessionManager session)
+            throw new NotSupportedException("모니터 공유 대상은 ReverseSessionManager 에서만 적용할 수 있습니다.");
+        var result = await session.StartReverseSharingAsync(sessionId, studentId, shareMonitor, cancellationToken);
+        NotifyStateChangedIfNeeded();
+        return result;
+    }
+
     public async Task<ReverseInvitationPacket> CreateProfessorInvitationAsync(Guid s, Guid sh, string p, Guid c, string pw, DateTimeOffset e, CancellationToken ct = default)
     {
         var result = await _reverseSessionManager.CreateProfessorInvitationAsync(s, sh, p, c, pw, e, ct);
