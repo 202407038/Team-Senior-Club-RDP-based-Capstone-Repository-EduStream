@@ -1,105 +1,82 @@
 # 역방향 화면 공유 호출 예제
 
-작성: 3번 [화면 송신 / RDP]. 2번·5번이 기존 엔진을 붙일 때 보는 호출 순서입니다. 학생 앱(`EduStream.Client`)에 `EduStream.Server` 프로젝트 참조를 추가하는 방법은 쓰지 않습니다. 앱 수명·XAML·세션 정책 파일은 이 예제가 대신 수정하지 않습니다.
+작성: 3번 [화면 송신 / RDP]. 학생 PC가 자기 데스크톱을 송신하고, 교수자 PC가 그 화면을 수신합니다. 학생 앱은 `EduStream.Server`(교수자 실행 파일)를 참조하지 않습니다. 2번의 전달 정책과 5번의 XAML은 이 문서가 대신 작성하지 않습니다.
 
-## 1. 어느 프로젝트가 무엇을 호출하는가
+## 1. 어느 프로세스가 무엇을 실행하는가
 
-| 프로젝트 | 참조 | 하는 일 |
-| --- | --- | --- |
-| `EduStream.Client` (학생 앱) | `EduStream.Core`만 | Kind 15 `ReverseRdpInvitationNotice`, Kind 16 비밀, Kind 17 판서 봉투를 읽고 씁니다. `ReverseSessionManager`를 생성하지 않습니다. |
-| `EduStream.Server` (이미 Server를 컴파일하는 실행 파일) | Core + 자신의 `Rdp` | 학생마다 호스트를 열고, 모니터 영역을 적용하고, 5번이 넘긴 뷰어 컨트롤의 수명을 끝냅니다. |
+WDS 호스트는 자신이 실행 중인 PC의 데스크톱을 공유합니다. 교수자 프로세스에서 학생 ID마다 호스트를 열어도 그 학생 PC의 화면이 오지 않습니다.
 
-학생 앱이 초대 필드를 보려고 Server의 `ReverseInvitationWire`를 참조할 필요는 없습니다. 서버가 `ReverseInvitationWire.From(packet).ToContract()`로 Core 계약을 만들어 Kind 15로 넘깁니다. 비밀번호는 그 계약에 넣지 않고 Kind 16으로만 보냅니다.
+| 실행 파일 | 프로젝트 | 참조 | 하는 일 |
+| --- | --- | --- | --- |
+| `EduStream 학생.exe` | `EduStream.Client` | Core + `EduStream.ShareHost` | 이 PC의 데스크톱 호스트를 엽니다. 초대 계약은 Core `ReverseRdpInvitationNotice`입니다. |
+| `EduStream 교수자.exe` | `EduStream.Server` | Core + `EduStream.ShareHost` + `EduStream.ShareViewer` | 학생 PC가 만든 연결 문자열로 수신 뷰어만 붙입니다. 여기서 `RDPSession`을 열지 않습니다. |
 
-## 2. 서버 프로세스에서의 호출
+`EduStream.ShareHost`는 Server 실행 파일을 참조하지 않습니다. `EduStream.ShareViewer`는 ShareHost와 Server를 참조하지 않습니다. 교수자 프로젝트가 ShareHost를 참조하는 이유는 `WdsViewportAdapter`, `ReverseScreenShareAdapter`, `ReverseWdsRemoteInputGate`가 ShareHost의 모니터·세션 타입을 쓰기 때문입니다. 이 참조로 교수자 프로세스에서 학생 ID마다 데스크톱 호스트를 열지는 않습니다.
 
-아래 코드는 `EduStream.Server` 안에서만 컴파일됩니다. 네임스페이스는 `EduStream.Server.Rdp`입니다.
+## 2. 학생 PC
+
+호출 위치는 학생 앱이 이미 참조하는 `EduStream.ShareHost.StudentDesktopHost`입니다.
 
 ```csharp
-await using var room = new ReverseClassroomPlacement();
-var station = room.StationFor(studentId); // 같은 studentId는 같은 호스트를 반환
-
+await using var host = new StudentDesktopHost(studentId);
 var monitors = new MonitorDpiAdapter().GetMonitors();
 var share = monitors.FirstOrDefault(m => m.DeviceName == selectedDeviceName)
             ?? monitors.First(m => m.IsPrimary);
 
-var sharingId = await station.StartAsync(sessionId, share);
-var password = invitationPassword; // Kind 16으로만 전달. 초대 계약에 넣지 않음
-var packet = await station.Host.CreateProfessorInvitationAsync(
+var sharingId = await host.StartAsync(sessionId, share);
+var password = invitationPassword; // 초대 계약에 넣지 않음
+ReverseRdpInvitationNotice notice = await host.CreateInvitationAsync(
     sessionId, sharingId, professorId, connectionId, password, DateTimeOffset.UtcNow.AddMinutes(5));
-var notice = ReverseInvitationWire.From(packet).ToContract();
-// 2번: notice는 Kind 15, password는 Kind 16. 해당 교수자 연결에만 전달
+// 2번이 notice를 Kind 15로, password를 Kind 16으로 해당 교수자 연결에만 전달합니다.
+
+// 허용/회수는 이 학생 PC의 호스트에 적용합니다.
+await host.GrantControlAsync(professorId);
+await host.RevokeControlAsync(professorId);
+
+await host.StopAsync();
 ```
 
-모니터를 지정하지 않으면 기존처럼 데스크톱 전체를 공유합니다.
+모니터를 생략하면 이 PC의 데스크톱 전체를 공유합니다. 크기가 없는 모니터는 세션을 열기 전에 `ArgumentException`입니다. 같은 호스트의 두 번째 `StartAsync`는 `InvalidOperationException`입니다. 학생 둘은 교수자 PC에 호스트를 두 개 띄우는 방식이 아니라, 학생 PC 두 대가 각각 `StudentDesktopHost`를 실행하는 방식입니다.
+
+## 3. 교수자 PC
+
+5번이 UI 스레드에서 만든 `AxRDPViewer`를 `System.Windows.Forms.Control`로 넘깁니다. 수신 쪽은 공유 세션을 만들지 않습니다.
 
 ```csharp
-var sharingId = await station.StartAsync(sessionId);
+using var reception = new ProfessorReception();
+ProfessorViewerConnection connection = reception.Watch(
+    studentId, viewerControl, notice.ConnectionString, notice.ProfessorId, password);
+
+// 학생 PC의 호스트가 끝난 뒤에 이 뷰어를 해제합니다.
+reception.Release(studentId);
 ```
 
-`share.Width` 또는 `Height`가 0 이하면 `StartAsync`는 세션을 열기 전에 `ArgumentException`을 냅니다. `SetDesktopSharedRect`가 실패하면 `InvalidOperationException`이며 그 세션은 열리지 않습니다. 같은 호스트에서 두 번째 `StartAsync`는 `InvalidOperationException`입니다. 학생 둘은 호스트를 하나 더 엽니다.
+다른 학생은 `Watch`를 한 번 더 호출합니다. 각 연결 문자열은 그 학생 PC의 호스트가 만든 값입니다. 같은 PC에서 호스트를 두 개 연 결과를 학생 두 대의 화면 수신으로 보지 않습니다.
+
+## 4. 교수자 PC의 표시
+
+맞춤과 배율은 수신 뷰어를 붙인 뒤에만 호출합니다. 뷰어 없이 `FitAsync`를 호출하면 `InvalidOperationException: WDS Viewer가 초기화되지 않았습니다.`가 납니다. 아래 순서는 교수자 UI 스레드에서 실행합니다. `FitAsync`, `ZoomAsync`, `Release`는 컨트롤 소유 스레드가 아니면 그 스레드로 옮겨 수행합니다.
+
+좌표의 논리 단위(DIP)는 교수자 뷰어 모니터 배율로 픽셀로 바꿉니다. 학생 공유 모니터 배율로 바꾸지 않습니다. 그 픽셀에 원본 대비 뷰어 크기 비율을 곱한 뒤 학생 모니터의 `Left`/`Top`을 더합니다.
 
 ```csharp
-var other = room.StationFor(otherStudentId);
-var otherSharingId = await other.StartAsync(sessionId, otherShare);
-await station.StopAsync(); // other의 세션과 뷰어는 유지
-```
+reception.Watch(studentId, viewerControl, notice.ConnectionString, notice.ProfessorId, password);
 
-## 3. 교수자 뷰어
-
-5번은 자신의 UI 스레드에서 `AxRDPViewer`를 만듭니다. Server 프로젝트는 그 COM 라이브러리를 참조하지 않습니다. 만들어진 컨트롤을 `System.Windows.Forms.Control`로 서버 프로세스의 UI 스레드에 넘깁니다.
-
-```csharp
-ProfessorViewerConnection connection = station.ConnectProfessor(
-    viewerControl, notice.ConnectionString, notice.ProfessorId, password);
-```
-
-연결이 거절되거나 끊긴 컨트롤에 `Disconnect`를 다시 호출하지 않습니다. 해제 순서는 `StopAsync` 안에 있습니다. 공유 세션을 먼저 끝낸 다음, 살아 있는 뷰어만 끊고 컨트롤을 해제합니다. 거절된 뷰어를 세션이 살아있는 동안 `Dispose`하지 않습니다.
-
-```csharp
-await station.StopAsync();
-// 또는 강의 종료 시 모든 학생
-await room.StopAllAsync();
-```
-
-`StopAsync`가 끝난 같은 `station`으로 `StartAsync`를 다시 호출할 수 있습니다. 이전 초대의 `ConnectionString`은 새 세션에서 쓰지 않습니다.
-
-## 4. 표시, 좌표, Pan
-
-뷰어 컨트롤 크기를 원본에 맞출 때 맞춤 배율은 한 번만 적용합니다.
-
-```csharp
 var viewport = new WdsViewportAdapter(new WheelScrollAdapter(), new ViewportFitAdapter());
+viewport.SetAxViewer(viewerControl);
 viewport.SetSourceSize(new System.Drawing.Size(share.Width, share.Height));
-var presentation = new WdsSharedScreenPresentation(viewport, () => containerSize);
-presentation.SetSharedMonitor(station.SharedMonitor);
+var presentation = new WdsSharedScreenPresentation(viewport, () => new System.Drawing.Size(960, 540));
+presentation.SetSharedMonitor(host.SharedMonitor);
 
 await presentation.FitAsync();
 await presentation.ZoomAsync(1.25, normalizedX: 0, normalizedY: 0);
+
+var professorMonitor = new MonitorDpiAdapter().GetMonitors().First(m => m.IsPrimary);
+System.Drawing.Point desktop = presentation.MapViewerPointToDesktop(
+    new System.Drawing.Point(100, 50), viewerPointIsLogical: true, viewerMonitor: professorMonitor);
+
+await host.StopAsync();
+reception.Release(studentId);
 ```
 
-`ZoomAsync`의 기준점 인자는 받지만, `AxRDPViewer`에 그 점을 기준으로 확대하는 API가 없어 배율만 적용됩니다.
-
-뷰어 안 좌표를 공유 데스크톱 좌표로 바꿀 때는 컨테이너 여백을 뺀 컨트롤 내부 좌표를 넘깁니다. 논리 좌표(DIP)이면 `viewerPointIsLogical: true`입니다. 구현은 DPI로 물리 픽셀로 바꾼 뒤 공유 모니터의 `Left`/`Top`을 더합니다.
-
-```csharp
-System.Drawing.Point desktop = presentation.MapViewerPointToDesktop(viewerPoint, viewerPointIsLogical: true);
-```
-
-화면 이동은 지원하지 않습니다. `presentation.PanSupported`는 항상 `false`이고, `PanAsync`는 `NotSupportedException`과 `WdsSharedScreenPresentation.PanNotSupportedMessage`를 냅니다. 성공으로 처리하지 않습니다. 사용할 수 있는 조작은 `FitAsync`와 `ZoomAsync`입니다.
-
-## 5. 입력 게이트
-
-제어 허용·회수 정책은 2번입니다. 3번이 제공한 게이트를 서버 프로세스에서 붙입니다. 이 게이트의 OS 입력 경로는 뷰어가 보낸 마우스·키보드가 다른 PC에 도달했다는 증거가 아닙니다.
-
-```csharp
-var gate = new ReverseWdsRemoteInputGate(
-    station.Host.GrantControlAsync,
-    station.Host.RevokeControlAsync,
-    state => professorIdByConnection[state.Professor.ParticipantId]);
-sessionManager.AttachRemoteInputGate(gate);
-```
-
-## 6. 실행으로 확인하는 방법
-
-같은 호출은 `tests/EduStream.FileTransfer.Tests/ReverseSharingPlacementTests.cs`에 있습니다. 실제 WDS가 필요하면 `EDUSTREAM_WDS_SMOKE=1`로 그 클래스를 실행합니다. 한 PC에서 확인된 것은 거절된 뷰어의 해제 순서, 같은 호스트의 재접속, 학생 둘의 독립 세션, 이 PC에 잡힌 모니터 1대의 공유 영역, DPI·원점 좌표입니다. 다른 PC의 뷰어 입력과 물리 모니터 2대의 공유 영역은 이 예제의 완료 조건이 아닙니다.
+`PanAsync`는 지원하지 않습니다. 예외가 나며 성공으로 처리하지 않습니다. 이 순서는 `tests/EduStream.FileTransfer.Tests/ReverseSharingCallExampleTests.cs`에서 실제 `AxRDPViewer`로 컴파일해 실행합니다. 한 PC에서 학생 호스트와 교수자 뷰어를 이어서 호출한 것이며, 학생 PC 두 대의 화면 수신이 아닙니다.

@@ -2,13 +2,18 @@
 
 작성 주체: 3번 [화면 송신 / RDP]. 이 문서는 3번이 **실제로 구현한 것**, **일부러 건드리지 않은 것**, **다른 담당이 해야 연결되는 것**을 구분해 기록합니다. 다른 담당 코드는 수정하지 않았고, 필요한 필드·함수·책임 경계만 아래에 적습니다. 이 문서의 어떤 항목도 "전체 완료"를 뜻하지 않습니다. 검증 수치는 PR 본문에 적습니다.
 
-## 1. 3번이 수정/추가한 파일 (3번 영역: `Server/Rdp`, 테스트)
+## 1. 3번이 수정/추가한 파일 (3번 영역: `ShareHost`, `ShareViewer`, `Server/Rdp`, 테스트)
+
+학생 PC의 송신 호스트는 `EduStream.ShareHost`, 교수자 PC의 수신 뷰어는 `EduStream.ShareViewer`입니다. 학생 앱은 `EduStream.Server`를 참조하지 않습니다. 뷰포트·판서·원격 입력 게이트는 `Server/Rdp`에 있습니다. 호출 순서는 [역방향 화면 공유 호출 예제](./REVERSE_SHARING_CALL_EXAMPLE.md)를 따릅니다.
 
 | 파일 | 내용 |
 | --- | --- |
-| `src/EduStream.Server/Rdp/ReverseSessionManager.cs` | `ConnectionString` 키 매핑 테이블, 실제 `OnAttendeeConnected` 이벤트에서 ProfessorId/StudentId/만료/세대/중복 검증 후 승인·거부, 호스트 허용(`GrantControlAsync`)·회수(`RevokeControlAsync`), 실패/종료/이탈 시 매핑 정리 |
-| `src/EduStream.Server/Rdp/ReverseInvitationWire.cs` (신규) | 역방향 초대 전용 계약 DTO. 필수 필드 유실 시 역직렬화 즉시 실패 |
-| `src/EduStream.Server/Rdp/IReverseSessionManager.cs` | 기존 인터페이스 유지, `ReverseControlMode`와 `InvitationId`만 추가 |
+| `src/EduStream.ShareHost/StudentDesktopHost.cs` | 학생 PC에서 이 PC 데스크톱 호스트 하나를 엽니다. 초대 생성은 Core `ReverseRdpInvitationNotice`를 반환하고, 비밀번호는 계약에 넣지 않습니다. |
+| `src/EduStream.ShareHost/ReverseSessionManager.cs` | `ConnectionString` 키 매핑 테이블, 실제 `OnAttendeeConnected` 이벤트에서 ProfessorId/StudentId/만료/세대/중복 검증 후 승인·거부, 호스트 허용(`GrantControlAsync`)·회수(`RevokeControlAsync`), 실패/종료/이탈 시 매핑 정리 |
+| `src/EduStream.ShareHost/ReverseInvitationWire.cs` | 역방향 초대 전용 계약 DTO. 필수 필드 유실 시 역직렬화 즉시 실패. Core 계약과 `ToContract`/`FromContract`로 변환 |
+| `src/EduStream.ShareHost/IReverseSessionManager.cs` | 기존 인터페이스 유지, `ReverseControlMode`와 `InvitationId`만 추가 |
+| `src/EduStream.ShareHost/MonitorDpiAdapter.cs`, `IMonitorDpiAdapter.cs` | 공유 대상 모니터의 원점·크기·DPI. 뷰어가 있는 교수자 모니터와 별개입니다. |
+| `src/EduStream.ShareViewer/ProfessorReception.cs` | 교수자 PC에서 학생 연결 문자열로 뷰어만 붙입니다. `RDPSession`을 열지 않습니다. 해제는 컨트롤 UI 스레드에서 이벤트 해제·Disconnect·부모 제거·Dispose까지 끝낸 뒤에만 완료로 표시합니다. |
 | `src/EduStream.Server/Rdp/WdsViewportAdapter.cs` | `ApplyViewportSettings` 실적용 확인. `ApplyFitMode` 이후 `CurrentZoom`은 맞춤 대비 사용자 배율(1.0). `CalculateRenderBounds`는 맞춤 스케일을 한 번만 곱함 |
 | `src/EduStream.Server/Rdp/ReverseWdsRemoteInputGate.cs` | 2번 `IRemoteInputGate` → 3번 `GrantControlAsync`/`RevokeControlAsync` 연결. OS 입력 파이프라인은 선택이며 뷰어발 WDS 입력과 구분 |
 | `src/EduStream.Server/Rdp/AnnotationOverlayLayer.cs`, `AnnotationStrokeWire` | 제품용 판서 오버레이·전송 JSON. 5번은 창 배치, 1·2번은 JSON 전달 |
