@@ -2,15 +2,17 @@
 
 ## ZIP을 풀고 바로 실행하기
 
-### [실행용 ZIP 다운로드 · EduStream-Portable-win-x64.zip](https://github.com/202407038/Team-Senior-Club-RDP-based-Capstone-Repository-EduStream/releases/download/v0.1.0-preview.2/EduStream-Portable-win-x64.zip)
+### [실행용 ZIP 다운로드 · EduStream-Portable-win-x64.zip](https://github.com/202407038/Team-Senior-Club-RDP-based-Capstone-Repository-EduStream/releases/download/v0.1.0-preview.4/EduStream-Portable-win-x64.zip)
 
 **다운로드 → 모두 압축 풀기 → EduStream 폴더 → `EduStream 교수자.exe` 또는 `EduStream 학생.exe` 더블클릭**
 
 설치나 명령어 입력 없이 실행할 수 있으며 .NET 실행 환경이 포함되어 있습니다. ZIP 안에서 바로 실행하지 말고 전체 압축을 풀어주세요. EXE 옆의 DLL과 하위 폴더도 필요하므로, 이동할 때는 폴더 전체를 옮깁니다. [실행 안내](docs/work/DESKTOP_LAUNCH.md)
 
-배포는 **실행용 ZIP만** 제공합니다. 현재 버전은 **v0.1.0-preview.2 (2026-09-30)**이며 실행 코드는 main `013c2d0` 기준입니다. 이후 문서 전용 갱신은 앱 코드 변경과 구분합니다. 코드 서명은 미적용이며 다중 PC RDP 실사용 인수는 진행 중입니다. [배포 정보](https://github.com/202407038/Team-Senior-Club-RDP-based-Capstone-Repository-EduStream/releases/tag/v0.1.0-preview.2)
+배포는 **실행용 ZIP만** 제공합니다. 현재 버전은 **v0.1.0-preview.4 (2026-10-07)**이며 실행 코드는 main `e75324d` (#94·#95 반영) 기준입니다. 중간 점검용 시험판이며 전체 기능 완료 버전이 아닙니다. 코드 서명은 미적용입니다. [배포 정보](https://github.com/202407038/Team-Senior-Club-RDP-based-Capstone-Repository-EduStream/releases/tag/v0.1.0-preview.4)
 
-방 비밀번호·보호 참가 인증, RDP 초대 비밀 자동 전달, 세션 파일 등록·선택 다운로드가 포함됩니다. 신규 UI·학생 화면 역방향 공유·원격 입력·판서는 완료 기능이 아닙니다. 학생의 최초 참가에는 교수자 주소/포트/접속 코드와 설정된 방 비밀번호가 필요하며, RDP 초대 비밀번호는 정상 흐름에서 자동 전달합니다.
+학생은 첫 화면에서 이름·교수자 IP·방 비밀번호(설정한 경우)로 참가합니다. 기본 포트는 5000이며 변경 시에만 고급 설정을 사용합니다. **접속 코드·별도 RDP 초대 비밀번호 입력은 없습니다.** 교수자 모니터 공유·판서, 학생별 화면 보기/큰 보기/제어 연결, 세션 파일 등록·선택 다운로드가 포함됩니다.
+
+**남은 문제:** 실제 휠 확대/축소, 큰 보기 최대화 표시 이상. 같은 Windows 로그인 환경의 교수자·학생 동시 송신은 인증 오류가 재현되어 보류 중입니다. 다른 PC의 양방향/실입력·회수/판서 수신, 반복·병행 인수는 미완료입니다. [현재 상태·후속 순서](docs/work/STATUS_AND_ROADMAP.md)
 
 **위 실행용 ZIP과 `Code → Download ZIP`은 다릅니다.** `Code → Download ZIP`은 개발용 소스입니다. 소스 ZIP을 받은 경우 루트의 `Download-EduStream.url`에서도 실행용 ZIP을 받을 수 있습니다.
 
