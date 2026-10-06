@@ -196,6 +196,111 @@ public sealed class StudentReverseShareServiceTests
         Assert.False(rig.Share.IsSharing);
     }
 
+    [Fact]
+    public async Task StopFailure_DoesNotAnnounceSuccess_AndRetainsHostForRetry()
+    {
+        var rig = new Rig();
+        rig.ApplyRoom();
+        await rig.Share.UpdateAsync(true);
+        Assert.Single(rig.Hosts).DisposeFailure = new InvalidOperationException("review: native close failed");
+        await rig.Share.UpdateAsync(false);
+        Assert.DoesNotContain("내 화면 공유를 종료했습니다.", rig.Messages);
+        Assert.True(rig.Share.IsSharing);
+        Assert.Single(rig.Hosts).DisposeFailure = null;
+        await rig.Share.RefreshAsync();
+        Assert.False(rig.Share.IsSharing);
+        Assert.True(rig.Hosts[0].Disposed);
+    }
+
+    [Fact]
+    public async Task ExpiringUnusedInvitation_RenewsWithoutRestartingHost()
+    {
+        var rig = new Rig();
+        rig.ApplyRoom();
+        await rig.Share.UpdateAsync(true);
+        var first = rig.Hosts[0].InvitationId;
+        rig.Now = rig.Now.AddMinutes(4);
+        await rig.Share.RefreshAsync();
+        Assert.Single(rig.Hosts);
+        Assert.NotEqual(first, rig.Hosts[0].InvitationId);
+        Assert.Equal(4, rig.Channel.Frames.Count);
+    }
+
+    [Fact]
+    public async Task ConnectedViewer_IsNotDisconnectedByPeriodicRenewal()
+    {
+        var rig = new Rig();
+        rig.ApplyRoom();
+        await rig.Share.UpdateAsync(true);
+        rig.Hosts[0].ActiveViewerCount = 1;
+        rig.Now = rig.Now.AddMinutes(6);
+        await rig.Share.RefreshAsync();
+        Assert.Equal(2, rig.Channel.Frames.Count);
+        Assert.False(rig.Hosts[0].Disposed);
+    }
+
+    [Fact]
+    public async Task ViewerDisconnected_RenewsConsumedInvitationWithoutPermissionRetoggle()
+    {
+        var rig = new Rig();
+        rig.ApplyRoom();
+        await rig.Share.UpdateAsync(true);
+        var first = rig.Hosts[0].InvitationId;
+        rig.Hosts[0].ConnectionRevision++;
+        await rig.Share.RefreshAsync();
+        Assert.Equal(2, rig.Hosts.Count);
+        Assert.True(rig.Hosts[0].Disposed);
+        Assert.NotEqual(first, rig.Hosts[1].InvitationId);
+        Assert.NotEqual(rig.Hosts[0].SharingId, rig.Hosts[1].SharingId);
+        Assert.Equal(4, rig.Channel.Frames.Count);
+    }
+
+    [Fact]
+    public async Task LocalOff_ClosesBeforeServerAck_AndIgnoresLateAllowedSnapshot()
+    {
+        var rig = new Rig();
+        rig.ApplyRoom();
+        await rig.Share.UpdateAsync(true);
+        await rig.Share.SetLocalViewingAllowedAsync(false);
+        Assert.False(rig.Share.IsSharing);
+        await rig.Share.UpdateAsync(true);
+        Assert.False(rig.Share.IsSharing);
+        await rig.Share.SetLocalViewingAllowedAsync(true);
+        Assert.False(rig.Share.IsSharing);
+        await rig.Share.UpdateAsync(true);
+        Assert.True(rig.Share.IsSharing);
+    }
+
+    [Fact]
+    public async Task DisposeFailure_IsObservable_AndSecondDisposeRetries()
+    {
+        var rig = new Rig();
+        rig.ApplyRoom();
+        await rig.Share.UpdateAsync(true);
+        rig.Hosts[0].DisposeFailure = new IOException("close failed");
+        await Assert.ThrowsAsync<InvalidOperationException>(() => rig.Share.DisposeAsync().AsTask());
+        rig.Hosts[0].DisposeFailure = null;
+        await rig.Share.DisposeAsync();
+        Assert.False(rig.Share.IsSharing);
+        Assert.True(rig.Hosts[0].Disposed);
+    }
+
+    [Fact]
+    public async Task OldHostCleanupMustCompleteBeforeOpeningReplacement()
+    {
+        var rig = new Rig();
+        rig.ApplyRoom();
+        var cleanup = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var starts = 0;
+        await using var replacement = new StudentReverseShareService(rig.Reverse, new InMemoryLogSink(),
+            id => { starts++; return new FakeHost(id, null); }, enableAutoRefresh: false, beforeStart: () => cleanup.Task);
+        var update = replacement.UpdateAsync(true);
+        Assert.Equal(0, starts);
+        cleanup.SetResult();
+        await update;
+        Assert.Equal(1, starts);
+    }
+
     private static async Task WaitUntilAsync(Func<bool> condition)
     {
         var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(10);
@@ -217,18 +322,19 @@ public sealed class StudentReverseShareServiceTests
         public List<FakeHost> Hosts { get; } = new();
         public ConcurrentQueue<string> Messages { get; } = new();
         public Exception? StartFailure { get; init; }
+        public DateTimeOffset Now { get; set; } = DateTimeOffset.UtcNow;
 
         public Rig()
         {
             Self = new ParticipantConnection(SessionId, Guid.NewGuid(), Guid.NewGuid(), ParticipantRole.Student);
             Professor = new ParticipantConnection(SessionId, Guid.NewGuid(), Guid.NewGuid(), ParticipantRole.Professor);
-            Reverse = new ReverseCollaborationClient(SessionId, Channel, new InMemoryLogSink());
+            Reverse = new ReverseCollaborationClient(SessionId, Channel, new InMemoryLogSink(), clock: () => Now);
             Share = new StudentReverseShareService(Reverse, new InMemoryLogSink(), studentId =>
             {
                 var host = new FakeHost(studentId, StartFailure);
                 lock (Hosts) Hosts.Add(host);
                 return host;
-            });
+            }, clock: () => Now, enableAutoRefresh: false);
             Share.SharingChanged += (_, message) => Messages.Enqueue(message);
         }
 
