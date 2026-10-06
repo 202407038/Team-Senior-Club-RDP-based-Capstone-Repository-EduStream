@@ -356,8 +356,8 @@ public sealed class ReverseSessionManager : IReverseSessionManager, IDisposable
             dynamic dyn = session;
             invitationsCom = dyn.Invitations;
 
-            // AuthString 은 정방향 서비스와 동일하게 참가자(ID)로 지정한다. (MS 명세: AuthString, GroupName, Password, AttendeeLimit)
-            dynamic created = ((dynamic)invitationsCom).CreateInvitation(professorId, groupName, invitationPassword, 1);
+            // 같은 교수자에게 초대를 갱신해도 AuthString은 WDS 세션 내에서 중복되지 않아야 한다.
+            dynamic created = ((dynamic)invitationsCom).CreateInvitation(invitationId.ToString("N"), groupName, invitationPassword, 1);
             invitationCom = created;
 
             string connectionString = created.ConnectionString;

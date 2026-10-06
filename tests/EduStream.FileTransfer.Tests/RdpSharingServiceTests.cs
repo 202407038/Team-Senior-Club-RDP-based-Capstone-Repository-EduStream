@@ -29,6 +29,28 @@ public class RdpSharingServiceTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task InvalidMonitorSetupClosesOpenedNativeSession()
+    {
+        var native = new MonitorFailureSession();
+        await using var service = new RdpSharingService(_logSink, () => native)
+        { SelectedBounds = new System.Drawing.Rectangle(0, 0, 1920, 1080) };
+        await Assert.ThrowsAsync<InvalidOperationException>(() => service.StartAsync(Guid.NewGuid()));
+        Assert.True(native.Opened);
+        Assert.True(native.Closed);
+        Assert.Contains(_logSink.Snapshot(), entry => entry.Contains("모니터 영역 설정 실패"));
+    }
+
+    private sealed class MonitorFailureSession
+    {
+        public bool Opened { get; private set; }
+        public bool Closed { get; private set; }
+        public int ColorDepth { get; set; }
+        public void Open() => Opened = true;
+        public void Close() => Closed = true;
+        public void SetDesktopSharedRect(int left, int top, int right, int bottom) => throw new InvalidOperationException("monitor failure");
+    }
+
+    [Fact]
     public async Task StartAsync_ThrowsWhenAlreadyStarted()
     {
         var sessionId = Guid.NewGuid();

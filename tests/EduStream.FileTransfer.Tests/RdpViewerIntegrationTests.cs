@@ -19,6 +19,7 @@ public sealed class RdpViewerIntegrationTests
     public async Task TwoViewers_ShouldConnectViewOnly_AndOneRevocationShouldPreserveOther()
     {
         var log = new InMemoryLogSink();
+        int ViewOnlyApprovals() => log.Snapshot().Count(IsViewOnlyApproval);
         await using var sharer = new RdpSharingService(log);
         await using var first = await ViewerRig.Create();
         await using var second = await ViewerRig.Create();
@@ -31,7 +32,10 @@ public sealed class RdpViewerIntegrationTests
         await first.Connected.Task.WaitAsync(TimeSpan.FromSeconds(25));
         await second.Viewer.ConnectAsync(invite2, password);
         await second.Connected.Task.WaitAsync(TimeSpan.FromSeconds(25));
-        Assert.Equal(2, log.Snapshot().Count(x => x.Contains("보기 전용 참가 승인")));
+        // 서비스 로그 형식은 참가 승인 + 실제 적용한 ControlLevel로 변경되었다.
+        var approvalDeadline = DateTime.UtcNow.AddSeconds(2);
+        while (ViewOnlyApprovals() < 2 && DateTime.UtcNow < approvalDeadline) await Task.Delay(20);
+        Assert.True(ViewOnlyApprovals() == 2, string.Join(Environment.NewLine, log.Snapshot()));
         await sharer.RevokeInvitationAsync(invite1.InvitationId);
         await first.Terminated.Task.WaitAsync(TimeSpan.FromSeconds(10));
         Assert.Equal(RdpConnectionState.Connected, second.Latest?.State);
@@ -41,6 +45,10 @@ public sealed class RdpViewerIntegrationTests
         await first.Connected.Task.WaitAsync(TimeSpan.FromSeconds(25));
         Assert.Equal(RdpConnectionState.Connected, second.Latest?.State);
     }
+
+    // 보기 전용 적용 후의 로그만 센다. 단순 연결 성공 로그를 승인으로 대체하지 않는다.
+    private static bool IsViewOnlyApproval(string entry) =>
+        entry.Contains("[RDP] 참가 승인:") && entry.Contains("ControlLevel=2");
 
     [Fact]
     public async Task InvalidInvitation_ShouldNotReachViewer_AndStaleStatusShouldBeIgnored()
