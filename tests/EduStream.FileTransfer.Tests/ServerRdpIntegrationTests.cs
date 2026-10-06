@@ -25,6 +25,46 @@ public sealed class ServerRdpIntegrationTests
     private static ServerViewModel CreateViewModel(IRdpSharingService? service = null) =>
         new(service, ProfessorCertificateStore.CreateEphemeral) { Port = TestPortAllocator.GetFreePortPair() };
 
+    // 참가 보호 채널 → TCP 초대 → 실제 학생 viewer의 자동 연결을 한 경로로 검증한다.
+    // 기존 테스트의 서버 비밀번호 직접 조회를 사용하지 않는다. 같은 PC/테스트 프로세스 검사이며 다중 PC 인수는 아니다.
+    [WdsTheory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task SharingBeforeJoin_ClientAutoConnectsThroughSecureHandoff(bool startStudentHost)
+    {
+        var server = CreateViewModel();
+        await using var viewer = await RdpViewerIntegrationTests.ViewerRig.Create();
+        var student = new EduStream.Client.ViewModels.ClientViewModel(viewer.Viewer)
+        {
+            HostAddress = "127.0.0.1", Port = server.Port, DisplayName = "NativeAutoJoin"
+        };
+        // 명시적 WDS 테스트에서만 실제 학생 호스트를 켠다. 일반 테스트에서는 사용자 화면을 열지 않는다.
+        typeof(EduStream.Client.ViewModels.ClientViewModel)
+            .GetField("_desktopAttached", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .SetValue(student, startStudentHost);
+        try
+        {
+            await Invoke(server, "OpenSessionAsync");
+            await server.StartRdpShareAsync();
+            Assert.True(server.IsRdpSharing);
+            student.JoinSessionCommand.Execute(null);
+            await viewer.Connected.Task.WaitAsync(Wait);
+            Assert.True(student.IsConnected);
+            Assert.Equal(RdpConnectionState.Connected, viewer.Latest?.State);
+            if (startStudentHost)
+            {
+                using var timeout = new CancellationTokenSource(Wait);
+                while (!student.StudentSharingStatus.Contains("공유를 시작"))
+                    await Task.Delay(20, timeout.Token);
+            }
+        }
+        finally
+        {
+            await server.ShutdownAsync();
+            await student.ShutdownAsync();
+        }
+    }
+
     [Fact]
     public async Task StartFailure_ShouldNotAdvertiseSharing_AndAllowRetry()
     {

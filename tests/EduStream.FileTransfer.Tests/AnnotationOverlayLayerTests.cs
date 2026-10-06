@@ -61,6 +61,82 @@ public class AnnotationOverlayLayerTests
         Assert.Equal(1, layer.ShapeCount);
     });
 
+    [Theory]
+    [InlineData(AnnotationTool.Pen)]
+    [InlineData(AnnotationTool.Line)]
+    [InlineData(AnnotationTool.Rectangle)]
+    [InlineData(AnnotationTool.Circle)]
+    public Task LivePreview_DrawsBeforeCommit_AndCancelsWithoutHistory(AnnotationTool tool) => RunOnStaAsync(async () =>
+    {
+        var manager = new AnnotationManager();
+        var engine = new AnnotationEngineAdapter(manager);
+        using var layer = new AnnotationOverlayLayer(240, 100);
+        layer.BindLocalRenderer(engine);
+        await engine.ActivateEngineAsync();
+        var stroke = MakeStroke(tool);
+        for (var i = 0; i < 10; i++) layer.ShowPreview(stroke);
+        Assert.Equal(1, layer.ShapeCount);
+        Assert.True(RedPixels(layer) > 100);
+        Assert.Empty(await manager.GetAllStrokesAsync());
+        layer.ClearPreview();
+        layer.Canvas.UpdateLayout();
+        Assert.Equal(0, RedPixels(layer));
+        Assert.Empty(await manager.GetAllStrokesAsync());
+        layer.ShowPreview(stroke);
+        await engine.ReceiveStrokeAsync(stroke);
+        Assert.Equal(1, layer.ShapeCount);
+        Assert.Single(await manager.GetAllStrokesAsync());
+        await engine.UndoAsync();
+        Assert.Equal(0, layer.ShapeCount);
+        Assert.Empty(await manager.GetAllStrokesAsync());
+    });
+
+    [Fact]
+    public Task EraserPreview_CancelRestoresPixels_CommitAndUndoRestoreStroke() => RunOnStaAsync(async () =>
+    {
+        var manager = new AnnotationManager();
+        var engine = new AnnotationEngineAdapter(manager);
+        using var layer = new AnnotationOverlayLayer(240, 100);
+        layer.BindLocalRenderer(engine);
+        await engine.ActivateEngineAsync();
+        await engine.ReceiveStrokeAsync(MakeStroke(AnnotationTool.Line));
+        var original = RedPixels(layer);
+        var eraser = MakeStroke(AnnotationTool.Eraser);
+        layer.ShowPreview(eraser);
+        Assert.Equal(0, RedPixels(layer));
+        Assert.Single(await manager.GetAllStrokesAsync());
+        layer.ClearPreview(); layer.Canvas.UpdateLayout();
+        Assert.Equal(original, RedPixels(layer));
+        layer.ShowPreview(eraser);
+        await engine.ReceiveStrokeAsync(eraser);
+        Assert.Equal(0, layer.ShapeCount);
+        await engine.UndoAsync();
+        Assert.Equal(original, RedPixels(layer));
+    });
+
+    [Fact]
+    public Task HideDuringPreview_DiscardsTransientShape_AndShowRestoresOnlyCommitted() => RunOnStaAsync(async () =>
+    {
+        var engine = new AnnotationEngineAdapter(new AnnotationManager());
+        using var layer = new AnnotationOverlayLayer(240, 100);
+        layer.BindLocalRenderer(engine);
+        await engine.ActivateEngineAsync();
+        await engine.ReceiveStrokeAsync(MakeStroke(AnnotationTool.Line));
+        layer.ShowPreview(MakeStroke(AnnotationTool.Circle));
+        Assert.Equal(2, layer.ShapeCount);
+        await engine.SetLayerVisibilityAsync(false);
+        Assert.Equal(0, layer.ShapeCount);
+        await engine.SetLayerVisibilityAsync(true);
+        Assert.Equal(1, layer.ShapeCount);
+    });
+
+    private static AnnotationStroke MakeStroke(AnnotationTool tool) => new()
+    {
+        ParticipantId = "professor", Tool = tool, Color = new AnnotationColor(255, 0, 0), StrokeWidth = 8,
+        Points = new[] { new Point(20, 20), new Point(200, 70) }
+    };
+    private static int RedPixels(AnnotationOverlayLayer layer) => layer.CountPixels((r, g, b) => r > 200 && g < 40 && b < 40);
+
     private static Task RunOnStaAsync(Func<Task> body)
     {
         var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);

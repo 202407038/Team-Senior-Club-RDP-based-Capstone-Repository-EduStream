@@ -22,6 +22,7 @@ public sealed class AnnotationOverlayLayer : IDisposable
     private readonly int _pixelHeight;
     private bool _disposed;
     private readonly System.Collections.Generic.Dictionary<Guid, AnnotationStroke> _strokes = new();
+    private UIElement? _preview;
 
     public Canvas Canvas { get; }
     public Window? HostWindow { get; private set; }
@@ -77,6 +78,7 @@ public sealed class AnnotationOverlayLayer : IDisposable
         ArgumentNullException.ThrowIfNull(snapshot);
         return OnUiAsync(() =>
         {
+            ClearPreview();
             Canvas.Children.Clear();
             _strokes.Clear();
             if (snapshot.IsVisible)
@@ -136,6 +138,7 @@ public sealed class AnnotationOverlayLayer : IDisposable
     public void Draw(AnnotationStroke stroke)
     {
         Canvas.Dispatcher.VerifyAccess();
+        ClearPreview();
         var points = stroke.Points;
         if (points.Count < 2) throw new InvalidOperationException("선/도형은 점이 2개 이상 필요합니다.");
         if (stroke.Tool == AnnotationTool.Eraser)
@@ -149,17 +152,62 @@ public sealed class AnnotationOverlayLayer : IDisposable
             return;
         }
 
+        var element = CreateShape(stroke);
+
+        // 같은 스트로크가 재전달되어도 중복해서 그리지 않는다.
+        foreach (var existing in Canvas.Children.OfType<FrameworkElement>()
+                     .Where(e => e.Tag is Guid id && id == stroke.StrokeId).ToArray())
+            Canvas.Children.Remove(existing);
+        element.Tag = stroke.StrokeId;
+        _strokes[stroke.StrokeId] = stroke;
+        Canvas.Children.Add(element);
+        Canvas.UpdateLayout();
+    }
+
+    /// <summary>드래그 중의 출력만 갱신한다. 확정 스트로크와 실행 취소 이력은 변경하지 않는다.</summary>
+    public void ShowPreview(AnnotationStroke stroke)
+    {
+        Canvas.Dispatcher.VerifyAccess();
+        ClearPreview();
+        if (stroke.Points.Count < 2) return;
+        if (stroke.Tool == AnnotationTool.Eraser)
+        {
+            var hits = _strokes.Values.Where(s => AnnotationStrokeGeometry.HitByEraser(s, stroke))
+                .Select(s => s.StrokeId).ToHashSet();
+            foreach (var shape in Canvas.Children.OfType<FrameworkElement>())
+                if (shape.Tag is Guid id && hits.Contains(id)) shape.Visibility = Visibility.Hidden;
+        }
+        else
+        {
+            _preview = CreateShape(stroke);
+            Canvas.Children.Add(_preview);
+        }
+        Canvas.UpdateLayout();
+    }
+
+    public void ClearPreview()
+    {
+        Canvas.Dispatcher.VerifyAccess();
+        if (_preview is not null) Canvas.Children.Remove(_preview);
+        _preview = null;
+        foreach (UIElement shape in Canvas.Children) shape.Visibility = Visibility.Visible;
+    }
+
+    private static FrameworkElement CreateShape(AnnotationStroke stroke)
+    {
+        var points = stroke.Points;
         var c = stroke.Color;
         var brush = new SolidColorBrush(WpfColor.FromArgb(c.A, c.R, c.G, c.B));
         var first = points[0];
         var last = points[points.Count - 1];
 
-        UIElement element = stroke.Tool switch
+        return stroke.Tool switch
         {
             AnnotationTool.Line => new Line
             {
                 X1 = first.X, Y1 = first.Y, X2 = last.X, Y2 = last.Y,
-                Stroke = brush, StrokeThickness = stroke.StrokeWidth
+                Stroke = brush, StrokeThickness = stroke.StrokeWidth,
+                StrokeStartLineCap = PenLineCap.Round, StrokeEndLineCap = PenLineCap.Round
             },
             AnnotationTool.Rectangle => CreateRectangle(first, last, brush, stroke.StrokeWidth),
             AnnotationTool.Circle => CreateEllipse(first, last, brush, stroke.StrokeWidth),
@@ -167,14 +215,6 @@ public sealed class AnnotationOverlayLayer : IDisposable
             _ => throw new NotSupportedException($"오버레이가 지원하지 않는 도구입니다: {stroke.Tool}")
         };
 
-        // 같은 스트로크가 재전달되어도 중복해서 그리지 않는다.
-        foreach (var existing in Canvas.Children.OfType<FrameworkElement>()
-                     .Where(e => e.Tag is Guid id && id == stroke.StrokeId).ToArray())
-            Canvas.Children.Remove(existing);
-        ((FrameworkElement)element).Tag = stroke.StrokeId;
-        _strokes[stroke.StrokeId] = stroke;
-        Canvas.Children.Add(element);
-        Canvas.UpdateLayout();
     }
 
     public int CountPixels(Func<byte, byte, byte, bool> match)
@@ -226,7 +266,8 @@ public sealed class AnnotationOverlayLayer : IDisposable
 
     private static Polyline CreatePolyline(System.Collections.Generic.IReadOnlyList<System.Drawing.Point> points, WpfBrush brush, int width)
     {
-        var polyline = new Polyline { Stroke = brush, StrokeThickness = width };
+        var polyline = new Polyline { Stroke = brush, StrokeThickness = width,
+            StrokeStartLineCap = PenLineCap.Round, StrokeEndLineCap = PenLineCap.Round, StrokeLineJoin = PenLineJoin.Round };
         foreach (var p in points) polyline.Points.Add(new System.Windows.Point(p.X, p.Y));
         return polyline;
     }

@@ -245,7 +245,13 @@ public sealed class RdpSharingService : IRdpSharingService
         foreach (var id in _invitations.Keys.ToArray())
             try { Revoke(id); } catch (Exception ex) { errors.Add(ex); }
 
-        try { Call(_session, "Close"); } catch (Exception ex) { errors.Add(ex); }
+        try { Call(_session, "Close"); }
+        catch (Exception ex)
+        {
+            errors.Add(ex);
+            // 실제 종료에 실패한 세션은 보존한다. 재시도 전 새 공유를 열지 않는다.
+            throw new AggregateException("WDS 종료 확인 실패. 종료를 다시 시도해야 합니다.", errors);
+        }
         Unsubscribe();
 
         foreach (var invitation in _invitations.Values) Release(invitation.Com);
@@ -263,13 +269,11 @@ public sealed class RdpSharingService : IRdpSharingService
     public async ValueTask DisposeAsync()
     {
         if (_disposed) return;
-        try { await StopAsync().ConfigureAwait(false); }
-        finally
-        {
-            _disposed = true;
-            (await _ready.Task.ConfigureAwait(false)).BeginInvokeShutdown(DispatcherPriority.Send);
-            await Task.Run(() => _thread.Join()).ConfigureAwait(false);
-        }
+        // 실패 시 STA와 세션 참조를 유지해야 다음 DisposeAsync에서 정리할 수 있다.
+        await StopAsync().ConfigureAwait(false);
+        _disposed = true;
+        (await _ready.Task.ConfigureAwait(false)).BeginInvokeShutdown(DispatcherPriority.Send);
+        await Task.Run(() => _thread.Join()).ConfigureAwait(false);
     }
 
     private void Subscribe(int id, Delegate handler)
