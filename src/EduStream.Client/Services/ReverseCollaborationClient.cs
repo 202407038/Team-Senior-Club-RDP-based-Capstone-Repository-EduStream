@@ -1,5 +1,6 @@
 using EduStream.Core.Collaboration;
 using EduStream.Core.Logging;
+using System.Text.Json;
 
 namespace EduStream.Client.Services;
 
@@ -29,6 +30,15 @@ public sealed class ReverseCollaborationClient
     private ParticipantConnection? _professor;
     private Guid _annotationSharingId;
     private long _lastAppliedSequence;
+    private long _lastReceivedSequence;
+    private readonly Queue<(AnnotationTransportNotice Notice, int Bytes)> _pendingAnnotations = new();
+    private long _pendingBytes;
+    private volatile int _pendingCount;
+    private volatile bool _lostAnnotations;
+    private Func<AnnotationTransportNotice, Task>? _annotationRenderer;
+    private Task<bool> _annotationRecovery = Task.FromResult(true);
+    public const int MaxPendingAnnotationFrames = AnnotationTransportNotice.MaxStrokes;
+    public const long MaxPendingAnnotationBytes = 32L * 1024 * 1024;
 
     public ReverseCollaborationClient(Guid sessionId, ICollaborationChannel server, ILogSink logSink,
         Func<DateTimeOffset>? clock = null)
@@ -41,9 +51,26 @@ public sealed class ReverseCollaborationClient
     }
 
     /// <summary>
-    /// 3번 판서 수신 레이어 적용(예: ReceiveRemoteStrokeJsonAsync(notice.PayloadJson)). 연결 전에는 받은 판서를 적용하지 않고 기록만 남깁니다.
+    /// 3번 판서 수신 레이어 적용. 연결 전 데이터는 한도 내에서 보관하며 연결 시 순서대로 적용합니다.
+    /// 렌더러는 같은 스트로크 ID/전체 스냅샷의 재적용에 안전해야 합니다(기존 수신 레이어 규약).
     /// </summary>
-    public Func<AnnotationTransportNotice, Task>? AnnotationRenderer { get; set; }
+    public Func<AnnotationTransportNotice, Task>? AnnotationRenderer
+    {
+        get { lock (_gate) return _annotationRenderer; }
+        set
+        {
+            lock (_gate)
+            {
+                _annotationRenderer = value;
+                // UI 스레드에서 동기 대기하지 않는다. 소비자는 AnnotationRecovery를 await해 완료 여부를 확인한다.
+                _annotationRecovery = Task.Run(RetryPendingAnnotationsAsync);
+            }
+        }
+    }
+
+    public Task<bool> AnnotationRecovery { get { lock (_gate) return _annotationRecovery; } }
+    /// <summary>미적용 데이터/보관 한도 초과가 남아 있으면 true. 송신 성공과 표시 완료를 구분합니다.</summary>
+    public bool AnnotationRecoveryRequired => _pendingCount > 0 || _lostAnnotations;
 
     /// <summary>교수자가 화면 공유를 다시 시작해 새 판서 세대로 넘어갔을 때 발생합니다. 렌더러는 이전 판서를 지워야 합니다.</summary>
     public event Action<Guid>? AnnotationSharingChanged;
@@ -154,7 +181,7 @@ public sealed class ReverseCollaborationClient
                     var professor = _professor ?? throw new CollaborationException(CollaborationError.StaleConnection);
                     if (notice.SharingId == _annotationSharingId)
                     {
-                        notice.ValidateForSender(professor, _annotationSharingId, _lastAppliedSequence);
+                        notice.ValidateForSender(professor, _annotationSharingId, _lastReceivedSequence);
                     }
                     else
                     {
@@ -166,6 +193,9 @@ public sealed class ReverseCollaborationClient
                             Remember(_retiredSharings, _retiredOrder, _annotationSharingId);
                         _annotationSharingId = notice.SharingId;
                         _lastAppliedSequence = 0;
+                        _lastReceivedSequence = 0;
+                        ClearPendingAnnotations();
+                        _lostAnnotations = false;
                         sharingChanged = notice.SharingId;
                     }
                 }
@@ -176,34 +206,81 @@ public sealed class ReverseCollaborationClient
                 return;
             }
 
-            if (sharingChanged is { } changed) AnnotationSharingChanged?.Invoke(changed);
+            if (sharingChanged is { } changed)
+            {
+                try { AnnotationSharingChanged?.Invoke(changed); }
+                catch (Exception ex) { _logSink.Write($"[Annotation] 공유 변경 소비 실패: {ex.GetType().Name}"); }
+            }
 
-            var renderer = AnnotationRenderer;
-            if (renderer is null)
+            using var document = JsonDocument.Parse(notice.PayloadJson);
+            if (document.RootElement.TryGetProperty("Kind", out _))
             {
-                _logSink.Write($"[Annotation] 판서 렌더러 미연결로 적용하지 않음: sequence={notice.Sequence}");
+                // 전체 스냅샷은 실패/누락된 이전 스트로크까지 대체하므로 복구 기준점으로 사용할 수 있다.
+                ClearPendingAnnotations();
+                _lostAnnotations = false;
+            }
+            if (_pendingAnnotations.Count >= MaxPendingAnnotationFrames ||
+                _pendingBytes + frame.Length > MaxPendingAnnotationBytes)
+            {
+                _lostAnnotations = true;
+                _logSink.Write("[Annotation] 미적용 판서 보관 한도 초과: 전체 스냅샷 또는 재접속 복원이 필요합니다.");
                 return;
             }
-            try
-            {
-                await renderer(notice);
-            }
-            catch (Exception ex)
-            {
-                // 적용 실패한 번호는 올리지 않는다. 다음 레이어 스냅샷이 오면 전체 상태로 다시 맞춰진다.
-                _logSink.Write($"[Annotation] 판서 적용 실패: sequence={notice.Sequence}, {ex.GetType().Name}");
-                return;
-            }
-            lock (_gate)
-            {
-                if (notice.SharingId == _annotationSharingId && notice.Sequence > _lastAppliedSequence)
-                    _lastAppliedSequence = notice.Sequence;
-            }
+            _pendingAnnotations.Enqueue((notice, frame.Length));
+            _pendingBytes += frame.Length;
+            _pendingCount = _pendingAnnotations.Count;
+            lock (_gate) _lastReceivedSequence = notice.Sequence;
+            await DrainPendingAnnotationsAsync();
         }
         finally
         {
             _annotationOrder.Release();
         }
+    }
+
+    /// <summary>표시기 연결/복구 뒤 호출할 수 있습니다. 실패한 선을 건너뛰지 않으며 미완료면 false입니다.</summary>
+    public async Task<bool> RetryPendingAnnotationsAsync()
+    {
+        await _annotationOrder.WaitAsync().ConfigureAwait(false);
+        try { return await DrainPendingAnnotationsAsync().ConfigureAwait(false); }
+        finally { _annotationOrder.Release(); }
+    }
+
+    private async Task<bool> DrainPendingAnnotationsAsync()
+    {
+        while (_pendingAnnotations.TryPeek(out var pending))
+        {
+            var renderer = AnnotationRenderer;
+            if (renderer is null) return false;
+            var applied = false;
+            for (var attempt = 0; attempt < 3; attempt++)
+            {
+                try
+                {
+                    await renderer(pending.Notice).ConfigureAwait(false);
+                    applied = true;
+                    break;
+                }
+                catch (Exception ex)
+                {
+                    _logSink.Write($"[Annotation] 판서 적용 실패: sequence={pending.Notice.Sequence}, 시도={attempt + 1}, {ex.GetType().Name}");
+                    if (attempt < 2) await Task.Delay(25).ConfigureAwait(false);
+                }
+            }
+            if (!applied) return false;
+            _pendingAnnotations.Dequeue();
+            _pendingBytes -= pending.Bytes;
+            _pendingCount = _pendingAnnotations.Count;
+            lock (_gate) _lastAppliedSequence = pending.Notice.Sequence;
+        }
+        return !_lostAnnotations;
+    }
+
+    private void ClearPendingAnnotations()
+    {
+        _pendingAnnotations.Clear();
+        _pendingBytes = 0;
+        _pendingCount = 0;
     }
 
     private static void Remember(HashSet<Guid> set, Queue<Guid> order, Guid id)

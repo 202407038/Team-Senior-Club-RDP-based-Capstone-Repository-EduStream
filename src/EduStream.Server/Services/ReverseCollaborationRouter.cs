@@ -65,8 +65,11 @@ public sealed class ReverseCollaborationRouter : IDisposable
     private readonly Func<DateTimeOffset> _clock;
     private readonly Dictionary<Guid, StudentState> _students = new(); // 학생 connectionId → 역방향 상태
     private readonly Dictionary<Guid, AnnotationPeer> _annotationPeers = new(); // 학생 connectionId → 판서 수신 채널
-    // 판서 송신·재접속 복원을 한 줄로 세워, 새로 붙은 학생이 복원 프레임과 실시간 프레임을 순서대로 받게 한다.
-    private readonly SemaphoreSlim _annotationLock = new(1, 1);
+    // 상태 변경과 같은 순서로 알림을 꺼내되 외부 콜백은 상태 잠금 밖에서 실행한다.
+    private readonly Queue<Action> _invitationNotifications = new();
+    private bool _dispatchingInvitations;
+    // 공유 전환·복원·실시간 송신을 같은 큐에 넣어 중지 알림을 이전 송신이 추월하지 못하게 한다.
+    private Task _annotationTail = Task.CompletedTask;
     private readonly LinkedList<byte[]> _annotationReplay = new();
     private long _annotationReplayBytes;
     private bool _annotationReplayTruncated;
@@ -173,6 +176,7 @@ public sealed class ReverseCollaborationRouter : IDisposable
         lock (_gate)
         {
             ThrowIfDisposed();
+            RequireViewableStudent(student);
             var state = GetStateLocked(student.ConnectionId);
             if (state.RetiredSharings.Contains(invitation.SharingId))
                 throw new CollaborationException(CollaborationError.StaleConnection);
@@ -197,8 +201,9 @@ public sealed class ReverseCollaborationRouter : IDisposable
             withdrawn = state.Ready;
             state.Ready = null;
             state.Pending = invitation;
+            if (withdrawn is not null) QueueWithdrawnLocked(withdrawn);
         }
-        if (withdrawn is not null) RaiseWithdrawn(withdrawn);
+        DrainInvitationNotifications();
         _logSink.Write($"[Reverse] 역방향 초대 수신(비밀번호 대기): connection={student.ConnectionId}, invitation={invitation.InvitationId}");
     }
 
@@ -210,6 +215,7 @@ public sealed class ReverseCollaborationRouter : IDisposable
         lock (_gate)
         {
             ThrowIfDisposed();
+            RequireViewableStudent(student);
             if (!_students.TryGetValue(student.ConnectionId, out var state) || state.Pending is null ||
                 state.Pending.InvitationId != secret.InvitationId)
                 throw new CollaborationException(CollaborationError.StaleConnection);
@@ -226,9 +232,15 @@ public sealed class ReverseCollaborationRouter : IDisposable
             ready = new ReverseInvitationDelivery(student, displayName, state.Pending, secret);
             state.Pending = null;
             state.Ready = ready;
+            _invitationNotifications.Enqueue(() =>
+            {
+                // 회수/종료가 알림 실행보다 빨랐으면 취소된 초대는 전달하지 않는다.
+                if (TryGetInvitation(student.ConnectionId) == ready)
+                    NotifyEach(InvitationReady, handler => handler(ready));
+            });
         }
         _logSink.Write($"[Reverse] 역방향 초대 준비: 학생={displayName}, invitation={secret.InvitationId}");
-        InvitationReady?.Invoke(ready);
+        DrainInvitationNotifications();
     }
 
     /// <summary>
@@ -239,9 +251,11 @@ public sealed class ReverseCollaborationRouter : IDisposable
         CollaborationContract.RequireId(sharingId, nameof(sharingId));
         lock (_gate)
         {
+            ThrowIfDisposed();
             if (_annotationSharingId == sharingId) return;
             _annotationSharingId = sharingId;
             ClearReplayLocked();
+            QueueAnnotationResetLocked(sharingId, remember: true);
         }
         _logSink.Write($"[Annotation] 판서 공유 시작: sharingId={sharingId}");
     }
@@ -252,8 +266,10 @@ public sealed class ReverseCollaborationRouter : IDisposable
         lock (_gate)
         {
             if (_annotationSharingId == Guid.Empty) return;
+            var ended = _annotationSharingId;
             _annotationSharingId = Guid.Empty;
             ClearReplayLocked();
+            QueueAnnotationResetLocked(ended, remember: false);
         }
         _logSink.Write("[Annotation] 판서 공유 종료");
     }
@@ -261,37 +277,40 @@ public sealed class ReverseCollaborationRouter : IDisposable
     /// <summary>
     /// 학생 연결을 판서 수신자로 붙이고, 현재 공유의 판서 기록을 원래 순서대로 다시 보냅니다(재접속 복원).
     /// </summary>
-    public async Task AttachAnnotationPeerAsync(ParticipantConnection student, ICollaborationChannel channel,
+    public Task AttachAnnotationPeerAsync(ParticipantConnection student, ICollaborationChannel channel,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(student);
         ArgumentNullException.ThrowIfNull(channel);
         if (!IsCurrentStudent(student)) throw new CollaborationException(CollaborationError.NotAuthorized);
 
-        await _annotationLock.WaitAsync(cancellationToken);
-        try
+        lock (_gate)
         {
-            byte[][] replay;
-            lock (_gate)
+            ThrowIfDisposed();
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!IsCurrentStudent(student)) throw new CollaborationException(CollaborationError.StaleConnection);
+            var replay = _annotationReplay.ToArray();
+            var peer = new AnnotationPeer(student, channel);
+            _annotationPeers[student.ConnectionId] = peer;
+            return QueueAnnotationsLocked(async () =>
             {
-                ThrowIfDisposed();
-                replay = _annotationReplay.ToArray();
-                _annotationPeers[student.ConnectionId] = new AnnotationPeer(student, channel);
-            }
-            // 등록 사이에 연결이 제거됐으면 ConnectionRemoved를 놓쳤을 수 있으므로 다시 확인한다.
-            if (!IsCurrentStudent(student))
-            {
-                lock (_gate) _annotationPeers.Remove(student.ConnectionId);
-                throw new CollaborationException(CollaborationError.StaleConnection);
-            }
-            foreach (var frame in replay)
-                await channel.SendAsync(frame, cancellationToken);
-            if (replay.Length > 0)
-                _logSink.Write($"[Annotation] 재접속 복원 전송: connection={student.ConnectionId}, {replay.Length}건");
-        }
-        finally
-        {
-            _annotationLock.Release();
+                try
+                {
+                    if (!IsCurrentStudent(student))
+                        throw new CollaborationException(CollaborationError.StaleConnection);
+                    foreach (var frame in replay)
+                        if (!await TrySendAsync(peer, frame, cancellationToken).ConfigureAwait(false))
+                            throw new CollaborationException(CollaborationError.StaleConnection);
+                    return replay.Length;
+                }
+                catch
+                {
+                    lock (_gate)
+                        if (_annotationPeers.TryGetValue(student.ConnectionId, out var current) && ReferenceEquals(current, peer))
+                            _annotationPeers.Remove(student.ConnectionId);
+                    throw;
+                }
+            });
         }
     }
 
@@ -300,47 +319,81 @@ public sealed class ReverseCollaborationRouter : IDisposable
     /// 공유가 없거나 형식이 잘못됐으면 CollaborationException을 던지며 조용히 버리지 않습니다.
     /// </summary>
     /// <returns>전달에 성공한 학생 수. 송신 성공은 학생 화면 적용 성공을 뜻하지 않습니다.</returns>
-    public async Task<int> PublishAnnotationAsync(string payloadJson, CancellationToken cancellationToken = default)
+    public Task<int> PublishAnnotationAsync(string payloadJson, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(payloadJson);
-        await _annotationLock.WaitAsync(cancellationToken);
-        try
+        lock (_gate)
         {
-            AnnotationPeer[] peers;
+            if (_disposed || _annotationSharingId == Guid.Empty)
+                return Task.FromException<int>(new CollaborationException(CollaborationError.SessionClosed));
+            if (cancellationToken.IsCancellationRequested) return Task.FromCanceled<int>(cancellationToken);
             byte[] frame;
-            lock (_gate)
+            var notice = new AnnotationTransportNotice(_professor.SessionId, _annotationSharingId,
+                _professor.ConnectionId, _annotationSequence + 1, payloadJson);
+            try
             {
-                ThrowIfDisposed();
-                if (_annotationSharingId == Guid.Empty)
-                    throw new CollaborationException(CollaborationError.SessionClosed);
-                var notice = new AnnotationTransportNotice(_professor.SessionId, _annotationSharingId,
-                    _professor.ConnectionId, _annotationSequence + 1, payloadJson);
-                try
-                {
-                    frame = CollaborationMessageCodec.Encode(Guid.NewGuid(), notice);
-                }
-                catch (ArgumentException)
-                {
-                    throw new CollaborationException(CollaborationError.InvalidRequest);
-                }
-                _annotationSequence = notice.Sequence;
-                Remember(frame, IsLayerSnapshot(payloadJson));
-                peers = _annotationPeers.Values.ToArray();
+                frame = CollaborationMessageCodec.Encode(Guid.NewGuid(), notice);
             }
+            catch (ArgumentException)
+            {
+                return Task.FromException<int>(new CollaborationException(CollaborationError.InvalidRequest));
+            }
+            _annotationSequence = notice.Sequence;
+            Remember(frame, IsLayerSnapshot(payloadJson));
+            var peers = _annotationPeers.Values.ToArray();
+            return QueueAnnotationsLocked(() => BroadcastAnnotationAsync(peers, frame, cancellationToken));
+        }
+    }
 
-            var results = await Task.WhenAll(peers.Select(peer => TrySendAsync(peer, frame, cancellationToken)));
-            return results.Count(sent => sent);
-        }
-        finally
+    /// <summary>호출 시점까지 예약된 공유 초기화·복원·판서 송신을 기다립니다. UI 스레드를 동기 대기하지 않습니다.</summary>
+    public Task WaitForAnnotationDeliveryAsync()
+    {
+        lock (_gate) return _annotationTail;
+    }
+
+    private Task<T> QueueAnnotationsLocked<T>(Func<Task<T>> operation)
+    {
+        var previous = _annotationTail;
+        var next = Task.Run(async () =>
         {
-            _annotationLock.Release();
-        }
+            try { await previous.ConfigureAwait(false); }
+            catch { /* 이전 요청의 실패가 이후 공유 중지/초기화를 막아서는 안 된다. */ }
+            return await operation().ConfigureAwait(false);
+        });
+        _annotationTail = next;
+        // 동기 수명 API에서 예약한 작업도 예외를 관찰한다. 각 요청 Task의 실패 상태는 유지한다.
+        _ = next.ContinueWith(task => _logSink.Write(
+            $"[Annotation] 예약 전달 실패: {task.Exception!.GetBaseException().GetType().Name}"),
+            TaskContinuationOptions.OnlyOnFaulted);
+        return next;
+    }
+
+    private void QueueAnnotationResetLocked(Guid sharingId, bool remember)
+    {
+        // 기존 Kind 17 레이어 규격의 빈 스냅샷을 사용한다. 새 스트로크가 없어도 학생 화면을 지운다.
+        const string emptyLayer = """{"Kind":"annotation-layer","Version":1,"Change":0,"IsVisible":true,"ContentRevision":0,"Strokes":[]}""";
+        var notice = new AnnotationTransportNotice(_professor.SessionId, sharingId,
+            _professor.ConnectionId, ++_annotationSequence, emptyLayer);
+        var frame = CollaborationMessageCodec.Encode(Guid.NewGuid(), notice);
+        if (remember) Remember(frame, layerSnapshot: true);
+        var peers = _annotationPeers.Values.ToArray();
+        QueueAnnotationsLocked(() => BroadcastAnnotationAsync(peers, frame, CancellationToken.None));
+    }
+
+    private async Task<int> BroadcastAnnotationAsync(AnnotationPeer[] peers, byte[] frame, CancellationToken cancellationToken)
+    {
+        var results = await Task.WhenAll(peers.Select(peer => TrySendAsync(peer, frame, cancellationToken))).ConfigureAwait(false);
+        return results.Count(sent => sent);
     }
 
     private async Task<bool> TrySendAsync(AnnotationPeer peer, byte[] frame, CancellationToken cancellationToken)
     {
         try
         {
+            lock (_gate)
+                if (_disposed || !_annotationPeers.TryGetValue(peer.Connection.ConnectionId, out var current) ||
+                    !ReferenceEquals(current, peer)) return false;
+            if (!IsCurrentStudent(peer.Connection)) return false;
             await peer.Channel.SendAsync(frame, cancellationToken);
             return true;
         }
@@ -422,8 +475,9 @@ public sealed class ReverseCollaborationRouter : IDisposable
         {
             _students.Remove(connection.ConnectionId, out state);
             _annotationPeers.Remove(connection.ConnectionId);
+            if (state?.Ready is { } ready) QueueWithdrawnLocked(ready);
         }
-        if (state?.Ready is { } ready) RaiseWithdrawn(ready);
+        DrainInvitationNotifications();
     }
 
     private void OnPermissionsChanged(ParticipantSnapshot snapshot)
@@ -436,14 +490,48 @@ public sealed class ReverseCollaborationRouter : IDisposable
             withdrawn = state.Ready;
             state.Ready = null;
             state.Pending = null;
+            if (withdrawn is not null) QueueWithdrawnLocked(withdrawn);
         }
-        if (withdrawn is not null) RaiseWithdrawn(withdrawn);
+        DrainInvitationNotifications();
     }
 
-    private void RaiseWithdrawn(ReverseInvitationDelivery delivery)
+    private void QueueWithdrawnLocked(ReverseInvitationDelivery delivery) =>
+        _invitationNotifications.Enqueue(() =>
+        {
+            _logSink.Write($"[Reverse] 역방향 초대 회수: 학생={delivery.DisplayName}, invitation={delivery.Invitation.InvitationId}");
+            NotifyEach(InvitationWithdrawn, handler => handler(delivery.Student, delivery.Invitation.InvitationId));
+        });
+
+    private void NotifyEach<T>(T? handlers, Action<T> invoke) where T : Delegate
     {
-        _logSink.Write($"[Reverse] 역방향 초대 회수: 학생={delivery.DisplayName}, invitation={delivery.Invitation.InvitationId}");
-        InvitationWithdrawn?.Invoke(delivery.Student, delivery.Invitation.InvitationId);
+        if (handlers is null) return;
+        foreach (var handler in handlers.GetInvocationList().Cast<T>())
+            try { invoke(handler); }
+            catch (Exception ex) { _logSink.Write($"[Reverse] 초대 알림 소비 실패: {ex.GetType().Name}"); }
+    }
+
+    private void DrainInvitationNotifications()
+    {
+        lock (_gate)
+        {
+            if (_dispatchingInvitations) return;
+            _dispatchingInvitations = true;
+        }
+        while (true)
+        {
+            Action next;
+            lock (_gate)
+            {
+                if (_invitationNotifications.Count == 0)
+                {
+                    _dispatchingInvitations = false;
+                    return;
+                }
+                next = _invitationNotifications.Dequeue();
+            }
+            try { next(); }
+            catch (Exception ex) { _logSink.Write($"[Reverse] 초대 알림 실패: {ex.GetType().Name}"); }
+        }
     }
 
     private async Task SendFailureAsync(ParticipantConnection student, ICollaborationChannel channel, Guid invitationId,
@@ -473,6 +561,7 @@ public sealed class ReverseCollaborationRouter : IDisposable
             if (_disposed) return;
             _disposed = true;
             withdrawn = _students.Values.Select(state => state.Ready).OfType<ReverseInvitationDelivery>().ToArray();
+            foreach (var ready in withdrawn) QueueWithdrawnLocked(ready);
             _students.Clear();
             _annotationPeers.Clear();
             _annotationSharingId = Guid.Empty;
@@ -480,6 +569,6 @@ public sealed class ReverseCollaborationRouter : IDisposable
         }
         _registry.ConnectionRemoved -= OnConnectionRemoved;
         _registry.PermissionsChanged -= OnPermissionsChanged;
-        foreach (var ready in withdrawn) RaiseWithdrawn(ready);
+        DrainInvitationNotifications();
     }
 }
