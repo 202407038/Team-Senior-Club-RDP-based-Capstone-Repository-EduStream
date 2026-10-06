@@ -28,6 +28,9 @@ public sealed class StudentStatusClient
 
     public event Action<StudentStatus>? StatusChanged;
 
+    /// <summary>같은 연결의 더 새로운 상태 스냅샷을 받아들인 뒤 발생합니다. 역방향 신원(교수자 연결 포함) 갱신에 씁니다.</summary>
+    public event Action<RoomJoined>? RoomChanged;
+
     public StudentStatusClient(Guid sessionId, Core.Collaboration.ICollaborationChannel server, ILogSink logSink)
     {
         CollaborationContract.RequireId(sessionId, nameof(sessionId));
@@ -90,6 +93,7 @@ public sealed class StudentStatusClient
             _room = room;
             changed = _status = _status with { AllowViewing = self.AllowViewing, AllowControl = self.AllowControl };
         }
+        RoomChanged?.Invoke(room);
         StatusChanged?.Invoke(changed);
     }
 

@@ -20,6 +20,7 @@ namespace EduStream.Server.Services;
 public sealed class SessionManager
 {
     private const int MaxChatMessageLength = 500;
+    private const string ProfessorDisplayName = "교수자";
 
     private readonly ILogSink _logSink;
     private readonly TcpServerService _tcpServer;
@@ -56,6 +57,7 @@ public sealed class SessionManager
     /// <summary>재연결 티켓으로 참가할 때 복원할 허용 상태입니다.</summary>
     private sealed record ReconnectRestore(bool AllowViewing, bool AllowControl);
     private SessionFileTransferRouter? _fileTransfers;
+    private ReverseCollaborationRouter? _reverseRouter;
 
     /// <summary>
     /// 참여자 목록이 변경되었을 때 발생합니다.
@@ -158,6 +160,7 @@ public sealed class SessionManager
         {
             _rdpSharingService = sharingService;
             _rdpSharingId = sharingId;
+            _reverseRouter?.BeginAnnotationSharing(sharingId);
             if (_sharingLifetime is null || _sharingLifetime.IsCancellationRequested)
                 _sharingLifetime = new CancellationTokenSource();
         }
@@ -303,6 +306,21 @@ public sealed class SessionManager
     public SessionFileTransferRouter? FileTransfers => _fileTransfers;
 
     /// <summary>
+    /// 학생→교수자 역방향 초대(Kind 15·16) 대조와 교수자→학생 판서(Kind 17) 전달입니다. 세션이 열려 있지 않으면 null입니다.
+    /// 교수자 viewer는 InvitationReady/InvitationWithdrawn을, 판서 엔진은 PublishAnnotationAsync를 연결합니다.
+    /// </summary>
+    public ReverseCollaborationRouter? ReverseCollaboration => _reverseRouter;
+
+    /// <summary>
+    /// 교수자 판서 엔진이 낸 JSON을 현재 화면 공유의 판서로 학생 전원에게 보냅니다. 공유가 없으면 SessionClosed로 실패합니다.
+    /// </summary>
+    public Task<int> PublishAnnotationAsync(string payloadJson, CancellationToken cancellationToken = default)
+    {
+        var router = _reverseRouter ?? throw new CollaborationException(CollaborationError.SessionClosed);
+        return router.PublishAnnotationAsync(payloadJson, cancellationToken);
+    }
+
+    /// <summary>
     /// 현재 강의의 파일 목록 스냅샷입니다. 세션이 열려 있지 않으면 null입니다.
     /// revision은 등록/해제마다 증가하므로 학생 쪽 동기화 여부 판단에 사용할 수 있습니다.
     /// </summary>
@@ -417,6 +435,7 @@ public sealed class SessionManager
             _fileCatalog = new SessionFileCatalog(
                 CurrentSession.SessionId, new SessionFileRequestAuthorizer(_participantRegistry));
             _fileTransfers = new SessionFileTransferRouter(_fileCatalog, _participantRegistry, _logSink);
+            _reverseRouter = new ReverseCollaborationRouter(_professorConnection, _participantRegistry, _logSink);
             if (secureChannelCertificate is not null)
             {
                 _secureListener = new SecureCollaborationListener(secureChannelCertificate, _logSink);
@@ -482,6 +501,8 @@ public sealed class SessionManager
             _roomPassword = null;
             _fileTransfers?.Dispose();
             _fileTransfers = null;
+            _reverseRouter?.Dispose();
+            _reverseRouter = null;
             _fileCatalog?.Dispose();
             _fileCatalog = null;
             secureGate = _secureGate;
@@ -530,6 +551,13 @@ public sealed class SessionManager
                     if (participant is not null && router is not null)
                         await router.HandleFrameAsync(participant, frame);
                     break;
+                case CollaborationMessageKind.ReverseRdpInvitation:
+                case CollaborationMessageKind.ReverseRdpInvitationSecret:
+                    var student = _participantRegistry.TryGetConnection(clientId);
+                    var reverse = _reverseRouter;
+                    if (student is not null && reverse is not null)
+                        await reverse.HandleFrameAsync(student, secure, frame);
+                    break;
                 default:
                     _logSink.Write($"[Secure] 처리하지 않는 메시지 무시: kind={kind}, clientId={clientId}");
                     break;
@@ -552,8 +580,13 @@ public sealed class SessionManager
         if (connection is null) return;
         var room = _participantRegistry.Snapshot(connection);
         if (room is null) return;
-        var self = new RoomJoined(connection, room.Revision,
-            room.Participants.Where(participant => participant.Connection == connection).ToArray());
+        var professor = _professorConnection;
+        var visible = room.Participants.Where(participant => participant.Connection == connection).ToList();
+        // 교수자 연결은 학생이 역방향 초대의 ProfessorId를 만들고 판서 발신자를 대조하는 데 필요하다. 다른 학생 정보는 보내지 않는다.
+        if (professor is not null && professor.SessionId == connection.SessionId)
+            visible.Add(new ParticipantSnapshot(professor, ProfessorDisplayName, Connected: true,
+                AllowViewing: false, AllowControl: false, PermissionRevision: 0));
+        var self = new RoomJoined(connection, room.Revision, visible);
         await SendSecureAsync(secure, CollaborationMessageCodec.Encode(Guid.NewGuid(), self), clientId);
     }
 
@@ -675,6 +708,26 @@ public sealed class SessionManager
         {
             // 연결 직후 이탈 등. 파일 목록만 못 받을 뿐 참가 자체는 유지한다.
             _logSink.Write($"[FileRoute] 채널 연결 실패: clientId={clientId}, {ex.GetType().Name}");
+        }
+    }
+
+    /// <summary>
+    /// 학생이 교수자 신원을 먼저 알아야 판서를 대조할 수 있으므로, 상태(교수자 연결 포함)를 보낸 뒤 판서 복원을 붙인다.
+    /// </summary>
+    private async Task PushStatusThenAttachAnnotationsAsync(string clientId, ParticipantConnection participant,
+        SecureCollaborationConnection secure)
+    {
+        await PushStudentStatusAsync(clientId);
+        var router = _reverseRouter;
+        if (router is null) return;
+        try
+        {
+            await router.AttachAnnotationPeerAsync(participant, secure);
+        }
+        catch (Exception ex)
+        {
+            // 연결 직후 이탈 등. 판서만 못 받을 뿐 참가 자체는 유지한다.
+            _logSink.Write($"[Annotation] 채널 연결 실패: clientId={clientId}, {ex.GetType().Name}");
         }
     }
 
@@ -1007,7 +1060,7 @@ public sealed class SessionManager
             _secureConnections[clientId] = secure;
             _ = IssueReconnectGrantAsync(clientId, packet.DisplayName, secure);
             // 참가 직후 학생이 기본 허용 상태(보기·제어 ON)를 바로 표시할 수 있게 한다(U07).
-            _ = PushStudentStatusAsync(clientId);
+            _ = PushStatusThenAttachAnnotationsAsync(clientId, participant, secure);
             _ = AttachFileRoutingAsync(clientId, participant, secure);
             // 등록 직전에 닫혔다면 닫힘 알림이 이 참가자를 찾지 못했으므로 여기서 정리한다.
             if (secure.IsClosed) _ = _tcpServer.DisconnectClientAsync(clientId, "보호 채널 종료");
@@ -1246,6 +1299,7 @@ public sealed class SessionManager
         {
             _rdpSharingService = null;
             _rdpSharingId = Guid.Empty;
+            _reverseRouter?.EndAnnotationSharing();
             lifetime = _sharingLifetime;
             _sharingLifetime = null;
         }
