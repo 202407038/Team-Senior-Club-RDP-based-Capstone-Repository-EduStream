@@ -191,7 +191,7 @@ public sealed class ReverseSharingPlacementTests
                 var finished = await Task.WhenAny(stop, Task.Delay(TimeSpan.FromSeconds(20)));
                 Assert.True(finished == stop, "학생 PC 공유 종료가 20초 넘게 멈췄습니다.");
                 await stop;
-                refusedConnection.ReleaseAfterSharingStopped();
+                await refusedConnection.ReleaseAfterSharingStoppedAsync();
                 _output.WriteLine($"refused viewer release {release.ElapsedMilliseconds} ms established={refusedConnection.Established} failed={refusedConnection.Failed} terminated={refusedConnection.Terminated}");
 
                 Assert.Equal(ReverseSessionState.Inactive, host.State);
@@ -219,7 +219,7 @@ public sealed class ReverseSharingPlacementTests
 
                 var liveRelease = Stopwatch.StartNew();
                 await host.StopAsync();
-                liveConnection.ReleaseAfterSharingStopped();
+                await liveConnection.ReleaseAfterSharingStoppedAsync();
                 _output.WriteLine($"live viewer release {liveRelease.ElapsedMilliseconds} ms");
                 Assert.True(liveRelease.Elapsed < TimeSpan.FromSeconds(20));
                 Assert.True(live.Viewer.IsDisposed);
@@ -228,8 +228,8 @@ public sealed class ReverseSharingPlacementTests
             finally
             {
                 try { await host.StopAsync(); } catch { /* 이미 종료 */ }
-                try { refusedConnection?.ReleaseAfterSharingStopped(); } catch { /* 이미 해제 */ }
-                try { liveConnection?.ReleaseAfterSharingStopped(); } catch { /* 이미 해제 */ }
+                if (refusedConnection != null) await refusedConnection.ReleaseAfterSharingStoppedAsync();
+                if (liveConnection != null) await liveConnection.ReleaseAfterSharingStoppedAsync();
                 refused?.Dispose();
                 live?.Dispose();
             }

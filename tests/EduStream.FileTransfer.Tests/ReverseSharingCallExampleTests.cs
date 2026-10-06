@@ -28,11 +28,42 @@ public sealed class ReverseSharingCallExampleTests
     }
 
     [WdsFact(Timeout = 120000)]
+    public Task InvalidNativeConnection_ReleasesViewerAndAllowsFreshAttempt()
+        => RunOnStaAsync(() =>
+        {
+            using var form = new Forms.Form { ShowInTaskbar = false, Width = 320, Height = 240 };
+            using var reception = new ProfessorReception();
+            form.Show();
+            for (var attempt = 0; attempt < 2; attempt++)
+            {
+                var viewer = new AxRDPCOMAPILib.AxRDPViewer();
+                ((ISupportInitialize)viewer).BeginInit();
+                form.Controls.Add(viewer);
+                ((ISupportInitialize)viewer).EndInit();
+                viewer.CreateControl();
+                var error = Assert.ThrowsAny<Exception>(() =>
+                    reception.Watch("student", viewer, "invalid-invitation", "professor", "password"));
+                Assert.DoesNotContain("이미 있습니다", error.Message);
+                Assert.True(viewer.IsDisposed);
+                Assert.Null(viewer.Parent);
+            }
+            return Task.CompletedTask;
+        });
+
+    [WdsFact(Timeout = 120000)]
     public Task DocumentedSequence_AttachesRealViewer_ThenFitsZoomsAndReleases()
+        => RunSharingSequenceAsync(waitForConnection: false);
+
+    [WdsFact(Timeout = 120000)]
+    public Task EstablishedSequence_AttachesRealViewer_ThenFitsZoomsAndReleases()
+        => RunSharingSequenceAsync(waitForConnection: true);
+
+    // 연결 전 조기 종료 재현과 정상 연결 후 종료를 분리한다. 연결 전 종료 결함을 대기로 숨기지 않는다.
+    private static Task RunSharingSequenceAsync(bool waitForConnection)
         => RunOnStaAsync(async () =>
         {
             await using var host = new StudentDesktopHost("stu-example");
-            using var reception = new ProfessorReception();
+            await using var reception = new ProfessorReception();
             Forms.Form? form = null;
             try
             {
@@ -55,7 +86,15 @@ public sealed class ReverseSharingCallExampleTests
                 viewer.Dock = Forms.DockStyle.None;
                 viewer.Bounds = new Rectangle(0, 0, 960, 540);
 
-                reception.Watch("stu-example", viewer, notice.ConnectionString, notice.ProfessorId, password);
+                var connection = reception.Watch("stu-example", viewer, notice.ConnectionString, notice.ProfessorId, password);
+                if (waitForConnection)
+                {
+                    var connectedBy = DateTime.UtcNow.AddSeconds(15);
+                    while (!connection.IsConnectionLive && !connection.Failed && !connection.Terminated && DateTime.UtcNow < connectedBy)
+                        await Task.Delay(20);
+                    Assert.True(connection.IsConnectionLive,
+                        $"실제 연결 미완료: established={connection.Established}, failed={connection.Failed}, terminated={connection.Terminated}");
+                }
 
                 var viewport = new WdsViewportAdapter(new WheelScrollAdapter(), new ViewportFitAdapter());
                 viewport.SetAxViewer(viewer);
@@ -78,13 +117,13 @@ public sealed class ReverseSharingCallExampleTests
                 var stopped = host.StopAsync();
                 Assert.Same(stopped, await Task.WhenAny(stopped, Task.Delay(TimeSpan.FromSeconds(20))));
                 await stopped;
-                reception.Release("stu-example");
+                await reception.ReleaseAsync("stu-example");
                 Assert.True(viewer.IsDisposed);
             }
             finally
             {
                 try { await host.StopAsync(); } catch { /* 이미 종료 */ }
-                try { reception.Dispose(); } catch { /* 이미 해제 */ }
+                await reception.DisposeAsync();
                 try { form?.Close(); } catch { /* 창이 이미 닫힘 */ }
             }
         });
