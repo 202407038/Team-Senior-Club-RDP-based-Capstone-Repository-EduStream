@@ -154,6 +154,33 @@ public sealed class WdsViewportAdapter : IWdsViewportAdapter
     }
 
     /// <summary>
+    /// 뷰어 좌표를 공유 데스크톱 절대 좌표로 변환합니다.
+    /// 논리 좌표(DIP)이면 모니터 DPI 로 물리 픽셀로 바꾼 뒤, 공유 모니터의 원점을 더합니다.
+    /// </summary>
+    public Point TranslateViewerPointToDesktop(Point viewerPoint, MonitorInfo? sharedMonitor, bool viewerPointIsLogical = false, IMonitorDpiAdapter? dpi = null)
+    {
+        if (_currentViewportSize.Width <= 0 || _currentViewportSize.Height <= 0 || _sourceSize.Width <= 0 || _sourceSize.Height <= 0)
+            return Point.Empty;
+
+        var point = viewerPoint;
+        if (viewerPointIsLogical)
+        {
+            if (sharedMonitor == null)
+                throw new ArgumentException("논리 좌표를 물리 픽셀로 바꾸려면 공유 중인 모니터가 필요합니다.", nameof(sharedMonitor));
+            dpi ??= new MonitorDpiAdapter();
+            point = dpi.LogicalToPhysical(viewerPoint, sharedMonitor);
+        }
+
+        var local = TranslateViewportToSource(point);
+        if (sharedMonitor == null || sharedMonitor.Width <= 0 || sharedMonitor.Height <= 0)
+            return local;
+
+        return new Point(
+            Math.Clamp(sharedMonitor.Left + local.X, sharedMonitor.Left, sharedMonitor.Left + sharedMonitor.Width - 1),
+            Math.Clamp(sharedMonitor.Top + local.Y, sharedMonitor.Top, sharedMonitor.Top + sharedMonitor.Height - 1));
+    }
+
+    /// <summary>
     /// 뷰어 컨테이너 내에서 종횡비를 유지하며 중앙 정렬(Letterbox/Pillarbox)되는 렌더 사각형 계산
     /// </summary>
     public Rectangle CalculateRenderBounds(Size containerSize)
