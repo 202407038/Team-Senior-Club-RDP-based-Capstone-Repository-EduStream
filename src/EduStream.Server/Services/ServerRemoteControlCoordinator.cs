@@ -293,6 +293,16 @@ public sealed class ServerRemoteControlCoordinator : IRemoteControlCoordinator, 
             "권한 변경");
     }
 
+    /// <summary>
+    /// 지정한 학생이 현재 제어 대상(요청 중·활성)이면 승인을 회수하고 실제 입력 차단 확인을 바로 시작합니다.
+    /// 대상이 아니거나 이미 회수됐으면 아무것도 하지 않습니다. 레지스트리 밖의 사건(역방향 화면 회수 등)에서 씁니다.
+    /// </summary>
+    public void WithdrawTarget(ParticipantConnection student, string reason)
+    {
+        ArgumentNullException.ThrowIfNull(student);
+        WithdrawForRegistryChange(current => current.Student == student, reason);
+    }
+
     private void OnConnectionRemoved(ParticipantConnection connection)
     {
         WithdrawForRegistryChange(
