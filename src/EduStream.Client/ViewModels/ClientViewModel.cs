@@ -49,6 +49,7 @@ public sealed class ClientViewModel : ObservableObject
     private volatile bool _userLeaving;
     private volatile bool _sessionEnded;
     private SessionFileRequestClient? _fileClient;
+    private ReverseCollaborationClient? _reverseClient;
     // 참가 요청을 보낸 뒤 서버의 참가 승인(SessionJoined)을 기다리는 시도. 승인·거부·끊김·시간 초과 중 먼저 온 결과로 끝난다.
     private enum JoinAckResult { Joined, Rejected, Disconnected, TimedOut }
     private TaskCompletionSource<JoinAckResult>? _pendingJoinAck;
@@ -398,6 +399,12 @@ public sealed class ClientViewModel : ObservableObject
     };
 
     public bool IsUnderControl => _studentStatus.UnderControl;
+
+    /// <summary>
+    /// 현재 보호 채널의 역방향 초대 송신·판서 수신 처리기입니다. 참가 전·퇴장 후에는 null입니다.
+    /// 3번 학생 호스트는 Target으로 초대를 만들어 SendInvitationAsync로 보내고, 판서 렌더러는 AnnotationRenderer에 연결합니다.
+    /// </summary>
+    public ReverseCollaborationClient? ReverseCollaboration => _reverseClient;
 
     /// <summary>교수자 원격 제어 허용 여부입니다. 강의 화면의 허용 표시(ON/OFF)에 씁니다.</summary>
     public bool AllowControl => _studentStatus.AllowControl;
@@ -1389,6 +1396,8 @@ public sealed class ClientViewModel : ObservableObject
         statusClient.StatusChanged += status => RunOnUiThread(() => ApplyStudentStatus(status));
         var fileClient = new SessionFileRequestClient(secure.SessionId, secure.Connection, new SessionFileDownloader(), _logSink);
         fileClient.CatalogChanged += catalog => RunOnUiThread(() => ApplyFileCatalog(catalog));
+        var reverseClient = new ReverseCollaborationClient(secure.SessionId, secure.Connection, _logSink);
+        statusClient.RoomChanged += reverseClient.ApplyRoom;
         secure.FrameReceived += frame =>
         {
             try
@@ -1414,6 +1423,12 @@ public sealed class ClientViewModel : ObservableObject
                     var secret = CollaborationMessageCodec.Decode<RdpInvitationSecretNotice>(frame, out _);
                     if (secret.SessionId == secure.SessionId) OnRdpInvitationSecret(secret);
                 }
+                else if (ReverseCollaborationClient.Handles(kind))
+                    // 판서는 렌더러 적용이 끝난 뒤 다음 번호를 받아야 하므로 수신 루프에서 await한다.
+                    return reverseClient.HandleFrameAsync(frame);
+                else if (kind == CollaborationMessageKind.Failure &&
+                         reverseClient.HandleFailure(CollaborationMessageCodec.Decode<CollaborationFailureNotice>(frame, out _)))
+                    return Task.CompletedTask;
                 else if (kind is CollaborationMessageKind.FileCatalog or CollaborationMessageKind.FileChunk
                          or CollaborationMessageKind.Failure)
                     // 청크는 저장이 따라올 때까지 기다려야 하므로 수신 루프에서 await한다.
@@ -1427,6 +1442,7 @@ public sealed class ClientViewModel : ObservableObject
         };
         _statusClient = statusClient;
         _fileClient = fileClient;
+        _reverseClient = reverseClient;
         _permissionNoticeShown = false;
         RunOnUiThread(() => ApplyStudentStatus(StudentStatus.Initial));
     }
@@ -1434,6 +1450,7 @@ public sealed class ClientViewModel : ObservableObject
     private void DetachStudentStatus()
     {
         _statusClient = null;
+        _reverseClient = null;
         // 진행 중인 다운로드는 임시 파일을 지우고 실패로 끝난다.
         Interlocked.Exchange(ref _fileClient, null)?.ConnectionClosed();
         RunOnUiThread(() =>
