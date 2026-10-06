@@ -150,7 +150,7 @@ public static class CollaborationMessageCodec
         }
     }
 
-    private static void RejectDuplicateProperties(JsonElement element)
+    internal static void RejectDuplicateProperties(JsonElement element)
     {
         if (element.ValueKind == JsonValueKind.Object)
         {
