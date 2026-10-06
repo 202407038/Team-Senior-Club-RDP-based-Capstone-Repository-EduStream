@@ -436,6 +436,10 @@ public sealed class SessionManager
                 CurrentSession.SessionId, new SessionFileRequestAuthorizer(_participantRegistry));
             _fileTransfers = new SessionFileTransferRouter(_fileCatalog, _participantRegistry, _logSink);
             _reverseRouter = new ReverseCollaborationRouter(_professorConnection, _participantRegistry, _logSink);
+            // 교수자가 학생 화면을 더 이상 볼 수 없으면(학생 공유 재시작·초대 교체 등) 그 학생 제어도 회수한다.
+            // 보이지 않는 화면을 계속 조작하게 두지 않는다. 새 화면이 붙어도 제어는 자동 재승인하지 않는다.
+            var coordinator = _controlCoordinator;
+            _reverseRouter.InvitationWithdrawn += (student, _) => coordinator.WithdrawTarget(student, "역방향 화면 회수");
             if (secureChannelCertificate is not null)
             {
                 _secureListener = new SecureCollaborationListener(secureChannelCertificate, _logSink);

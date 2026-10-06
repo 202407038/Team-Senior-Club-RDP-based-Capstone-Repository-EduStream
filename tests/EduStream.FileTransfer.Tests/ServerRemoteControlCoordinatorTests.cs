@@ -8,6 +8,82 @@ public sealed class ServerRemoteControlCoordinatorTests
 {
     private static readonly TimeSpan DefaultWait = TimeSpan.FromSeconds(2);
 
+    [Theory]
+    [InlineData("withdraw")]
+    [InlineData("permissions")]
+    [InlineData("disconnect")]
+    public async Task WaitingTargetWithdrawn_DoesNotReceiveGrant(string action)
+    {
+        var rig = new Rig();
+        using var coordinator = rig.Coordinator;
+        var a = rig.Join("a");
+        var b = rig.Join("b");
+        await coordinator.RequestAsync(a);
+        var revoke = rig.Gate.BlockNextRevoke();
+        var pending = coordinator.RequestAsync(b);
+        try
+        {
+            await revoke.Entered.WaitAsync(DefaultWait);
+            if (action == "withdraw") coordinator.WithdrawTarget(b, "화면 회수");
+            else if (action == "disconnect") rig.Registry.Disconnect("b");
+            else
+            {
+                rig.Registry.SetPermissions(b.ConnectionId, false, false);
+                rig.Registry.SetPermissions(b.ConnectionId, true, true);
+            }
+        }
+        finally { revoke.Release(); }
+        await pending.WaitAsync(DefaultWait);
+        Assert.DoesNotContain(rig.Gate.Grants, g => g.Student == b);
+        Assert.Equal(ControlPhase.Revoked, coordinator.Current!.Phase);
+        await coordinator.ConfirmInputRevokedAsync().WaitAsync(DefaultWait);
+        coordinator.SetInputGate(rig.Gate);
+    }
+
+    [Fact]
+    public async Task ReplacedWaitingRequest_DoesNotEraseNewTargetTracking()
+    {
+        var rig = new Rig();
+        using var coordinator = rig.Coordinator;
+        var a = rig.Join("a");
+        var b = rig.Join("b");
+        var c = rig.Join("c");
+        await coordinator.RequestAsync(a);
+        var revoke = rig.Gate.BlockNextRevoke();
+        using var cancellation = new CancellationTokenSource();
+        var first = coordinator.RequestAsync(b);
+        await revoke.Entered.WaitAsync(DefaultWait);
+        var second = coordinator.RequestAsync(c, cancellation.Token);
+        coordinator.WithdrawTarget(b, "이전 요청 화면 회수");
+        revoke.Release();
+        await first.WaitAsync(DefaultWait);
+        await second.WaitAsync(DefaultWait);
+        Assert.DoesNotContain(rig.Gate.Grants, g => g.Student == b);
+        Assert.Equal(c, coordinator.Current!.Student);
+        Assert.Equal(ControlPhase.Active, coordinator.Current.Phase);
+        await coordinator.StopAsync();
+    }
+
+    [Fact]
+    public async Task CancelledWaitingRequest_DoesNotLeavePendingTarget()
+    {
+        var rig = new Rig();
+        using var coordinator = rig.Coordinator;
+        var a = rig.Join("a");
+        var b = rig.Join("b");
+        await coordinator.RequestAsync(a);
+        var revoke = rig.Gate.BlockNextRevoke();
+        using var cancellation = new CancellationTokenSource();
+        var pending = coordinator.RequestAsync(b, cancellation.Token);
+        await revoke.Entered.WaitAsync(DefaultWait);
+        cancellation.Cancel();
+        revoke.Release();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => pending.WaitAsync(DefaultWait));
+        await coordinator.ConfirmInputRevokedAsync().WaitAsync(DefaultWait);
+        coordinator.SetInputGate(rig.Gate);
+        Assert.DoesNotContain(rig.Gate.Grants, g => g.Student == b);
+    }
+
     [Fact]
     public async Task RequestAsync_DefaultPermission_BecomesActiveOnlyAfterInputGranted()
     {
