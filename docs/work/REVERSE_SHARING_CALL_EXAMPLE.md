@@ -43,19 +43,21 @@ await host.StopAsync();
 5번이 UI 스레드에서 만든 `AxRDPViewer`를 `System.Windows.Forms.Control`로 넘깁니다. 수신 쪽은 공유 세션을 만들지 않습니다.
 
 ```csharp
-using var reception = new ProfessorReception();
+await using var reception = new ProfessorReception();
 ProfessorViewerConnection connection = reception.Watch(
     studentId, viewerControl, notice.ConnectionString, notice.ProfessorId, password);
 
 // 학생 PC의 호스트가 끝난 뒤에 이 뷰어를 해제합니다.
-reception.Release(studentId);
+await reception.ReleaseAsync(studentId);
 ```
 
 다른 학생은 `Watch`를 한 번 더 호출합니다. 각 연결 문자열은 그 학생 PC의 호스트가 만든 값입니다. 같은 PC에서 호스트를 두 개 연 결과를 학생 두 대의 화면 수신으로 보지 않습니다.
 
 ## 4. 교수자 PC의 표시
 
-맞춤과 배율은 수신 뷰어를 붙인 뒤에만 호출합니다. 뷰어 없이 `FitAsync`를 호출하면 `InvalidOperationException: WDS Viewer가 초기화되지 않았습니다.`가 납니다. 아래 순서는 교수자 UI 스레드에서 실행합니다. `FitAsync`, `ZoomAsync`, `Release`는 컨트롤 소유 스레드가 아니면 그 스레드로 옮겨 수행합니다.
+맞춤과 배율은 수신 뷰어를 붙인 뒤에만 호출합니다. 뷰어 없이 `FitAsync`를 호출하면 `InvalidOperationException: WDS Viewer가 초기화되지 않았습니다.`가 납니다. 아래 순서는 교수자 UI 스레드에서 실행합니다. `FitAsync`, `ZoomAsync`, `ReleaseAsync`는 컨트롤 소유 스레드가 아니면 그 스레드로 옮겨 수행합니다.
+
+종료에는 `await reception.ReleaseAsync(studentId)`를 사용합니다. 호스트의 `StopAsync`나 뷰어의 `Disconnect` 반환만으로 수신 측 native 종료가 완료된 것은 아닙니다. `ReleaseAsync`는 연결 중인 뷰어도 취소하고 실제 실패/종료 이벤트를 기다린 뒤, UI 큐에서 컨트롤을 해제합니다. 연결 성공을 기다린 뒤 종료하는 우회 방식이 아닙니다. 15초 내 종료 확인이 없거나 호출이 취소되면 예외를 반환하고 학생 등록·뷰어를 남겨 재시도할 수 있게 합니다. 완료 전 `Form.Close`, 직접 `viewer.Dispose`, UI 스레드에서 `.Wait()`/`.Result`를 호출하지 않습니다. 기존 동기 `Release`는 연결을 시작한 WDS 컨트롤의 해제를 거부합니다. 종료 이벤트 콜백 안에서 동기 폐기하는 것도 안전하지 않기 때문이며 비동기 해제를 대신하지 않습니다.
 
 좌표의 논리 단위(DIP)는 교수자 뷰어 모니터 배율로 픽셀로 바꿉니다. 학생 공유 모니터 배율로 바꾸지 않습니다. 그 픽셀에 원본 대비 뷰어 크기 비율을 곱한 뒤 학생 모니터의 `Left`/`Top`을 더합니다.
 
@@ -76,7 +78,7 @@ System.Drawing.Point desktop = presentation.MapViewerPointToDesktop(
     new System.Drawing.Point(100, 50), viewerPointIsLogical: true, viewerMonitor: professorMonitor);
 
 await host.StopAsync();
-reception.Release(studentId);
+await reception.ReleaseAsync(studentId);
 ```
 
 `PanAsync`는 지원하지 않습니다. 예외가 나며 성공으로 처리하지 않습니다. 이 순서는 `tests/EduStream.FileTransfer.Tests/ReverseSharingCallExampleTests.cs`에서 실제 `AxRDPViewer`로 컴파일해 실행합니다. 한 PC에서 학생 호스트와 교수자 뷰어를 이어서 호출한 것이며, 학생 PC 두 대의 화면 수신이 아닙니다.
