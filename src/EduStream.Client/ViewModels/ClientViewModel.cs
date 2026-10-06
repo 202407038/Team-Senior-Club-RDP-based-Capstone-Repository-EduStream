@@ -50,8 +50,10 @@ public sealed class ClientViewModel : ObservableObject
     private volatile bool _sessionEnded;
     private SessionFileRequestClient? _fileClient;
     private ReverseCollaborationClient? _reverseClient;
-    private StudentReverseShareService? _reverseShare;
-    private Func<Task> _reverseShareCleanup = () => Task.CompletedTask;
+    private StudentSharingSession? _studentSharing;
+    private bool _desktopAttached;
+    private string _studentSharingStatus = "내 화면 공유 대기 중";
+    public string StudentSharingStatus { get => _studentSharingStatus; private set => SetProperty(ref _studentSharingStatus, value); }
     // 참가 요청을 보낸 뒤 서버의 참가 승인(SessionJoined)을 기다리는 시도. 승인·거부·끊김·시간 초과 중 먼저 온 결과로 끝난다.
     private enum JoinAckResult { Joined, Rejected, Disconnected, TimedOut }
     private TaskCompletionSource<JoinAckResult>? _pendingJoinAck;
@@ -159,6 +161,7 @@ public sealed class ClientViewModel : ObservableObject
 
     public void AttachRdpHost(System.Windows.Forms.Integration.WindowsFormsHost host)
     {
+        _desktopAttached = true;
         if (_rdpViewerService is RdpViewerService viewer) viewer.AttachTo(host);
     }
     public string FrameFreshness
@@ -1384,6 +1387,12 @@ public sealed class ClientViewModel : ObservableObject
     /// <summary>보호 채널은 참가 연결과 수명을 같이한다. 새 참가·퇴장·끊김 때 이전 채널을 닫는다.</summary>
     private async Task ReplaceSecureChannelAsync(SecureSessionChannel? next)
     {
+        var sharing = _studentSharing;
+        if (sharing is not null)
+        {
+            await sharing.DisposeAsync();
+            Interlocked.CompareExchange(ref _studentSharing, null, sharing);
+        }
         var previous = Interlocked.Exchange(ref _secureChannel, next);
         if (previous is not null && !ReferenceEquals(previous, next))
         {
@@ -1394,19 +1403,20 @@ public sealed class ClientViewModel : ObservableObject
 
     private void AttachStudentStatus(SecureSessionChannel secure)
     {
-        StopReverseShare(Interlocked.Exchange(ref _reverseShare, null));
-        var previousCleanup = _reverseShareCleanup;
         var statusClient = new StudentStatusClient(secure.SessionId, secure.Connection, _logSink);
         statusClient.StatusChanged += status => RunOnUiThread(() => ApplyStudentStatus(status));
         var fileClient = new SessionFileRequestClient(secure.SessionId, secure.Connection, new SessionFileDownloader(), _logSink);
         fileClient.CatalogChanged += catalog => RunOnUiThread(() => ApplyFileCatalog(catalog));
         var reverseClient = new ReverseCollaborationClient(secure.SessionId, secure.Connection, _logSink);
         statusClient.RoomChanged += reverseClient.ApplyRoom;
-        // 서버가 확정한 보기 허용과 교수자/본인 연결이 정해진 뒤에만 이 PC의 화면 공유를 연다(초기 표시값으로 시작하지 않음).
-        var reverseShare = new StudentReverseShareService(reverseClient, _logSink,
-            beforeStart: previousCleanup);
-        reverseShare.SharingChanged += (_, message) => RunOnUiThread(() => ChatMessages.Add(ChatLine.System(message)));
-        statusClient.RoomChanged += _ => reverseShare.UpdateAsync(statusClient.Status.AllowViewing);
+        // 실제 앱에만 학생 PC의 WDS 호스트를 붙인다. 비 UI 테스트에서 사용자 화면을 열지 않는다.
+        var sharing = _desktopAttached ? new StudentSharingSession(reverseClient, secure.Connection, _logSink) : null;
+        _studentSharing = sharing;
+        if (sharing is not null)
+        {
+            sharing.StatusChanged += message => RunOnUiThread(() => StudentSharingStatus = message);
+            statusClient.RoomChanged += room => _ = ApplySharingRoomAsync(sharing, room);
+        }
         secure.FrameReceived += frame =>
         {
             try
@@ -1414,6 +1424,8 @@ public sealed class ClientViewModel : ObservableObject
                 var kind = CollaborationFrameInspector.PeekKind(frame);
                 if (StudentStatusClient.Handles(kind))
                     statusClient.HandleFrame(frame);
+                else if (kind == CollaborationMessageKind.RemoteInputCommand && sharing is not null)
+                    return sharing.HandleInputAsync(CollaborationMessageCodec.Decode<RemoteInputCommandNotice>(frame, out _));
                 else if (kind == CollaborationMessageKind.ReconnectGrant)
                 {
                     var grant = CollaborationMessageCodec.Decode<ReconnectGrantNotice>(frame, out _);
@@ -1452,7 +1464,6 @@ public sealed class ClientViewModel : ObservableObject
         _statusClient = statusClient;
         _fileClient = fileClient;
         _reverseClient = reverseClient;
-        _reverseShare = reverseShare;
         _permissionNoticeShown = false;
         RunOnUiThread(() => ApplyStudentStatus(StudentStatus.Initial));
     }
@@ -1461,7 +1472,6 @@ public sealed class ClientViewModel : ObservableObject
     {
         _statusClient = null;
         _reverseClient = null;
-        StopReverseShare(Interlocked.Exchange(ref _reverseShare, null));
         // 진행 중인 다운로드는 임시 파일을 지우고 실패로 끝난다.
         Interlocked.Exchange(ref _fileClient, null)?.ConnectionClosed();
         RunOnUiThread(() =>
@@ -1471,24 +1481,14 @@ public sealed class ClientViewModel : ObservableObject
         });
     }
 
-    /// <summary>이전 연결의 역방향 공유는 새 연결과 섞이지 않도록 닫는다. 정리 실패는 서비스가 로그로 남긴다.</summary>
-    private void StopReverseShare(StudentReverseShareService? share)
+    private async Task ApplySharingRoomAsync(StudentSharingSession sharing, RoomJoined room)
     {
-        if (share is null) return;
-        var previous = _reverseShareCleanup;
-        // 세대별로 이전 정리만 기다린다. 자기 자신의 Dispose를 기다리는 순환 대기를 만들지 않는다.
-        _reverseShareCleanup = async () =>
+        try { await sharing.ApplyRoomAsync(room); }
+        catch (Exception ex)
         {
-            await previous();
-            await share.DisposeAsync();
-        };
-        _ = ObserveReverseCleanupAsync(_reverseShareCleanup);
-    }
-
-    private async Task ObserveReverseCleanupAsync(Func<Task> cleanup)
-    {
-        try { await cleanup(); }
-        catch (Exception ex) { _logSink.Write("[Reverse] 이전 연결 공유 종료 재시도 필요: " + ex.GetType().Name); }
+            _logSink.Write("[Reverse] 학생 공유 상태 적용 실패: " + ex.GetType().Name);
+            RunOnUiThread(() => StudentSharingStatus = "공유/입력 차단 확인이 필요합니다.");
+        }
     }
 
     /// <summary>목록이 바뀌어도 받는 중인 항목의 진행 표시는 유지하고, 사라진 파일만 내립니다.</summary>
@@ -1567,7 +1567,8 @@ public sealed class ClientViewModel : ObservableObject
         if (statusClient is null) return;
         try
         {
-            if (_reverseShare is { } share) await share.SetLocalViewingAllowedAsync(allowViewing);
+            // 로컬 OFF는 서버 왕복/ACK보다 먼저 실제 학생 호스트에 적용한다.
+            if (_studentSharing is { } sharing) await sharing.ApplyLocalPermissionsAsync(allowViewing, allowControl);
             await statusClient.SetPermissionsAsync(allowViewing, allowControl);
         }
         catch (Exception ex)

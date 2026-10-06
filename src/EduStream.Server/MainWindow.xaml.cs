@@ -10,11 +10,26 @@ namespace EduStream.Server;
 public partial class MainWindow : Window
 {
     private readonly ServerViewModel _viewModel;
+    private AnnotationDesktopWindow? _annotation;
+    private readonly HashSet<StudentScreenView> _studentViews = new();
+    internal void RegisterStudentView(StudentScreenView view) => _studentViews.Add(view);
 
     public MainWindow()
     {
         InitializeComponent();
         _viewModel = new ServerViewModel();
+        _viewModel.HasVisibleStudentScreen = () => _studentViews.Any(view => view.ShowingStudentScreen);
+        _viewModel.SessionManager.ConnectedStudentSharing = student => Dispatcher.Invoke(() =>
+            _studentViews.Select(view => view.ConnectedSharingFor(student)).FirstOrDefault(id => id.HasValue));
+        _viewModel.SessionManager.CloseStudentViewerAsync = async (student, token) =>
+            await Dispatcher.InvokeAsync(async () =>
+            {
+                var targets = _studentViews.Where(view => view.HasViewerHistory(student)).ToArray();
+                if (targets.Length == 0) return false;
+                foreach (var view in targets)
+                    if (!await view.DisconnectForRevokeAsync(student, token)) return false;
+                return true;
+            }).Task.Unwrap();
         // 방 비밀번호는 화면 공유로 노출되지 않게 PasswordBox로 받고, 세션을 열 때 한 번 읽은 뒤 비운다.
         _viewModel.RoomPasswordProvider = () =>
         {
@@ -23,6 +38,11 @@ public partial class MainWindow : Window
             return password;
         };
         DataContext = _viewModel;
+        _viewModel.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(ServerViewModel.IsRdpSharing) && !_viewModel.IsRdpSharing)
+            { _annotation?.Dispose(); _annotation = null; DrawingToggle.IsChecked = false; }
+        };
        
         Closing += OnClosing;
         Loaded += (_, _) =>
@@ -49,12 +69,19 @@ public partial class MainWindow : Window
         if (_closing) return;
         _closing = true;
         IsEnabled = false;
-        try { await _viewModel.ShutdownAsync(); }
+        try
+        {
+            _annotation?.Dispose(); _annotation = null;
+            await _viewModel.SessionManager.StopControlAsync();
+            foreach (var view in _studentViews) await view.StopAsync();
+            await _viewModel.ShutdownAsync();
+        }
         catch (Exception ex)
         {
             MessageBox.Show("공유 종료를 확인해 주세요: " + ex.GetType().Name, "EduStream");
+            _closing = false; IsEnabled = true; return;
         }
-        finally { _closed = true; Close(); }
+        _closed = true; Close();
     }
     private void CopyHostAddress_Click(object sender, RoutedEventArgs e)
     {
@@ -138,6 +165,12 @@ private void SetAllStudentsExpanded(bool expanded)
 }
 private void DrawingToggle_Click(object sender, RoutedEventArgs e)
     {
-        // 판서 엔진 연결 전에는 버튼이 비활성이라 이 핸들러가 호출되지 않습니다. 연결 후 실제 판서 ON/OFF를 여기에 둡니다.
+        if (!_viewModel.IsRdpSharing || _viewModel.SelectedMonitor is not { } monitor) return;
+        if (_annotation is null)
+        {
+            _annotation = new AnnotationDesktopWindow(monitor, _viewModel.AnnotationTools);
+            _annotation.DrawingChanged += drawing => DrawingToggle.IsChecked = drawing;
+        }
+        else _annotation.SetDrawing(DrawingToggle.IsChecked == true);
     }
 }
