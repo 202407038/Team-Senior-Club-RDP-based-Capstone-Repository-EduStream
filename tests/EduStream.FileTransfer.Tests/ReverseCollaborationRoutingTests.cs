@@ -20,7 +20,7 @@ namespace EduStream.FileTransfer.Tests;
 /// 2번 담당: Kind 15·16(학생→교수자 역방향 초대/비밀번호)과 Kind 17(교수자→학생 판서)의 인증 라우팅을 검증합니다.
 /// 정상 전달과 함께 다른 학생·옛 공유·옛 연결·만료·중복/역순·보기 허용 철회를 거부하는지 확인합니다.
 /// </summary>
-public sealed class ReverseCollaborationRoutingTests
+public sealed partial class ReverseCollaborationRoutingTests
 {
     private static readonly TimeSpan Wait = TimeSpan.FromSeconds(10);
 
@@ -235,7 +235,8 @@ public sealed class ReverseCollaborationRoutingTests
         foreach (var student in new[] { alice, bob })
         {
             var notices = rig.Annotations(student);
-            Assert.Equal(new long[] { 1, 2 }, notices.Select(notice => notice.Sequence));
+            Assert.Equal(new long[] { 1, 2, 3 }, notices.Select(notice => notice.Sequence));
+            AssertEmptyLayer(notices[0]);
             Assert.All(notices, notice =>
             {
                 Assert.Equal(sharing, notice.SharingId);
@@ -256,7 +257,8 @@ public sealed class ReverseCollaborationRoutingTests
         Assert.Equal(CollaborationError.InvalidRequest, ex.Code);
         await rig.Router.PublishAnnotationAsync(StrokeJson());
 
-        Assert.Equal(1, Assert.Single(rig.Annotations(alice)).Sequence);
+        Assert.Equal(new long[] { 1, 2 }, rig.Annotations(alice).Select(n => n.Sequence));
+        AssertEmptyLayer(rig.Annotations(alice)[0]);
     }
 
     [Fact]
@@ -269,24 +271,25 @@ public sealed class ReverseCollaborationRoutingTests
 
         var alice = rig.Join("alice", "Alice");
         await rig.Router.AttachAnnotationPeerAsync(alice, rig.Channel(alice));
-        Assert.Equal(new long[] { 1, 2 }, rig.Annotations(alice).Select(notice => notice.Sequence));
+        Assert.Equal(new long[] { 1, 2, 3 }, rig.Annotations(alice).Select(notice => notice.Sequence));
+        AssertEmptyLayer(rig.Annotations(alice)[0]);
 
         await rig.Router.PublishAnnotationAsync(LayerJson());
         await rig.Router.PublishAnnotationAsync(StrokeJson());
         var bob = rig.Join("bob", "Bob");
         await rig.Router.AttachAnnotationPeerAsync(bob, rig.Channel(bob));
         // 전체 상태인 레이어 스냅샷 이후만 복원한다.
-        Assert.Equal(new long[] { 3, 4 }, rig.Annotations(bob).Select(notice => notice.Sequence));
+        Assert.Equal(new long[] { 4, 5 }, rig.Annotations(bob).Select(notice => notice.Sequence));
         Assert.True(rig.Router.IsAnnotationReplayComplete);
 
         var restarted = Guid.NewGuid();
         rig.Router.EndAnnotationSharing();
         rig.Router.BeginAnnotationSharing(restarted);
-        Assert.Equal(0, rig.Router.AnnotationReplayCount);
+        Assert.Equal(1, rig.Router.AnnotationReplayCount); // 새 공유의 빈 전체 상태
         await rig.Router.PublishAnnotationAsync(StrokeJson());
         var last = rig.Annotations(alice).Last();
         Assert.Equal(restarted, last.SharingId);
-        Assert.Equal(5, last.Sequence);
+        Assert.Equal(8, last.Sequence); // 종료 초기화(6), 시작 초기화(7), 선(8)
     }
 
     [Fact]
@@ -299,7 +302,7 @@ public sealed class ReverseCollaborationRoutingTests
 
         rig.Registry.Disconnect("alice");
         Assert.Equal(0, await rig.Router.PublishAnnotationAsync(StrokeJson()));
-        Assert.Empty(rig.Annotations(alice));
+        AssertEmptyLayer(Assert.Single(rig.Annotations(alice))); // 접속 때 받은 초기화 외 추가 전달 없음
         await Assert.ThrowsAsync<CollaborationException>(() => rig.Router.AttachAnnotationPeerAsync(alice, rig.Channel(alice)));
     }
 
@@ -399,8 +402,9 @@ public sealed class ReverseCollaborationRoutingTests
 
         var applied = new List<long>();
         client.Reverse.AnnotationRenderer = notice => { applied.Add(notice.Sequence); return Task.CompletedTask; };
+        Assert.True(await client.Reverse.AnnotationRecovery);
         await client.ReceiveAsync(client.Annotation(sharing, 2));
-        Assert.Equal(new long[] { 2 }, applied);
+        Assert.Equal(new long[] { 1, 2 }, applied);
     }
 
     // ---------- 실제 TLS 보호 채널 + SessionManager ----------
@@ -445,22 +449,31 @@ public sealed class ReverseCollaborationRoutingTests
 
         await rig.SessionManager.PublishAnnotationAsync(StrokeJson());
         await rig.SessionManager.PublishAnnotationAsync(StrokeJson());
-        await WaitUntilAsync(() => alice.Applied.Count == 2);
-        Assert.Equal(new long[] { 1, 2 }, alice.Applied.Select(notice => notice.Sequence));
+        await WaitUntilAsync(() => alice.Applied.Count == 3);
+        Assert.Equal(new long[] { 1, 2, 3 }, alice.Applied.Select(notice => notice.Sequence));
+        AssertEmptyLayer(alice.Applied.First());
 
         // 늦게 들어온 학생은 연결 직후 현재 공유의 판서를 순서대로 복원받는다.
         var bob = await rig.JoinAsync("Bob");
-        await WaitUntilAsync(() => bob.Applied.Count == 2);
-        Assert.Equal(new long[] { 1, 2 }, bob.Applied.Select(notice => notice.Sequence));
+        await WaitUntilAsync(() => bob.Applied.Count == 3);
+        Assert.Equal(new long[] { 1, 2, 3 }, bob.Applied.Select(notice => notice.Sequence));
         Assert.All(bob.Applied, notice => Assert.Equal(sharing, notice.SharingId));
 
         // 공유를 멈추면 판서 송신은 실패로 드러나고, 재시작 후에는 새 공유 세대만 전달된다.
         await rig.SessionManager.DetachRdpSharingAsync();
+        await WaitUntilAsync(() => alice.Applied.Count == 4 && bob.Applied.Count == 4);
+        AssertEmptyLayer(alice.Applied.Last());
+        AssertEmptyLayer(bob.Applied.Last());
         await Assert.ThrowsAsync<CollaborationException>(() => rig.SessionManager.PublishAnnotationAsync(StrokeJson()));
         var restarted = Guid.NewGuid();
         rig.SessionManager.AttachRdpSharing(new NoopSharing(), restarted);
+        await WaitUntilAsync(() => alice.Applied.Count == 5 && bob.Applied.Count == 5);
+        AssertEmptyLayer(alice.Applied.Last());
+        AssertEmptyLayer(bob.Applied.Last());
+        Assert.Equal(restarted, alice.Reverse.AnnotationSharingId);
+        Assert.Equal(restarted, bob.Reverse.AnnotationSharingId);
         await rig.SessionManager.PublishAnnotationAsync(StrokeJson());
-        await WaitUntilAsync(() => alice.Applied.Count == 3 && bob.Applied.Count == 3);
+        await WaitUntilAsync(() => alice.Applied.Count == 6 && bob.Applied.Count == 6);
         Assert.Equal(restarted, alice.Applied.Last().SharingId);
     }
 
@@ -516,10 +529,11 @@ public sealed class ReverseCollaborationRoutingTests
     {
         public ConcurrentQueue<byte[]> Frames { get; } = new();
 
-        public Task SendAsync(byte[] frame, CancellationToken cancellationToken = default)
+        public Func<byte[], Task>? Receiver { get; set; }
+        public async Task SendAsync(byte[] frame, CancellationToken cancellationToken = default)
         {
             Frames.Enqueue(frame);
-            return Task.CompletedTask;
+            if (Receiver is not null) await Receiver(frame);
         }
     }
 
@@ -527,10 +541,10 @@ public sealed class ReverseCollaborationRoutingTests
     {
         private readonly Dictionary<Guid, RecordingChannel> _channels = new();
 
-        public RouterRig()
+        public RouterRig(ILogSink? log = null)
         {
             Professor = new ParticipantConnection(SessionId, Guid.NewGuid(), Guid.NewGuid(), ParticipantRole.Professor);
-            Router = new ReverseCollaborationRouter(Professor, Registry, new InMemoryLogSink(), () => Now);
+            Router = new ReverseCollaborationRouter(Professor, Registry, log ?? new InMemoryLogSink(), () => Now);
         }
 
         public Guid SessionId { get; } = Guid.NewGuid();
