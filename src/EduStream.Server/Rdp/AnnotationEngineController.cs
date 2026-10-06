@@ -142,9 +142,9 @@ public sealed class WdsSharedScreenPresentation : ISharedScreenPresentation
     /// <summary>이 공유가 보여주는 모니터. 좌표 변환의 원점으로 씁니다.</summary>
     public void SetSharedMonitor(MonitorInfo? sharedMonitor) => _sharedMonitor = sharedMonitor;
 
-    /// <summary>뷰어 좌표를 공유 데스크톱 절대 좌표로 변환합니다.</summary>
-    public System.Drawing.Point MapViewerPointToDesktop(System.Drawing.Point viewerPoint, bool viewerPointIsLogical = false)
-        => _adapter.TranslateViewerPointToDesktop(viewerPoint, _sharedMonitor, viewerPointIsLogical);
+    /// <summary>뷰어 좌표를 공유 데스크톱 절대 좌표로 변환합니다. 논리 좌표의 배율은 교수자 뷰어 모니터를 씁니다.</summary>
+    public System.Drawing.Point MapViewerPointToDesktop(System.Drawing.Point viewerPoint, bool viewerPointIsLogical = false, MonitorInfo? viewerMonitor = null)
+        => _adapter.TranslateViewerPointToDesktop(viewerPoint, _sharedMonitor, viewerPointIsLogical, viewerMonitor: viewerMonitor);
 
     public Task PanAsync(double normalizedDeltaX, double normalizedDeltaY,
         CancellationToken cancellationToken = default)

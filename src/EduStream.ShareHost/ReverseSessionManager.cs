@@ -7,7 +7,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Threading;
 
-namespace EduStream.Server.Rdp;
+namespace EduStream.ShareHost;
 
 /// <summary>역방향 세션에서 네이티브 WDS 이벤트가 만든 참석자 생명주기 종류</summary>
 public enum ReverseAttendeeEventKind

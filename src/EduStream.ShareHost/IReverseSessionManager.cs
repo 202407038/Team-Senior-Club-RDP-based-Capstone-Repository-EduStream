@@ -2,7 +2,7 @@ using System;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace EduStream.Server.Rdp;
+namespace EduStream.ShareHost;
 
 /// <summary>
 /// 학생→교수자 역방향 WDS 세션 관리자 인터페이스

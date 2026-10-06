@@ -155,9 +155,14 @@ public sealed class WdsViewportAdapter : IWdsViewportAdapter
 
     /// <summary>
     /// 뷰어 좌표를 공유 데스크톱 절대 좌표로 변환합니다.
-    /// 논리 좌표(DIP)이면 모니터 DPI 로 물리 픽셀로 바꾼 뒤, 공유 모니터의 원점을 더합니다.
+    /// 논리 좌표는 뷰어가 있는 교수자 모니터 배율로 픽셀로 바꾸고, 그 다음 원본 대비 뷰어 크기 비율을 적용한 뒤 학생 공유 모니터의 원점을 더합니다.
     /// </summary>
-    public Point TranslateViewerPointToDesktop(Point viewerPoint, MonitorInfo? sharedMonitor, bool viewerPointIsLogical = false, IMonitorDpiAdapter? dpi = null)
+    public Point TranslateViewerPointToDesktop(
+        Point viewerPoint,
+        MonitorInfo? sharedMonitor,
+        bool viewerPointIsLogical = false,
+        IMonitorDpiAdapter? dpi = null,
+        MonitorInfo? viewerMonitor = null)
     {
         if (_currentViewportSize.Width <= 0 || _currentViewportSize.Height <= 0 || _sourceSize.Width <= 0 || _sourceSize.Height <= 0)
             return Point.Empty;
@@ -165,10 +170,10 @@ public sealed class WdsViewportAdapter : IWdsViewportAdapter
         var point = viewerPoint;
         if (viewerPointIsLogical)
         {
-            if (sharedMonitor == null)
-                throw new ArgumentException("논리 좌표를 물리 픽셀로 바꾸려면 공유 중인 모니터가 필요합니다.", nameof(sharedMonitor));
+            if (viewerMonitor == null)
+                throw new ArgumentException("논리 좌표를 뷰어 픽셀로 바꾸려면 교수자 뷰어가 있는 모니터가 필요합니다.", nameof(viewerMonitor));
             dpi ??= new MonitorDpiAdapter();
-            point = dpi.LogicalToPhysical(viewerPoint, sharedMonitor);
+            point = dpi.LogicalToPhysical(viewerPoint, viewerMonitor);
         }
 
         var local = TranslateViewportToSource(point);
