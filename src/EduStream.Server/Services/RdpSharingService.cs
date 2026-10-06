@@ -28,6 +28,7 @@ public sealed class RdpSharingService : IRdpSharingService
 
 // 🌟 [추가] 역방향(학생->교수) 공유일 때만 true로 설정하는 스위치
     public bool IsInteractive { get; set; } = false;
+    public System.Drawing.Rectangle? SelectedBounds { get; set; }
     public RdpSharingService(ILogSink logSink) : this(logSink, () => Activator.CreateInstance(
         Type.GetTypeFromCLSID(new Guid("9B78F0E6-3E05-4A5B-B2E8-E743A8956B65"), true)!)) { }
 
@@ -56,6 +57,8 @@ public sealed class RdpSharingService : IRdpSharingService
         if (sessionId == Guid.Empty) throw new ArgumentException("세션 ID가 필요합니다.");
         if (_session is not null) throw new InvalidOperationException("공유가 이미 시작되었습니다.");
 
+        var opened = false;
+        var stage = "WDS 생성";
         try
         {
             _session = _factory() ?? throw new InvalidOperationException("WDS 생성 실패");
@@ -70,7 +73,12 @@ public sealed class RdpSharingService : IRdpSharingService
             // (테스트용 Mock 객체에는 ColorDepth가 없을 수 있으므로 예외를 무시하여 호환성 유지)
             try { Set(_session, "ColorDepth", 24); } catch { /* 무시 */ }
 
+            stage = "WDS Open";
             Call(_session, "Open");
+            opened = true;
+            stage = "모니터 영역 설정";
+            if (SelectedBounds is { Width: > 0, Height: > 0 } bounds)
+                Call(_session, "SetDesktopSharedRect", bounds.Left, bounds.Top, bounds.Right, bounds.Bottom);
             _sessionId = sessionId;
             _sharingId = Guid.NewGuid();
             _expiryTimer = new DispatcherTimer(TimeSpan.FromSeconds(1), DispatcherPriority.Background,
@@ -81,6 +89,16 @@ public sealed class RdpSharingService : IRdpSharingService
         }
         catch (Exception ex)
         {
+            _log.Write($"[RDP] {stage} 실패: {ex.GetBaseException().GetType().Name}, HRESULT=0x{ex.GetBaseException().HResult:X8}");
+            if (opened)
+            {
+                try { Call(_session!, "Close"); }
+                catch (Exception closeError)
+                {
+                    // 정리 실패를 성공으로 지우지 않는다. StopAsync에서 다시 정리할 수 있게 참조를 보존한다.
+                    throw new AggregateException("WDS 시작 실패 후 종료 확인도 실패했습니다.", ex, closeError);
+                }
+            }
             Unsubscribe();
             Release(_session);
             _session = null;
@@ -107,8 +125,8 @@ public sealed class RdpSharingService : IRdpSharingService
         {
             manager = Get(_session, "Invitations") ?? throw new InvalidOperationException("초대 관리자 없음");
 
-            // 🎯 [피드백 3번 반영] 기존 서비스 코드에도 AuthString 인자 복구 (빈 문자열 "" 대신 participantId 사용)
-            invitation = Call(manager, "CreateInvitation", participantId, group, invitationPassword, 1)
+            // AuthString은 같은 WDS 세션에서 유일해야 한다. 학생 ID를 재사용하면 폐기 후 재초대도 실패한다.
+            invitation = Call(manager, "CreateInvitation", id.ToString("N"), group, invitationPassword, 1)
                 ?? throw new InvalidOperationException("WDS 초대 발급 실패");
 
             var connection = Get(invitation, "ConnectionString") as string ?? string.Empty;

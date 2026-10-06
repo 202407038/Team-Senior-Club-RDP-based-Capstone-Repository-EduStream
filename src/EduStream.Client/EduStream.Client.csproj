@@ -1,8 +1,9 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
     <ProjectReference Include="..\EduStream.Core\EduStream.Core.csproj" />
     <ProjectReference Include="..\EduStream.ShareHost\EduStream.ShareHost.csproj" />
+    <ProjectReference Include="..\EduStream.ShareViewer\EduStream.ShareViewer.csproj" />
   </ItemGroup>
 
   <ItemGroup>

@@ -45,5 +45,6 @@ namespace EduStream.ShareHost
         public int DpiY { get; init; }
         public double ScaleFactor { get; init; } // 1.0 = 100%, 1.25 = 125%, 1.5 = 150%
         public bool IsPrimary { get; init; }
+        public override string ToString() => $"{DeviceName} · {Width}×{Height}{(IsPrimary ? " (주)" : string.Empty)}";
     }
 }
