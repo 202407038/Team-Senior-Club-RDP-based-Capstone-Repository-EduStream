@@ -18,13 +18,13 @@ namespace EduStream.FileTransfer.Tests;
 /// </summary>
 public sealed class AutoReconnectTests
 {
-    // Review-only regression probe; no native WDS or desktop input is exercised.
+    // 실제 TLS/TCP 회수 응답 회귀. native WDS 입력은 별도 통합 테스트에서 검증한다.
     [Fact]
-    public async Task Review_PermissionOff_MustConsumeAppliedAckWithoutTimeout()
+    public async Task PermissionOff_MustConsumeAppliedAckWithoutTimeout()
     {
         await using var rig = await Rig.OpenAsync();
         var alice = await rig.JoinAsync("Alice");
-        rig.SessionManager.AttachRdpSharing(new ReviewSharingStub(), Guid.NewGuid());
+        rig.SessionManager.AttachRdpSharing(new PermissionAckSharingStub(), Guid.NewGuid());
         var revokeAckSent = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         alice.Secure.FrameReceived += async frame =>
         {
@@ -72,7 +72,7 @@ public sealed class AutoReconnectTests
         }
     }
 
-    private sealed class ReviewSharingStub : EduStream.Core.Network.IRdpSharingService
+    private sealed class PermissionAckSharingStub : EduStream.Core.Network.IRdpSharingService
     {
         public Task<Guid> StartAsync(Guid sessionId, CancellationToken cancellationToken = default) => Task.FromResult(Guid.NewGuid());
         public Task<RdpInvitationPacket> CreateInvitationAsync(Guid sessionId, Guid sharingId, string participantId,
@@ -81,7 +81,6 @@ public sealed class AutoReconnectTests
         public Task StopAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
-
     private static readonly TimeSpan Wait = TimeSpan.FromSeconds(5);
 
     [Fact]
@@ -318,9 +317,19 @@ public sealed class AutoReconnectTests
             }
         }
 
-        public Task<SecureSessionChannel> AuthenticateAsync(string displayName, string password = "", string? reconnectToken = null) =>
-            SecureRoomJoinClient.AuthenticateAsync("127.0.0.1", Port, SessionManager.ConnectionCode!, displayName,
-                password.AsMemory(), new InMemoryLogSink(), Wait, reconnectToken: reconnectToken);
+        public async Task<SecureSessionChannel> AuthenticateAsync(string displayName, string password = "", string? reconnectToken = null)
+        {
+            try
+            {
+                return await SecureRoomJoinClient.AuthenticateAsync("127.0.0.1", Port, SessionManager.ConnectionCode!, displayName,
+                    password.AsMemory(), new InMemoryLogSink(), Wait, reconnectToken: reconnectToken);
+            }
+            catch (System.Security.Authentication.AuthenticationException error)
+            {
+                // 간헐 TLS 실패를 재시도/통과 처리하지 않고 실제 포트와 서버 측 경과를 남긴다.
+                throw new Xunit.Sdk.XunitException($"TLS handshake failed on session port {Port}: {error}\n{string.Join(Environment.NewLine, Log.Snapshot())}");
+            }
+        }
 
         public async Task<Student> JoinAsync(string displayName, string password = "", string? reconnectToken = null)
         {
