@@ -9,7 +9,7 @@ namespace EduStream.Server.Services;
 /// </summary>
 /// <remarks>
 /// 허용은 교수자가 지금 볼 수 있는 학생 공유 세대(<c>currentSharingFor</c>)가 있을 때만 보냅니다. 회수는 그 허용을 보낸 세대로 보냅니다.
-/// 학생 연결이 이미 사라졌으면 회수는 성공으로 봅니다. 학생 앱은 연결이 끊기면 자기 PC의 공유 호스트를 닫기 때문입니다.
+/// 보호 채널 끊김만으로 WDS 입력 차단을 단정하지 않습니다. 회수 ACK 또는 교수자 WDS 연결의 실제 종료 확인이 필요합니다.
 /// 응답 시간 초과는 실패이며, 회수 실패는 조정자가 대기열에 남겨 다음 요청/중지 때 다시 시도합니다.
 /// </remarks>
 public sealed class StudentRemoteInputGate : IRemoteInputGate, IDisposable
@@ -26,13 +26,15 @@ public sealed class StudentRemoteInputGate : IRemoteInputGate, IDisposable
     private readonly Func<ParticipantConnection, Guid?> _currentSharingFor;
     private readonly ILogSink _logSink;
     private readonly TimeSpan _responseTimeout;
+    private readonly Func<ParticipantConnection, CancellationToken, Task<bool>>? _disconnectViewer;
     private readonly Dictionary<Guid, PendingCommand> _pending = new(); // CommandId → 응답 대기
     private readonly Dictionary<Guid, Guid> _grantedSharings = new(); // 제어 RequestId → 허용을 보낸 공유 세대
     private bool _disposed;
 
     public StudentRemoteInputGate(string professorId, ParticipantRegistry registry,
         Func<ParticipantConnection, ICollaborationChannel?> channelFor, Func<ParticipantConnection, Guid?> currentSharingFor,
-        ILogSink logSink, TimeSpan? responseTimeout = null)
+        ILogSink logSink, TimeSpan? responseTimeout = null,
+        Func<ParticipantConnection, CancellationToken, Task<bool>>? disconnectViewer = null)
     {
         if (string.IsNullOrWhiteSpace(professorId)) throw new ArgumentException("교수자 ID가 필요합니다.", nameof(professorId));
         _professorId = professorId;
@@ -41,6 +43,7 @@ public sealed class StudentRemoteInputGate : IRemoteInputGate, IDisposable
         _currentSharingFor = currentSharingFor ?? throw new ArgumentNullException(nameof(currentSharingFor));
         _logSink = logSink ?? throw new ArgumentNullException(nameof(logSink));
         _responseTimeout = responseTimeout ?? DefaultResponseTimeout;
+        _disconnectViewer = disconnectViewer;
         _registry.ConnectionRemoved += OnConnectionRemoved;
     }
 
@@ -68,8 +71,7 @@ public sealed class StudentRemoteInputGate : IRemoteInputGate, IDisposable
             .ConfigureAwait(false);
         if (!result.Applied)
         {
-            // 학생이 적용하지 못했다고 답했으면 열린 입력이 없다.
-            Forget(requested.RequestId);
+            // 실패 응답도 부분 적용 후 실패일 수 있다. 확인된 회수 전까지 기록을 유지한다.
             throw new CollaborationException(result.Error ?? CollaborationError.UnsupportedCapability);
         }
         _logSink.Write($"[Control] 학생 PC 입력 허용 확인: request={requested.RequestId}");
@@ -84,17 +86,20 @@ public sealed class StudentRemoteInputGate : IRemoteInputGate, IDisposable
             // 허용을 보낸 적이 없으면 학생 PC에서 열린 입력도 없다.
             if (!_grantedSharings.TryGetValue(revoked.RequestId, out sharingId)) return;
         }
-        var channel = _channelFor(revoked.Student);
-        if (channel is null)
+        try
         {
-            Forget(revoked.RequestId);
-            _logSink.Write($"[Control] 학생 연결 종료로 입력 회수 완료 처리: request={revoked.RequestId}");
-            return;
+            var channel = _channelFor(revoked.Student)
+                ?? throw new CollaborationException(CollaborationError.StaleConnection);
+            var result = await SendAndWaitAsync(channel, revoked, sharingId, RemoteInputAction.Revoke, cancellationToken)
+                .ConfigureAwait(false);
+            if (!result.Applied)
+                throw new CollaborationException(result.Error ?? CollaborationError.UnsupportedCapability);
         }
-        var result = await SendAndWaitAsync(channel, revoked, sharingId, RemoteInputAction.Revoke, cancellationToken)
-            .ConfigureAwait(false);
-        if (!result.Applied)
-            throw new CollaborationException(result.Error ?? CollaborationError.UnsupportedCapability);
+        catch when (_disconnectViewer is not null && !cancellationToken.IsCancellationRequested)
+        {
+            // ACK를 받을 수 없어도 이 교수자의 실제 WDS viewer가 닫혔음을 확인한 경우만 회수를 완료한다.
+            if (!await _disconnectViewer(revoked.Student, cancellationToken).ConfigureAwait(false)) throw;
+        }
         Forget(revoked.RequestId);
         _logSink.Write($"[Control] 학생 PC 입력 회수 확인: request={revoked.RequestId}");
     }
@@ -174,12 +179,8 @@ public sealed class StudentRemoteInputGate : IRemoteInputGate, IDisposable
         }
         foreach (var command in closed)
         {
-            // 연결이 끊긴 학생은 공유 호스트를 닫으므로 회수는 성공, 허용은 실패로 끝낸다.
-            if (command.Action == RemoteInputAction.Revoke)
-                command.Completion.TrySetResult(new RemoteInputResultNotice(Guid.NewGuid(), connection.SessionId,
-                    RemoteInputAction.Revoke, true, null));
-            else
-                command.Completion.TrySetException(new CollaborationException(CollaborationError.StaleConnection));
+            // TCP/TLS 연결과 WDS 연결은 별개다. 끊김을 Applied=true 응답으로 만들어내지 않는다.
+            command.Completion.TrySetException(new CollaborationException(CollaborationError.StaleConnection));
         }
     }
 

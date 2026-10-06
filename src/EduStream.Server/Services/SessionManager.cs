@@ -311,6 +311,8 @@ public sealed class SessionManager
     /// 교수자 viewer는 InvitationReady/InvitationWithdrawn을, 판서 엔진은 PublishAnnotationAsync를 연결합니다.
     /// </summary>
     public ReverseCollaborationRouter? ReverseCollaboration => _reverseRouter;
+    /// <summary>회수 ACK 실패 시 실제 학생 WDS viewer 종료를 확인하는 연결점. 미연결/실패는 회수 완료가 아니다.</summary>
+    public Func<ParticipantConnection, CancellationToken, Task<bool>>? CloseStudentViewerAsync { get; set; }
 
     /// <summary>
     /// 교수자 판서 엔진이 낸 JSON을 현재 화면 공유의 판서로 학생 전원에게 보냅니다. 공유가 없으면 SessionClosed로 실패합니다.
@@ -448,7 +450,8 @@ public sealed class SessionManager
                 _studentInputGate = new StudentRemoteInputGate(reverseRouter.ProfessorId, _participantRegistry,
                     FindSecureChannel,
                     student => reverseRouter.TryGetInvitation(student.ConnectionId)?.Invitation.SharingId,
-                    _logSink);
+                    _logSink, disconnectViewer: (student, token) =>
+                        CloseStudentViewerAsync?.Invoke(student, token) ?? Task.FromResult(false));
                 if (_remoteInputGate is UnavailableRemoteInputGate) coordinator.SetInputGate(_studentInputGate);
                 _secureListener = new SecureCollaborationListener(secureChannelCertificate, _logSink);
                 _secureGate = new SecureRoomGate(_secureListener, CurrentSession.SessionId, passwordVerifier, _logSink);
@@ -555,7 +558,7 @@ public sealed class SessionManager
                 case CollaborationMessageKind.PermissionChange:
                     var request = CollaborationMessageCodec.Decode<PermissionChangeRequest>(frame, out _);
                     if (_clientDisplayNames.TryGetValue(clientId, out var displayName))
-                        await UpdatePermissionsForClientAsync(clientId, displayName, request.AllowViewing, request.AllowControl);
+                        _ = ApplyPermissionsWithoutBlockingReceiveAsync(clientId, displayName, request);
                     break;
                 case CollaborationMessageKind.FileRequest:
                 case CollaborationMessageKind.FileCancel:
@@ -588,6 +591,13 @@ public sealed class SessionManager
         {
             _logSink.Write($"[Secure] 잘못된 메시지 무시: clientId={clientId}, 사유={ex.Code}");
         }
+    }
+
+    private async Task ApplyPermissionsWithoutBlockingReceiveAsync(string clientId, string displayName, PermissionChangeRequest request)
+    {
+        // 권한 반영은 첫 await 전에 수행한다. ACK도 같은 수신 루프에 도착하므로 회수 대기는 루프 밖에서 한다.
+        try { await UpdatePermissionsForClientAsync(clientId, displayName, request.AllowViewing, request.AllowControl); }
+        catch (Exception ex) { _logSink.Write("[Control] 허용 변경/회수 확인 실패: " + ex.GetType().Name); }
     }
 
     /// <summary>
