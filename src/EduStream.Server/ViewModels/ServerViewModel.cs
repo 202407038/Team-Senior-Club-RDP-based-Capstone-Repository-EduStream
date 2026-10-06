@@ -22,6 +22,16 @@ namespace EduStream.Server.ViewModels;
 public sealed class ServerViewModel : ObservableObject
 {
     public AnnotationToolsViewModel AnnotationTools { get; } = new();
+    public SessionManager SessionManager => _sessionManager;
+    public Func<bool>? HasVisibleStudentScreen { get; set; }
+    public IReadOnlyList<EduStream.ShareHost.MonitorInfo> Monitors { get; } = new EduStream.ShareHost.MonitorDpiAdapter().GetMonitors();
+    private EduStream.ShareHost.MonitorInfo? _selectedMonitor;
+    public EduStream.ShareHost.MonitorInfo? SelectedMonitor
+    {
+        get => _selectedMonitor ?? Monitors.FirstOrDefault(m => m.IsPrimary) ?? Monitors.FirstOrDefault();
+        set { if (!IsRdpSharing && !IsRdpBusy) SetProperty(ref _selectedMonitor, value); }
+    }
+    public bool CanSelectMonitor => !IsRdpSharing && !IsRdpBusy;
     private readonly InMemoryLogSink _logSink = new();
     private readonly SessionManager _sessionManager;
     private readonly TcpServerService _tcpServer;
@@ -190,6 +200,7 @@ public sealed class ServerViewModel : ObservableObject
 
     private void UpdateRdpCommands()
     {
+        OnPropertyChanged(nameof(CanSelectMonitor));
         StartRdpShareCommand.RaiseCanExecuteChanged();
         StopRdpShareCommand.RaiseCanExecuteChanged();
         StartScreenShareCommand.RaiseCanExecuteChanged();
@@ -348,6 +359,7 @@ public sealed class ServerViewModel : ObservableObject
             var roomPassword = UseRoomPassword ? typedPassword : string.Empty;
             _secureCertificate ??= LoadSecureCertificate();
             await _sessionManager.OpenSessionAsync(SessionName, Port, roomPassword.AsMemory(), _secureCertificate);
+            // 보호 채널의 기본 입력 게이트는 SessionManager가 구성한다(#90).
             _heartbeatService.Start();
             IsSessionOpen = true;
             ConnectionCode = _sessionManager.ConnectionCode ?? "-";
@@ -365,7 +377,9 @@ public sealed class ServerViewModel : ObservableObject
         catch (Exception ex)
         {
             SessionStatus = "세션 Open 실패";
-            StatusMessage = ex.Message;
+            StatusMessage = ex is System.Net.Sockets.SocketException { SocketErrorCode: System.Net.Sockets.SocketError.AddressAlreadyInUse }
+                ? $"포트 {Port} 또는 보조 통신 포트 {Port + 1}을 다른 프로그램이 사용 중입니다. 고급 설정에서 포트를 바꾸고 학생에게 같은 포트를 알려 주세요."
+                : ex.Message;
             IsStatusError = true;
             SyncLogs();
         }
@@ -544,6 +558,11 @@ public sealed class ServerViewModel : ObservableObject
 
     public async Task StartRdpShareAsync()
     {
+        if (HasVisibleStudentScreen?.Invoke() == true)
+        {
+            RdpStatus = "학생 화면이 다른 학생에게 다시 공유되지 않도록 학생 보기 창과 펼친 목록을 닫은 뒤 공유를 시작해 주세요.";
+            return;
+        }
         if (!IsSessionOpen || IsBusy || IsRdpBusy || IsRdpSharing || _shuttingDown) return;
         IsRdpBusy = true;
         await _rdpLifecycle.WaitAsync();
@@ -551,10 +570,12 @@ public sealed class ServerViewModel : ObservableObject
         {
             var sessionId = _sessionManager.CurrentSession!.SessionId;
             await StopAutoShareAsync();
+            if (_rdpSharing is RdpSharingService native && SelectedMonitor is { } monitor)
+                native.SelectedBounds = new System.Drawing.Rectangle(monitor.Left, monitor.Top, monitor.Width, monitor.Height);
             var sharingId = await _rdpSharing.StartAsync(sessionId);
             _sessionManager.AttachRdpSharing(_rdpSharing, sharingId);
             IsRdpSharing = true;
-            RdpStatus = "WDS 공유 중 · 보기 전용 · 최대 학생 2명. 학생 앱에서 초대를 요청해 주세요.";
+            RdpStatus = "WDS 공유 중 · 선택한 모니터를 학생에게 자동 공유합니다. (현재 검증 기준 학생 2명)";
         }
         catch (Exception ex)
         {

@@ -10,6 +10,43 @@ public sealed class RdpSharingContractTests
     private readonly Xunit.Abstractions.ITestOutputHelper _output;
     public RdpSharingContractTests(Xunit.Abstractions.ITestOutputHelper output) => _output = output;
 
+    [WdsFact(Timeout = 90000)]
+    public async Task RealSharingStartsWithEachEnumeratedMonitor()
+    {
+        var monitors = new EduStream.ShareHost.MonitorDpiAdapter().GetMonitors();
+        Assert.NotEmpty(monitors);
+        foreach (var monitor in monitors)
+        {
+            var log = new InMemoryLogSink();
+            await using var service = new RdpSharingService(log)
+            { SelectedBounds = new System.Drawing.Rectangle(monitor.Left, monitor.Top, monitor.Width, monitor.Height) };
+            try
+            {
+                Assert.NotEqual(Guid.Empty, await service.StartAsync(Guid.NewGuid()));
+                await service.StopAsync();
+                _output.WriteLine($"MONITOR_START_STOP_PASS {monitor.DeviceName} {monitor.Width}x{monitor.Height}");
+            }
+            finally { _output.WriteLine(string.Join(Environment.NewLine, log.Snapshot())); }
+        }
+    }
+
+    [WdsFact(Timeout = 90000)]
+    public async Task ReverseHostCanRenewSameProfessorInvitationWithoutRestart()
+    {
+        await using var host = new EduStream.ShareHost.StudentDesktopHost("RenewalStudent");
+        var session = Guid.NewGuid();
+        var sharing = await host.StartAsync(session);
+        string? previous = null;
+        for (var attempt = 0; attempt < 3; attempt++)
+        {
+            var notice = await host.CreateInvitationAsync(session, sharing, "SameProfessor", Guid.NewGuid(),
+                Guid.NewGuid().ToString("N"), DateTimeOffset.UtcNow.AddMinutes(1));
+            Assert.Equal(sharing, notice.SharingId);
+            Assert.NotEqual(previous, notice.ConnectionString);
+            previous = notice.ConnectionString;
+        }
+    }
+
     [WdsTheory]
     [InlineData("ReviewStudent1")]
     [InlineData("ReviewStudent3")]
@@ -58,6 +95,22 @@ public sealed class RdpSharingContractTests
         Assert.True(mock.Invitations.UsedPassword == password, "Caller-supplied password must be preserved.");
     }
 
+    [Fact]
+    public async Task ReissuedInvitationUsesUniqueNativeAuthenticationString()
+    {
+        var mock = new PasswordSession();
+        await using var service = new RdpSharingService(new InMemoryLogSink(), () => mock);
+        var session = Guid.NewGuid();
+        var sharing = await service.StartAsync(session);
+        for (var attempt = 0; attempt < 3; attempt++)
+        {
+            var invitation = await service.CreateInvitationAsync(session, sharing, "SameStudent", Guid.NewGuid(),
+                "secret", DateTimeOffset.UtcNow.AddMinutes(1));
+            await service.RevokeInvitationAsync(invitation.InvitationId);
+        }
+        Assert.Equal(3, mock.Invitations.AuthenticationStrings.Distinct().Count());
+    }
+
     public sealed class PasswordSession
     {
         // 🎯 [피드백 5번 연동] 가짜 엔진에도 ColorDepth 속성을 추가하여 예외 방지!
@@ -72,11 +125,13 @@ public sealed class RdpSharingContractTests
     public sealed class PasswordInvitations
     {
         public List<PasswordInvitation> Created { get; } = new();
+        public List<string> AuthenticationStrings { get; } = new();
         public string? UsedPassword { get; private set; }
-        public PasswordInvitation CreateInvitation(string group, string auth, string password, int limit)
+        public PasswordInvitation CreateInvitation(string auth, string group, string password, int limit)
         {
             UsedPassword = password;
-            var invitation = new PasswordInvitation { GroupName = auth };
+            AuthenticationStrings.Add(auth);
+            var invitation = new PasswordInvitation { GroupName = group };
             Created.Add(invitation);
             return invitation;
         }

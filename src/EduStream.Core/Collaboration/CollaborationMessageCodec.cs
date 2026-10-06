@@ -12,7 +12,8 @@ public enum CollaborationMessageKind
     ReconnectGrant = 12, SessionEnded = 13,
     RdpInvitationSecret = 14,
     ReverseRdpInvitation = 15, ReverseRdpInvitationSecret = 16,
-    Annotation = 17
+    Annotation = 17,
+    RemoteInputCommand = 18, RemoteInputResult = 19
 }
 public sealed record FileCancelRequest(Guid RequestId, Guid SessionId);
 public sealed record FileStoredNotice(Guid RequestId, Guid FileId, long Length, string Sha256);
@@ -87,6 +88,8 @@ public static class CollaborationMessageCodec
         if (type == typeof(ReverseRdpInvitationNotice)) return CollaborationMessageKind.ReverseRdpInvitation;
         if (type == typeof(ReverseRdpInvitationSecretNotice)) return CollaborationMessageKind.ReverseRdpInvitationSecret;
         if (type == typeof(AnnotationTransportNotice)) return CollaborationMessageKind.Annotation;
+        if (type == typeof(RemoteInputCommandNotice)) return CollaborationMessageKind.RemoteInputCommand;
+        if (type == typeof(RemoteInputResultNotice)) return CollaborationMessageKind.RemoteInputResult;
         throw new CollaborationException(CollaborationError.UnsupportedCapability);
     }
 
@@ -146,11 +149,13 @@ public static class CollaborationMessageCodec
             case ReverseRdpInvitationNotice invitation: invitation.Validate(); break;
             case ReverseRdpInvitationSecretNotice reverseSecret: reverseSecret.Validate(); break;
             case AnnotationTransportNotice annotation: annotation.Validate(); break;
+            case RemoteInputCommandNotice command: RemoteInputRules.Validate(command); break;
+            case RemoteInputResultNotice result: RemoteInputRules.Validate(result); break;
             default: throw new CollaborationException(CollaborationError.UnsupportedCapability);
         }
     }
 
-    private static void RejectDuplicateProperties(JsonElement element)
+    internal static void RejectDuplicateProperties(JsonElement element)
     {
         if (element.ValueKind == JsonValueKind.Object)
         {

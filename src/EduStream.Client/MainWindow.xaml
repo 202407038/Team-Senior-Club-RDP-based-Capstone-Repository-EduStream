@@ -449,6 +449,8 @@
                                        TextWrapping="Wrap"
                                        Foreground="{StaticResource BrushTextMuted}"
                                        Text="{Binding ControlStatusText}" />
+                            <TextBlock Margin="0,4,0,0" FontSize="12" TextWrapping="Wrap"
+                                       Foreground="{StaticResource BrushTextMuted}" Text="{Binding StudentSharingStatus}" />
                             <TextBlock Margin="0,4,0,0"
                                        FontSize="12"
                                        TextWrapping="Wrap"

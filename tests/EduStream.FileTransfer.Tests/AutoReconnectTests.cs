@@ -18,6 +18,69 @@ namespace EduStream.FileTransfer.Tests;
 /// </summary>
 public sealed class AutoReconnectTests
 {
+    // 실제 TLS/TCP 회수 응답 회귀. native WDS 입력은 별도 통합 테스트에서 검증한다.
+    [Fact]
+    public async Task PermissionOff_MustConsumeAppliedAckWithoutTimeout()
+    {
+        await using var rig = await Rig.OpenAsync();
+        var alice = await rig.JoinAsync("Alice");
+        rig.SessionManager.AttachRdpSharing(new PermissionAckSharingStub(), Guid.NewGuid());
+        var revokeAckSent = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        alice.Secure.FrameReceived += async frame =>
+        {
+            if (CollaborationFrameInspector.PeekKind(frame) != CollaborationMessageKind.RemoteInputCommand) return;
+            var command = CollaborationMessageCodec.Decode<RemoteInputCommandNotice>(frame, out _);
+            await alice.Secure.Connection.SendAsync(CollaborationMessageCodec.Encode(Guid.NewGuid(),
+                new RemoteInputResultNotice(command.CommandId, command.SessionId, command.Action, true, null)));
+            if (command.Action == RemoteInputAction.Revoke) revokeAckSent.TrySetResult();
+        };
+        var student = rig.SessionManager.Participants.Participants.Single(p => p.DisplayName == "Alice").Connection;
+        var router = rig.SessionManager.ReverseCollaboration!;
+        const string xml = "<E><A KH=\"x\"/></E>";
+        var invitation = new ReverseRdpInvitationNotice
+        {
+            ContractVersion = ReverseRdpInvitationNotice.CurrentVersion,
+            Provider = ReverseRdpInvitationNotice.ProviderName,
+            Direction = ReverseRdpInvitationNotice.StudentToProfessor,
+            SessionId = student.SessionId, SharingId = Guid.NewGuid(), InvitationId = Guid.NewGuid(),
+            ConnectionId = student.ConnectionId, ProfessorId = router.ProfessorId,
+            StudentId = ReverseRdpIdentity.For(student), ParticipantId = router.ProfessorId,
+            ConnectionString = xml, DataLength = System.Text.Encoding.UTF8.GetByteCount(xml),
+            ExpiresAt = DateTimeOffset.UtcNow.AddMinutes(5),
+            ControlMode = ReverseRdpControlMode.HostGrantedInteractive, ViewOnly = false
+        };
+        var secret = new ReverseRdpInvitationSecretNotice(invitation.SessionId, invitation.SharingId,
+            invitation.InvitationId, invitation.ConnectionId, invitation.StudentId, invitation.ProfessorId,
+            "review-secret", invitation.ExpiresAt);
+        await alice.Secure.Connection.SendAsync(CollaborationMessageCodec.Encode(Guid.NewGuid(), invitation));
+        await alice.Secure.Connection.SendAsync(CollaborationMessageCodec.Encode(Guid.NewGuid(), secret));
+        await WaitUntilAsync(() => router.TryGetInvitation(student.ConnectionId) is not null);
+        await rig.SessionManager.RequestControlAsync("Alice").WaitAsync(Wait);
+        Assert.Equal(ControlPhase.Active, rig.SessionManager.CurrentControlState!.Phase);
+        try
+        {
+            await alice.Secure.Connection.SendAsync(CollaborationMessageCodec.Encode(Guid.NewGuid(),
+                new PermissionChangeRequest(Guid.NewGuid(), true, false)));
+            await revokeAckSent.Task.WaitAsync(Wait);
+            await Task.Delay(1000);
+            Assert.False(rig.SessionManager.IsControlInputRevokePending,
+                "Student has sent an Applied ACK, but the server is still waiting on its blocked receive loop.");
+        }
+        finally
+        {
+            await alice.DropAsync();
+        }
+    }
+
+    private sealed class PermissionAckSharingStub : EduStream.Core.Network.IRdpSharingService
+    {
+        public Task<Guid> StartAsync(Guid sessionId, CancellationToken cancellationToken = default) => Task.FromResult(Guid.NewGuid());
+        public Task<RdpInvitationPacket> CreateInvitationAsync(Guid sessionId, Guid sharingId, string participantId,
+            Guid connectionId, string invitationPassword, DateTimeOffset expiresAt, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task RevokeInvitationAsync(Guid invitationId, CancellationToken cancellationToken = default) => Task.CompletedTask;
+        public Task StopAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    }
     private static readonly TimeSpan Wait = TimeSpan.FromSeconds(5);
 
     [Fact]
@@ -254,9 +317,19 @@ public sealed class AutoReconnectTests
             }
         }
 
-        public Task<SecureSessionChannel> AuthenticateAsync(string displayName, string password = "", string? reconnectToken = null) =>
-            SecureRoomJoinClient.AuthenticateAsync("127.0.0.1", Port, SessionManager.ConnectionCode!, displayName,
-                password.AsMemory(), new InMemoryLogSink(), Wait, reconnectToken: reconnectToken);
+        public async Task<SecureSessionChannel> AuthenticateAsync(string displayName, string password = "", string? reconnectToken = null)
+        {
+            try
+            {
+                return await SecureRoomJoinClient.AuthenticateAsync("127.0.0.1", Port, SessionManager.ConnectionCode!, displayName,
+                    password.AsMemory(), new InMemoryLogSink(), Wait, reconnectToken: reconnectToken);
+            }
+            catch (System.Security.Authentication.AuthenticationException error)
+            {
+                // 간헐 TLS 실패를 재시도/통과 처리하지 않고 실제 포트와 서버 측 경과를 남긴다.
+                throw new Xunit.Sdk.XunitException($"TLS handshake failed on session port {Port}: {error}\n{string.Join(Environment.NewLine, Log.Snapshot())}");
+            }
+        }
 
         public async Task<Student> JoinAsync(string displayName, string password = "", string? reconnectToken = null)
         {

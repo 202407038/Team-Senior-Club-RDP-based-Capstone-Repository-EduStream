@@ -4,7 +4,7 @@ namespace EduStream.Server.ViewModels;
 
 /// <summary>
 /// 판서 엔진과 독립적인 도구 설정입니다. 선택만 보관하며 그리기/송출 성공 상태를 만들지 않습니다.
-/// 실제 실행 명령과 화면 위 도구 모음 부착은 3번 엔진 계약 인계 후 연결합니다.
+/// 실제 실행 명령은 AnnotationDesktopWindow가 엔진에 연결합니다.
 /// </summary>
 public sealed class AnnotationToolsViewModel : ObservableObject
 {
@@ -37,7 +37,7 @@ public sealed class AnnotationToolsViewModel : ObservableObject
         set { if (double.IsFinite(value)) SetProperty(ref _strokeWidth, Math.Clamp(Math.Round(value), 1, 20)); }
     }
 
-    // 엔진이 없는 상태를 사용 가능한 것처럼 바꾸지 않습니다. 실행 명령은 아직 제공하지 않습니다.
+    // 설정 패널 자체는 실행 명령을 제공하지 않습니다. 실제 실행은 공유 중 화면 위 도구 모음에서 합니다.
     public bool CanExecuteDrawing => false;
-    public string EngineStatus => "도구 설정만 준비할 수 있습니다. 실제 판서·화면 위 배치·학생 송출은 엔진 연결 대기 중입니다.";
+    public string EngineStatus => "공유 시작 후 위 판서 버튼을 누르세요. 선택 모니터의 화면 위 도구 모음에서 그리기·숨김·실행 취소·지우기를 사용할 수 있습니다.";
 }

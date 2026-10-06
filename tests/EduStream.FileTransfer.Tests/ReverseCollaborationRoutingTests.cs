@@ -24,6 +24,21 @@ public sealed partial class ReverseCollaborationRoutingTests
 {
     private static readonly TimeSpan Wait = TimeSpan.FromSeconds(10);
 
+    [Fact]
+    public async Task ExpiredInvitation_OnlyMatchingLiveViewerCanRetainCurrentSharing()
+    {
+        using var rig = new RouterRig();
+        var alice = rig.Join("alice", "Alice");
+        var invitation = rig.Invitation(alice, Guid.NewGuid());
+        await rig.DeliverAsync(alice, invitation);
+        rig.Now = invitation.ExpiresAt.AddSeconds(1);
+        Assert.Null(rig.Router.TryGetInvitation(alice.ConnectionId));
+        Assert.Equal(invitation.SharingId, rig.Router.TryGetConnectedSharing(alice.ConnectionId, invitation.SharingId));
+        Assert.Null(rig.Router.TryGetConnectedSharing(alice.ConnectionId, Guid.NewGuid()));
+        rig.Registry.SetPermissions(alice.ConnectionId, allowViewing: false, allowControl: false);
+        Assert.Null(rig.Router.TryGetConnectedSharing(alice.ConnectionId, invitation.SharingId));
+    }
+
     // ---------- 서버 라우터: 역방향 초대 ----------
 
     [Fact]

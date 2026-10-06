@@ -8,6 +8,7 @@ public static class CollaborationErrorCatalog
     public static CollaborationFailure FromException(Exception exception) => exception switch
     {
         OperationCanceledException => new("CANCELLED", "작업이 취소되었습니다.", true),
+        TimeoutException => new("OPERATION_TIMEOUT", "작업 응답 시간이 초과되었습니다. 연결 상태를 확인한 뒤 다시 시도해 주세요.", true),
         UnauthorizedAccessException => new("FILE_ACCESS_DENIED", "파일 또는 저장 폴더의 접근 권한을 확인해 주세요.", false),
         PathTooLongException => new("FILE_PATH_TOO_LONG", "파일 이름이나 저장 경로가 너무 깁니다.", false),
         IOException => new("FILE_IO_ERROR", "파일 잠금·저장 공간·원본 파일을 확인해 주세요.", true),

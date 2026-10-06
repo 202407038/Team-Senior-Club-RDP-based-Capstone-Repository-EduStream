@@ -7,6 +7,7 @@ using EduStream.Core.Logging;
 using EduStream.Core.Models;
 using EduStream.Core.Network;
 using EduStream.Core.Utils;
+using EduStream.ShareViewer;
 
 namespace EduStream.Client.Services;
 
@@ -16,6 +17,9 @@ public sealed class RdpViewerService : IRdpViewerService
     private readonly ILogSink? _log;
     private WindowsFormsHost? _host;
     private AxRDPViewer? _viewer;
+    private ViewerZoomSurface? _surface;
+    private ProfessorViewerConnection? _connection;
+    private readonly SemaphoreSlim _lifecycle = new(1, 1);
     private RdpConnectionStatus? _status;
     private DispatcherTimer? _timeout;
     private int _generation;
@@ -44,6 +48,7 @@ public sealed class RdpViewerService : IRdpViewerService
     {
         if (generation != _generation || width <= 0 || height <= 0) return;
         _aspect = (double)width / height;
+        _surface?.SetSourceSize(width, height);
         FitHost();
     }
 
@@ -80,16 +85,19 @@ public sealed class RdpViewerService : IRdpViewerService
             invitation.ParticipantId, invitation.ConnectionId, DateTimeOffset.UtcNow);
         if (string.IsNullOrEmpty(invitationPassword)) throw new ArgumentException("별도로 전달받은 초대 비밀번호를 입력해 주세요.");
         var host = _host ?? throw new InvalidOperationException("RDP 표시 영역이 준비되지 않았습니다.");
-        await host.Dispatcher.InvokeAsync(() =>
+        await _lifecycle.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+        await host.Dispatcher.InvokeAsync(async () =>
         {
             cancellationToken.ThrowIfCancellationRequested();
-            ResetViewer();
+            await ResetViewerAsync(cancellationToken);
             var generation = _generation;
             _status = RdpConnectionStatus.Create(invitation.SessionId!.Value, invitation.ParticipantId).BeginConnect(invitation.ConnectionId);
             Publish();
             try
             {
-                var viewer = new AxRDPViewer { Dock = DockStyle.Fill };
+                var viewer = new AxRDPViewer();
                 _viewer = viewer;
                 viewer.OnConnectionEstablished += (_, _) =>
                 {
@@ -102,9 +110,12 @@ public sealed class RdpViewerService : IRdpViewerService
                 viewer.OnConnectionTerminated += (_, _) => Fail(generation, RdpFailureReason.NetworkInterrupted);
                 viewer.OnError += (_, _) => Fail(generation, RdpFailureReason.Unknown);
                 ((ISupportInitialize)viewer).BeginInit();
-                host.Child = viewer;
+                _surface = new ViewerZoomSurface();
+                host.Child = _surface;
+                _surface.Controls.Add(viewer);
                 ((ISupportInitialize)viewer).EndInit();
                 viewer.CreateControl();
+                _surface.Attach(viewer);
                 // 공유 화면 전체가 창 크기에 맞게 축소되어 스크롤 없이 보이게 한다(기본 화면 맞춤).
                 viewer.SmartSizing = true;
                 viewer.OnSharedRectChanged += (_, e) =>
@@ -113,14 +124,17 @@ public sealed class RdpViewerService : IRdpViewerService
                     ApplySharedSize(generation, e.width, e.height, "DesktopSettings");
                 _timeout = new DispatcherTimer(TimeSpan.FromSeconds(20), DispatcherPriority.Background,
                     (_, _) => Fail(generation, RdpFailureReason.HostUnavailable), host.Dispatcher);
-                viewer.Connect(invitation.ConnectionString, invitation.ParticipantId, invitationPassword);
+                _connection = new ProfessorViewerConnection(viewer);
+                _connection.Connect(invitation.ConnectionString, invitation.ParticipantId, invitationPassword);
             }
             catch (Exception ex)
             {
                 _log?.Write($"[RDP] 연결 시작 실패: {ex.GetType().Name}");
                 Fail(generation, RdpFailureReason.Unknown);
             }
-        }, DispatcherPriority.Normal, cancellationToken).Task.ConfigureAwait(false);
+        }, DispatcherPriority.Normal, cancellationToken).Task.Unwrap().ConfigureAwait(false);
+        }
+        finally { _lifecycle.Release(); }
     }
 
     private void Fail(int generation, RdpFailureReason reason)
@@ -135,14 +149,19 @@ public sealed class RdpViewerService : IRdpViewerService
     public async Task DisconnectAsync(CancellationToken cancellationToken = default)
     {
         if (_host is null) return;
-        await _host.Dispatcher.InvokeAsync(() =>
+        await _lifecycle.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
         {
-            ResetViewer();
+        await _host.Dispatcher.InvokeAsync(async () =>
+        {
+            await ResetViewerAsync(cancellationToken);
             if (_status is not null) { _status = _status.Close(); Publish(); }
-        }, DispatcherPriority.Normal, cancellationToken).Task.ConfigureAwait(false);
+        }, DispatcherPriority.Normal, cancellationToken).Task.Unwrap().ConfigureAwait(false);
+        }
+        finally { _lifecycle.Release(); }
     }
 
-    private void ResetViewer()
+    private async Task ResetViewerAsync(CancellationToken cancellationToken)
     {
         ++_generation; // 해제 중 발생하는 COM 이벤트와 이전 연결 알림을 먼저 무효화한다.
         _aspect = 0;
@@ -150,15 +169,14 @@ public sealed class RdpViewerService : IRdpViewerService
         _timeout?.Stop();
         _timeout = null;
         var viewer = _viewer;
-        _viewer = null;
         if (viewer is null) return;
-        try { viewer.Disconnect(); }
-        catch (Exception ex) { _log?.Write($"[RDP] 연결 해제: {ex.GetType().Name}"); }
-        finally
-        {
-            if (_host?.Child == viewer) _host.Child = null;
-            viewer.Dispose();
-        }
+        // Disconnect 반환만으로 COM 컨트롤을 폐기하지 않는다. 실제 종료 이벤트를 기다린다.
+        // 실패 시 참조를 보존하여 다음 종료에서 재시도한다.
+        if (_connection is not null) await _connection.ReleaseAfterSharingStoppedAsync(cancellationToken);
+        else viewer.Dispose();
+        _connection = null; _viewer = null;
+        if (_host is not null) _host.Child = null;
+        _surface?.Dispose(); _surface = null;
     }
     private void Publish()
     {
