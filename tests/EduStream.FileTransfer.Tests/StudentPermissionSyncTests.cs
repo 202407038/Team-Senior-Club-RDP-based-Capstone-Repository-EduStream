@@ -33,7 +33,7 @@ public sealed class StudentPermissionSyncTests
     }
 
     [Fact]
-    public async Task StatusSnapshot_ContainsOnlyTheStudentThemself()
+    public async Task StatusSnapshot_ContainsOnlyTheStudentThemselfAndProfessor()
     {
         await using var rig = await Rig.OpenAsync();
         var alice = await rig.JoinAsync("Alice");
@@ -44,9 +44,13 @@ public sealed class StudentPermissionSyncTests
 
         foreach (var room in alice.RoomFrames)
         {
-            var self = Assert.Single(room.Participants);
+            // 다른 학생(Bob)은 보이지 않고, 역방향 초대·판서 대조용 교수자 연결만 함께 온다.
+            var self = Assert.Single(room.Participants, participant => participant.Connection.Role == ParticipantRole.Student);
             Assert.Equal("Alice", self.DisplayName);
             Assert.Equal(room.Connection, self.Connection);
+            var professor = Assert.Single(room.Participants, participant => participant.Connection.Role == ParticipantRole.Professor);
+            Assert.Equal(room.Connection.SessionId, professor.Connection.SessionId);
+            Assert.Equal(2, room.Participants.Count);
         }
     }
 
