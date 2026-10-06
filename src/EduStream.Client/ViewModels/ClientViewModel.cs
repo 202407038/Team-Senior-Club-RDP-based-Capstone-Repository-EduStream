@@ -111,7 +111,7 @@ public sealed class ClientViewModel : ObservableObject
 
     public ClientViewModel(IRdpViewerService? rdpViewerService = null)
     {
-        _rdpViewerService = rdpViewerService ?? new RdpViewerService();
+        _rdpViewerService = rdpViewerService ?? new RdpViewerService(_logSink);
         _sessionClient = new SessionClient(_logSink);
         _screenRenderer = new ScreenRenderer();
         _fileReceiver = new FileReceiver();
@@ -857,6 +857,11 @@ public sealed class ClientViewModel : ObservableObject
         RunOnUiThread(() =>
         {
             RdpStatusText = $"RDP 연결 종료됨: {revoked.Reason}";
+            if (IsConnected)
+            {
+                ResetStatusPriority();
+                UpdateStatus("교수자 화면 공유가 끝났습니다. 다시 시작되면 자동으로 연결됩니다.", StatusPriority.Info);
+            }
             _logSink.Write($"[RDP] 초대 폐기: {revoked.Reason}");
             SyncLogs();
         });
@@ -1380,8 +1385,18 @@ public sealed class ClientViewModel : ObservableObject
         if (_disposing) return;
         _disposing = true;
         _freshnessTimer.Stop();
-        await DisconnectAsync();
-        await _rdpViewerService.DisposeAsync();
+        try
+        {
+            await DisconnectAsync();
+            await _rdpViewerService.DisposeAsync();
+        }
+        catch
+        {
+            // 네이티브 공유 종료 실패 시 다음 닫기 요청에서 실제 정리를 다시 시도한다.
+            _disposing = false;
+            _freshnessTimer.Start();
+            throw;
+        }
     }
 
     /// <summary>보호 채널은 참가 연결과 수명을 같이한다. 새 참가·퇴장·끊김 때 이전 채널을 닫는다.</summary>
