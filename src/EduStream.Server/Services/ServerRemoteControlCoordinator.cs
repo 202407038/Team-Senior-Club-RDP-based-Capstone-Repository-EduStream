@@ -29,6 +29,8 @@ public sealed class ServerRemoteControlCoordinator : IRemoteControlCoordinator, 
     private IRemoteInputGate _inputGate;
     private IRemoteInputGate? _currentInputGate;
     private RemoteControlState? _current;
+    // 이전 대상의 입력 회수를 기다리는 동안에는 아직 Current에 나타나지 않는 새 대상이다.
+    private ParticipantConnection? _pendingTarget;
     private CancellationTokenSource? _grantCancellation;
     // 회수·새 요청마다 증가합니다. 비동기 대기 전후로 값을 비교해 대체된 요청을 버립니다.
     private long _version;
@@ -82,7 +84,7 @@ public sealed class ServerRemoteControlCoordinator : IRemoteControlCoordinator, 
         lock (_gate)
         {
             ThrowIfDisposed();
-            if (_current?.Phase is ControlPhase.Requested or ControlPhase.Active ||
+            if (_pendingTarget is not null || _current?.Phase is ControlPhase.Requested or ControlPhase.Active ||
                 _pendingInputRevokes.Count > 0 || _inFlightGrants.Count > 0)
                 throw new InvalidOperationException("원격 제어가 진행 중이거나 입력 회수 확인 대기 중에는 입력 엔진을 바꿀 수 없습니다.");
             _inputGate = inputGate;
@@ -106,15 +108,27 @@ public sealed class ServerRemoteControlCoordinator : IRemoteControlCoordinator, 
         {
             ThrowIfDisposed();
             WithdrawLocked(out replacedGrant);
+            _pendingTarget = target;
             expectedVersion = _version;
             previousGrants = _inFlightGrants.Values.Select(completion => completion.Task).ToArray();
         }
         CancelGrant(replacedGrant);
 
         // 우선 차단을 요청하되, 취소를 무시하는 native 허용도 종료/후속 회수까지 끝나야 전환한다.
-        await ConfirmInputRevokedAsync(cancellationToken);
-        await Task.WhenAll(previousGrants).WaitAsync(cancellationToken);
-        await ConfirmInputRevokedAsync(cancellationToken);
+        try
+        {
+            await ConfirmInputRevokedAsync(cancellationToken);
+            await Task.WhenAll(previousGrants).WaitAsync(cancellationToken);
+            await ConfirmInputRevokedAsync(cancellationToken);
+        }
+        catch
+        {
+            lock (_gate)
+            {
+                if (_version == expectedVersion) _pendingTarget = null;
+            }
+            throw;
+        }
 
         RemoteControlState requested;
         IRemoteInputGate inputGate;
@@ -122,6 +136,8 @@ public sealed class ServerRemoteControlCoordinator : IRemoteControlCoordinator, 
         TaskCompletionSource grantCompleted;
         lock (_gate)
         {
+            // 대체된 요청이 새 요청의 대기 대상을 지우지 않도록 버전을 먼저 확인한다.
+            if (_version == expectedVersion) _pendingTarget = null;
             ThrowIfDisposed();
             cancellationToken.ThrowIfCancellationRequested();
             if (_version != expectedVersion) return;
@@ -290,7 +306,8 @@ public sealed class ServerRemoteControlCoordinator : IRemoteControlCoordinator, 
         WithdrawForRegistryChange(
             current => current.Student.ConnectionId == snapshot.Connection.ConnectionId &&
                        current.PermissionRevision != snapshot.PermissionRevision,
-            "권한 변경");
+            "권한 변경",
+            pending => pending.ConnectionId == snapshot.Connection.ConnectionId);
     }
 
     /// <summary>
@@ -300,23 +317,27 @@ public sealed class ServerRemoteControlCoordinator : IRemoteControlCoordinator, 
     public void WithdrawTarget(ParticipantConnection student, string reason)
     {
         ArgumentNullException.ThrowIfNull(student);
-        WithdrawForRegistryChange(current => current.Student == student, reason);
+        WithdrawForRegistryChange(current => current.Student == student, reason, pending => pending == student);
     }
 
     private void OnConnectionRemoved(ParticipantConnection connection)
     {
         WithdrawForRegistryChange(
             current => current.Student.ConnectionId == connection.ConnectionId,
-            "연결 제거");
+            "연결 제거",
+            pending => pending.ConnectionId == connection.ConnectionId);
     }
 
-    private void WithdrawForRegistryChange(Func<RemoteControlState, bool> affectsCurrent, string reason)
+    private void WithdrawForRegistryChange(Func<RemoteControlState, bool> affectsCurrent, string reason,
+        Func<ParticipantConnection, bool>? affectsPending = null)
     {
         CancellationTokenSource? replacedGrant;
         lock (_gate)
         {
-            if (_disposed || _current?.Phase is not (ControlPhase.Requested or ControlPhase.Active) ||
-                !affectsCurrent(_current))
+            if (_disposed) return;
+            var currentMatches = _current?.Phase is ControlPhase.Requested or ControlPhase.Active && affectsCurrent(_current);
+            var pendingMatches = _pendingTarget is not null && affectsPending?.Invoke(_pendingTarget) == true;
+            if (!currentMatches && !pendingMatches)
                 return;
             WithdrawLocked(out replacedGrant);
         }
@@ -335,6 +356,7 @@ public sealed class ServerRemoteControlCoordinator : IRemoteControlCoordinator, 
     private void WithdrawLocked(out CancellationTokenSource? replacedGrant)
     {
         _version++;
+        _pendingTarget = null;
         replacedGrant = _grantCancellation;
         _grantCancellation = null;
 
