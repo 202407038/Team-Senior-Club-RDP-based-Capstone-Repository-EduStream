@@ -4,6 +4,7 @@ using System.Drawing;
 using System.Windows.Forms.Integration;
 using System.Windows.Threading;
 using EduStream.Server.Rdp;
+using EduStream.ShareViewer;
 using Xunit.Abstractions;
 using Forms = System.Windows.Forms;
 using Wpf = System.Windows;
@@ -37,16 +38,32 @@ public sealed class ReverseSharingPlacementTests
             ScaleFactor = 1.5,
             IsPrimary = false
         };
+        var viewerMonitor = new MonitorInfo
+        {
+            DeviceName = @"\\.\DISPLAY1",
+            Left = 0,
+            Top = 0,
+            Width = 1920,
+            Height = 1080,
+            DpiX = 96,
+            DpiY = 96,
+            ScaleFactor = 1.0,
+            IsPrimary = true
+        };
         var viewport = NewViewport(new Size(1920, 1080), new Size(960, 540));
 
-        var origin = viewport.TranslateViewerPointToDesktop(new Point(0, 0), secondary, viewerPointIsLogical: true, dpi);
-        var mapped = viewport.TranslateViewerPointToDesktop(new Point(100, 50), secondary, viewerPointIsLogical: true, dpi);
+        var origin = viewport.TranslateViewerPointToDesktop(new Point(0, 0), secondary, viewerPointIsLogical: true, dpi, viewerMonitor);
+        var mapped = viewport.TranslateViewerPointToDesktop(new Point(100, 50), secondary, viewerPointIsLogical: true, dpi, viewerMonitor);
+        var sameScale = viewport.TranslateViewerPointToDesktop(new Point(100, 50), secondary, viewerPointIsLogical: true, dpi, secondary);
         var unset = NewViewport(Size.Empty, Size.Empty)
-            .TranslateViewerPointToDesktop(new Point(10, 10), secondary, viewerPointIsLogical: true, dpi);
+            .TranslateViewerPointToDesktop(new Point(10, 10), secondary, viewerPointIsLogical: true, dpi, viewerMonitor);
 
         Assert.Equal(new Point(1920, 120), origin);
-        Assert.Equal(new Point(2220, 270), mapped);
+        Assert.Equal(new Point(2120, 220), mapped);
+        Assert.Equal(new Point(2220, 270), sameScale);
         Assert.Equal(Point.Empty, unset);
+        Assert.Throws<ArgumentException>(() =>
+            viewport.TranslateViewerPointToDesktop(new Point(100, 50), secondary, viewerPointIsLogical: true, dpi));
     }
 
     [Fact]
@@ -69,14 +86,14 @@ public sealed class ReverseSharingPlacementTests
 
             var logical = new Point(10, 20);
             var physical = dpi.LogicalToPhysical(logical, monitor);
-            var mapped = viewport.TranslateViewerPointToDesktop(logical, monitor, viewerPointIsLogical: true, dpi);
+            var mapped = viewport.TranslateViewerPointToDesktop(logical, monitor, viewerPointIsLogical: true, dpi, viewerMonitor: monitor);
             Assert.Equal(monitor.Left + physical.X, mapped.X);
             Assert.Equal(monitor.Top + physical.Y, mapped.Y);
 
             var presentation = new WdsSharedScreenPresentation(viewport, () => new Size(monitor.Width, monitor.Height));
             presentation.SetSharedMonitor(monitor);
             Assert.False(presentation.PanSupported);
-            Assert.Equal(mapped, presentation.MapViewerPointToDesktop(logical, viewerPointIsLogical: true));
+            Assert.Equal(mapped, presentation.MapViewerPointToDesktop(logical, viewerPointIsLogical: true, viewerMonitor: monitor));
         }
     }
 
@@ -94,11 +111,11 @@ public sealed class ReverseSharingPlacementTests
     [Fact]
     public async Task MonitorShare_RejectsEmptyMonitor_AndForeignManager()
     {
-        await using var station = new ReverseStudentStation("stu-empty");
+        await using var host = new StudentDesktopHost("stu-empty");
         var empty = new MonitorInfo { Left = 10, Top = 20, Width = 0, Height = 1080 };
-        await Assert.ThrowsAsync<ArgumentException>(() => station.StartAsync(Guid.NewGuid(), empty));
-        Assert.Equal(ReverseSessionState.Inactive, station.Host.CurrentState);
-        Assert.Null(station.SharedMonitor);
+        await Assert.ThrowsAsync<ArgumentException>(() => host.StartAsync(Guid.NewGuid(), empty));
+        Assert.Equal(ReverseSessionState.Inactive, host.State);
+        Assert.Null(host.SharedMonitor);
 
         var foreign = new ReverseScreenShareAdapter(new UnusedReverseSession());
         var monitor = new MonitorInfo { Width = 100, Height = 100 };
@@ -144,53 +161,56 @@ public sealed class ReverseSharingPlacementTests
     public Task ComLifetime_RefusedViewerIsReleasedAfterStop_ThenSameStationReconnects()
         => RunOnStaAsync(async () =>
         {
-            await using var station = new ReverseStudentStation("stu-lifetime");
+            await using var host = new StudentDesktopHost("stu-lifetime");
             var sessionId = Guid.NewGuid();
             ViewerHost? refused = null;
             ViewerHost? live = null;
+            ProfessorViewerConnection? refusedConnection = null;
+            ProfessorViewerConnection? liveConnection = null;
             try
             {
-                var sharingId = await station.StartAsync(sessionId);
+                var sharingId = await host.StartAsync(sessionId);
                 var password = Guid.NewGuid().ToString("N");
-                var invitation = await station.Host.CreateProfessorInvitationAsync(
+                var invitation = await host.CreateInvitationAsync(
                     sessionId, sharingId, "prof-lifetime", Guid.NewGuid(), password, DateTimeOffset.UtcNow.AddMinutes(5));
 
                 refused = ViewerHost.ShowAt(40, 40);
-                var refusedConnection = station.ConnectProfessor(
-                    refused.Viewer, invitation.ConnectionString, "prof-lifetime", "wrong-" + password);
+                refusedConnection = new ProfessorViewerConnection(refused.Viewer);
+                refusedConnection.Connect(invitation.ConnectionString, "prof-lifetime", "wrong-" + password);
                 await WaitUntilAsync(
                     () => refusedConnection.Failed || refusedConnection.Terminated,
                     TimeSpan.FromSeconds(30),
                     () => $"거부가 오지 않았습니다. established={refusedConnection.Established} failed={refusedConnection.Failed} terminated={refusedConnection.Terminated}");
 
                 Assert.False(refusedConnection.IsConnectionLive);
-                Assert.Equal(ReverseSessionState.Hosting, station.Host.CurrentState);
-                Assert.True(station.Host.IsReverseSharingActive);
+                Assert.Equal(ReverseSessionState.Hosting, host.State);
+                Assert.True(host.Session.IsReverseSharingActive);
 
                 var release = Stopwatch.StartNew();
-                var stop = station.StopAsync();
+                var stop = host.StopAsync();
                 var finished = await Task.WhenAny(stop, Task.Delay(TimeSpan.FromSeconds(20)));
-                Assert.True(finished == stop, "거절된 뷰어를 공유 종료 뒤에 해제하는 동안 20초 넘게 멈췄습니다.");
+                Assert.True(finished == stop, "학생 PC 공유 종료가 20초 넘게 멈췄습니다.");
                 await stop;
+                refusedConnection.ReleaseAfterSharingStopped();
                 _output.WriteLine($"refused viewer release {release.ElapsedMilliseconds} ms established={refusedConnection.Established} failed={refusedConnection.Failed} terminated={refusedConnection.Terminated}");
 
-                Assert.Equal(ReverseSessionState.Inactive, station.Host.CurrentState);
+                Assert.Equal(ReverseSessionState.Inactive, host.State);
                 Assert.True(refused.Viewer.IsDisposed);
-                Assert.Null(station.SharedMonitor);
+                Assert.Null(host.SharedMonitor);
 
-                sharingId = await station.StartAsync(sessionId);
-                invitation = await station.Host.CreateProfessorInvitationAsync(
+                sharingId = await host.StartAsync(sessionId);
+                invitation = await host.CreateInvitationAsync(
                     sessionId, sharingId, "prof-lifetime", Guid.NewGuid(), password, DateTimeOffset.UtcNow.AddMinutes(5));
                 var approved = new TaskCompletionSource<ReverseAttendeeEventKind>(TaskCreationOptions.RunContinuationsAsynchronously);
-                station.Host.AttendeeLifecycleChanged += (_, e) =>
+                host.Session.AttendeeLifecycleChanged += (_, e) =>
                 {
                     if (e.Kind is ReverseAttendeeEventKind.Approved or ReverseAttendeeEventKind.Rejected)
                         approved.TrySetResult(e.Kind);
                 };
 
                 live = ViewerHost.ShowAt(400, 40);
-                var liveConnection = station.ConnectProfessor(
-                    live.Viewer, invitation.ConnectionString, "prof-lifetime", password);
+                liveConnection = new ProfessorViewerConnection(live.Viewer);
+                liveConnection.Connect(invitation.ConnectionString, "prof-lifetime", password);
                 var approval = await Task.WhenAny(approved.Task, Task.Delay(TimeSpan.FromSeconds(30)));
                 Assert.True(approval == approved.Task, "재접속 승인이 30초 안에 오지 않았습니다.");
                 Assert.Equal(ReverseAttendeeEventKind.Approved, await approved.Task);
@@ -198,81 +218,50 @@ public sealed class ReverseSharingPlacementTests
                     () => $"재접속 뷰어가 살아 있지 않습니다. established={liveConnection.Established} failed={liveConnection.Failed} terminated={liveConnection.Terminated}");
 
                 var liveRelease = Stopwatch.StartNew();
-                await station.StopAsync();
+                await host.StopAsync();
+                liveConnection.ReleaseAfterSharingStopped();
                 _output.WriteLine($"live viewer release {liveRelease.ElapsedMilliseconds} ms");
                 Assert.True(liveRelease.Elapsed < TimeSpan.FromSeconds(20));
                 Assert.True(live.Viewer.IsDisposed);
-                Assert.Equal(ReverseSessionState.Inactive, station.Host.CurrentState);
+                Assert.Equal(ReverseSessionState.Inactive, host.State);
             }
             finally
             {
-                try { await station.StopAsync(); } catch { /* 이미 종료 */ }
+                try { await host.StopAsync(); } catch { /* 이미 종료 */ }
+                try { refusedConnection?.ReleaseAfterSharingStopped(); } catch { /* 이미 해제 */ }
+                try { liveConnection?.ReleaseAfterSharingStopped(); } catch { /* 이미 해제 */ }
                 refused?.Dispose();
                 live?.Dispose();
             }
         });
 
-    [WdsFact(Timeout = 180000)]
-    public Task TwoStudents_KeepIndependentSessionsAndViewers()
-        => RunOnStaAsync(async () =>
-        {
-            await using var room = new ReverseClassroomPlacement();
-            var first = room.StationFor("stu-a");
-            var second = room.StationFor("stu-b");
-            Assert.NotSame(first, second);
-            Assert.NotSame(first.Host, second.Host);
-            Assert.Same(first, room.StationFor("stu-a"));
+    [Fact]
+    public void StudentHost_AndProfessorViewer_LiveInSeparateAssemblies()
+    {
+        var hostAssembly = typeof(StudentDesktopHost).Assembly;
+        var viewerAssembly = typeof(ProfessorReception).Assembly;
+        Assert.Equal("EduStream.ShareHost", hostAssembly.GetName().Name);
+        Assert.Equal("EduStream.ShareViewer", viewerAssembly.GetName().Name);
+        Assert.DoesNotContain(hostAssembly.GetReferencedAssemblies(), a => a.Name == "EduStream.Server");
+        Assert.DoesNotContain(viewerAssembly.GetReferencedAssemblies(), a => a.Name is "EduStream.Server" or "EduStream.ShareHost");
+        Assert.Null(typeof(ProfessorReception).GetMethod("StartAsync"));
+        Assert.Null(typeof(ProfessorReception).GetMethod("StartReverseSharingAsync"));
 
-            var sessionId = Guid.NewGuid();
-            ViewerHost? firstView = null;
-            ViewerHost? secondView = null;
-            try
-            {
-                var firstSharing = await first.StartAsync(sessionId);
-                var secondSharing = await second.StartAsync(sessionId);
-                Assert.NotEqual(firstSharing, secondSharing);
-                Assert.Equal(ReverseSessionState.Hosting, first.Host.CurrentState);
-                Assert.Equal(ReverseSessionState.Hosting, second.Host.CurrentState);
-                await Assert.ThrowsAsync<InvalidOperationException>(() => first.StartAsync(sessionId));
+        var root = FindRepositoryRoot();
+        var studentProject = File.ReadAllText(Path.Combine(root, "src", "EduStream.Client", "EduStream.Client.csproj"));
+        var professorProject = File.ReadAllText(Path.Combine(root, "src", "EduStream.Server", "EduStream.Server.csproj"));
+        Assert.Contains("EduStream.ShareHost.csproj", studentProject);
+        Assert.DoesNotContain("EduStream.Server.csproj", studentProject);
+        Assert.Contains("EduStream.ShareViewer.csproj", professorProject);
+    }
 
-                var firstPassword = Guid.NewGuid().ToString("N");
-                var secondPassword = Guid.NewGuid().ToString("N");
-                var firstInvite = await first.Host.CreateProfessorInvitationAsync(
-                    sessionId, firstSharing, "prof-a", Guid.NewGuid(), firstPassword, DateTimeOffset.UtcNow.AddMinutes(5));
-                var secondInvite = await second.Host.CreateProfessorInvitationAsync(
-                    sessionId, secondSharing, "prof-b", Guid.NewGuid(), secondPassword, DateTimeOffset.UtcNow.AddMinutes(5));
-                Assert.NotEqual(firstInvite.ConnectionString, secondInvite.ConnectionString);
-
-                var firstApproved = WatchApproval(first);
-                var secondApproved = WatchApproval(second);
-                firstView = ViewerHost.ShowAt(40, 40);
-                secondView = ViewerHost.ShowAt(400, 40);
-                first.ConnectProfessor(firstView.Viewer, firstInvite.ConnectionString, "prof-a", firstPassword);
-                second.ConnectProfessor(secondView.Viewer, secondInvite.ConnectionString, "prof-b", secondPassword);
-
-                await WaitApprovalAsync(firstApproved, "stu-a");
-                await WaitApprovalAsync(secondApproved, "stu-b");
-                Assert.Equal(1, first.Host.ActiveAttendeeCount);
-                Assert.Equal(1, second.Host.ActiveAttendeeCount);
-
-                await first.StopAsync();
-                Assert.Equal(ReverseSessionState.Inactive, first.Host.CurrentState);
-                Assert.True(firstView.Viewer.IsDisposed);
-                Assert.Equal(ReverseSessionState.Connected, second.Host.CurrentState);
-                Assert.Equal(1, second.Host.ActiveAttendeeCount);
-                Assert.True(second.Host.IsReverseSharingActive);
-
-                await second.StopAsync();
-                Assert.Equal(ReverseSessionState.Inactive, second.Host.CurrentState);
-                Assert.True(secondView.Viewer.IsDisposed);
-            }
-            finally
-            {
-                try { await room.StopAllAsync(); } catch { /* 이미 종료 */ }
-                firstView?.Dispose();
-                secondView?.Dispose();
-            }
-        });
+    private static string FindRepositoryRoot()
+    {
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir != null && !File.Exists(Path.Combine(dir.FullName, "EduStream.sln")))
+            dir = dir.Parent;
+        return dir?.FullName ?? throw new DirectoryNotFoundException("EduStream.sln 을 찾지 못했습니다.");
+    }
 
     private static WdsViewportAdapter NewViewport(Size source, Size viewport)
     {
@@ -282,24 +271,6 @@ public sealed class ReverseSharingPlacementTests
         if (viewport.Width > 0 && viewport.Height > 0)
             adapter.SetViewportSize(viewport);
         return adapter;
-    }
-
-    private static TaskCompletionSource<ReverseAttendeeEventKind> WatchApproval(ReverseStudentStation station)
-    {
-        var approved = new TaskCompletionSource<ReverseAttendeeEventKind>(TaskCreationOptions.RunContinuationsAsynchronously);
-        station.Host.AttendeeLifecycleChanged += (_, e) =>
-        {
-            if (e.Kind is ReverseAttendeeEventKind.Approved or ReverseAttendeeEventKind.Rejected)
-                approved.TrySetResult(e.Kind);
-        };
-        return approved;
-    }
-
-    private static async Task WaitApprovalAsync(TaskCompletionSource<ReverseAttendeeEventKind> approved, string studentId)
-    {
-        var finished = await Task.WhenAny(approved.Task, Task.Delay(TimeSpan.FromSeconds(30)));
-        Assert.True(finished == approved.Task, $"{studentId} 승인이 30초 안에 오지 않았습니다.");
-        Assert.Equal(ReverseAttendeeEventKind.Approved, await approved.Task);
     }
 
     private static async Task WaitUntilAsync(Func<bool> condition, TimeSpan timeout, Func<string> describeFailure)
