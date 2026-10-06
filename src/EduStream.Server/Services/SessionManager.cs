@@ -41,6 +41,7 @@ public sealed class SessionManager
     private ParticipantConnection? _professorConnection;
     private ServerRemoteControlCoordinator? _controlCoordinator;
     private IRemoteInputGate _remoteInputGate = UnavailableRemoteInputGate.Instance;
+    private StudentRemoteInputGate? _studentInputGate;
     private RoomPasswordVerifier? _roomPassword;
     private ISessionFileCatalog? _fileCatalog;
     private SecureCollaborationListener? _secureListener;
@@ -442,6 +443,13 @@ public sealed class SessionManager
             _reverseRouter.InvitationWithdrawn += (student, _) => coordinator.WithdrawTarget(student, "역방향 화면 회수");
             if (secureChannelCertificate is not null)
             {
+                // 보호 채널이 있으면 학생 PC로 실제 입력 허용/회수를 보낸다. 별도 입력 엔진을 붙였으면 그것을 유지한다.
+                var reverseRouter = _reverseRouter;
+                _studentInputGate = new StudentRemoteInputGate(reverseRouter.ProfessorId, _participantRegistry,
+                    FindSecureChannel,
+                    student => reverseRouter.TryGetInvitation(student.ConnectionId)?.Invitation.SharingId,
+                    _logSink);
+                if (_remoteInputGate is UnavailableRemoteInputGate) coordinator.SetInputGate(_studentInputGate);
                 _secureListener = new SecureCollaborationListener(secureChannelCertificate, _logSink);
                 _secureGate = new SecureRoomGate(_secureListener, CurrentSession.SessionId, passwordVerifier, _logSink);
                 _secureGate.ConnectionClosed += OnSecureConnectionClosed;
@@ -507,6 +515,8 @@ public sealed class SessionManager
             _fileTransfers = null;
             _reverseRouter?.Dispose();
             _reverseRouter = null;
+            _studentInputGate?.Dispose();
+            _studentInputGate = null;
             _fileCatalog?.Dispose();
             _fileCatalog = null;
             secureGate = _secureGate;
@@ -561,6 +571,13 @@ public sealed class SessionManager
                     var reverse = _reverseRouter;
                     if (student is not null && reverse is not null)
                         await reverse.HandleFrameAsync(student, secure, frame);
+                    break;
+                case CollaborationMessageKind.RemoteInputResult:
+                    var inputResult = CollaborationMessageCodec.Decode<RemoteInputResultNotice>(frame, out _);
+                    var sender = _participantRegistry.TryGetConnection(clientId);
+                    var inputGate = _studentInputGate;
+                    if (sender is not null && inputGate is not null)
+                        inputGate.HandleResult(sender, inputResult);
                     break;
                 default:
                     _logSink.Write($"[Secure] 처리하지 않는 메시지 무시: kind={kind}, clientId={clientId}");
@@ -755,6 +772,12 @@ public sealed class SessionManager
             if (ReferenceEquals(bound, secure)) return clientId;
         }
         return null;
+    }
+
+    private SecureCollaborationConnection? FindSecureChannel(ParticipantConnection connection)
+    {
+        var clientId = FindClientId(connection);
+        return clientId is not null && _secureConnections.TryGetValue(clientId, out var secure) ? secure : null;
     }
 
     private string? FindClientId(ParticipantConnection connection)
