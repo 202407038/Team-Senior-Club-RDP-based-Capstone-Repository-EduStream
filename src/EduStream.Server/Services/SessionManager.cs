@@ -214,9 +214,11 @@ public sealed class SessionManager
         lock (_sessionLock)
         {
             // 공유 중지가 시작되면 서비스 참조가 먼저 비워지므로, 중지 중·중지 후 요청은 여기서 막힌다.
-            if (_rdpSharingService is null || _sharingLifetime is null || _sharingLifetime.IsCancellationRequested)
+            if (_studentInputGate is not null && GetStudentSharingForInput(target) is not null)
+                sharingToken = CancellationToken.None;
+            else if (_rdpSharingService is null || _sharingLifetime is null || _sharingLifetime.IsCancellationRequested)
                 throw new InvalidOperationException("현재 화면 공유가 시작되지 않았습니다.");
-            sharingToken = _sharingLifetime.Token;
+            else sharingToken = _sharingLifetime.Token;
         }
 
         var coordinator = _controlCoordinator;
@@ -311,6 +313,16 @@ public sealed class SessionManager
     /// 교수자 viewer는 InvitationReady/InvitationWithdrawn을, 판서 엔진은 PublishAnnotationAsync를 연결합니다.
     /// </summary>
     public ReverseCollaborationRouter? ReverseCollaboration => _reverseRouter;
+    public event Action<RemoteControlState>? ControlStateChanged;
+    public Func<ParticipantConnection, Guid?>? ConnectedStudentSharing { get; set; }
+    private Guid? GetStudentSharingForInput(ParticipantConnection student)
+    {
+        var router = _reverseRouter;
+        var invitation = router?.TryGetInvitation(student.ConnectionId);
+        if (invitation is not null) return invitation.Invitation.SharingId;
+        var connected = ConnectedStudentSharing?.Invoke(student);
+        return connected is { } sharingId ? router?.TryGetConnectedSharing(student.ConnectionId, sharingId) : null;
+    }
     /// <summary>회수 ACK 실패 시 실제 학생 WDS viewer 종료를 확인하는 연결점. 미연결/실패는 회수 완료가 아니다.</summary>
     public Func<ParticipantConnection, CancellationToken, Task<bool>>? CloseStudentViewerAsync { get; set; }
 
@@ -449,7 +461,7 @@ public sealed class SessionManager
                 var reverseRouter = _reverseRouter;
                 _studentInputGate = new StudentRemoteInputGate(reverseRouter.ProfessorId, _participantRegistry,
                     FindSecureChannel,
-                    student => reverseRouter.TryGetInvitation(student.ConnectionId)?.Invitation.SharingId,
+                    GetStudentSharingForInput,
                     _logSink, disconnectViewer: (student, token) =>
                         CloseStudentViewerAsync?.Invoke(student, token) ?? Task.FromResult(false));
                 if (_remoteInputGate is UnavailableRemoteInputGate) coordinator.SetInputGate(_studentInputGate);
@@ -633,6 +645,7 @@ public sealed class SessionManager
     /// </summary>
     private void OnControlStateChanged(RemoteControlState state)
     {
+        ControlStateChanged?.Invoke(state);
         var sequence = Interlocked.Increment(ref _controlNoticeSequence);
         var clientId = FindClientId(state.Student);
         if (clientId is null || !_secureConnections.TryGetValue(clientId, out var secure)) return;

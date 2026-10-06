@@ -132,6 +132,15 @@ public sealed class ReverseCollaborationRouter : IDisposable
         return ready;
     }
 
+    /// <summary>초대의 신규 접속 유효기간과 이미 연결된 viewer 수명을 구분한다. 실제 접속 확인된 현재 세대만 허용한다.</summary>
+    public Guid? TryGetConnectedSharing(Guid studentConnectionId, Guid confirmedSharingId)
+    {
+        ReverseInvitationDelivery? ready;
+        lock (_gate) ready = _students.TryGetValue(studentConnectionId, out var state) ? state.Ready : null;
+        return ready is not null && ready.Invitation.SharingId == confirmedSharingId && CanViewStudent(ready.Student)
+            ? confirmedSharingId : null;
+    }
+
     /// <summary>
     /// 학생 연결에서 받은 Kind 15·16을 처리합니다. 거부하면 해당 학생에게만 실패 알림(RequestId=InvitationId)을 보냅니다.
     /// </summary>
