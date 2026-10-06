@@ -49,7 +49,7 @@ public sealed class StudentRemoteInputGateTests
     }
 
     [Fact]
-    public async Task Grant_FailedResult_ThrowsReason_AndLaterRevokeSendsNothing()
+    public async Task Grant_FailedResult_StillRequiresConfirmedRevokeForPossiblePartialApply()
     {
         using var rig = new Rig();
         var alice = rig.Join("alice");
@@ -62,8 +62,11 @@ public sealed class StudentRemoteInputGateTests
             RemoteInputAction.Grant, false, CollaborationError.UnsupportedCapability));
 
         Assert.Equal(CollaborationError.UnsupportedCapability, (await Assert.ThrowsAsync<CollaborationException>(() => grant)).Code);
-        await rig.Gate.RevokeAsync(state.Revoke(), CancellationToken.None);
-        Assert.Single(rig.Channel(alice).Frames);
+        var revoke = rig.Gate.RevokeAsync(state.Revoke(), CancellationToken.None);
+        var revokeCommand = (await rig.CommandsAsync(alice, 2))[1];
+        Assert.False(revoke.IsCompleted);
+        rig.Gate.HandleResult(alice, Applied(revokeCommand));
+        await revoke;
     }
 
     [Fact]
@@ -168,7 +171,7 @@ public sealed class StudentRemoteInputGateTests
     }
 
     [Fact]
-    public async Task StudentDisconnected_PendingGrantFails_PendingRevokeSucceeds_LaterRevokeSucceeds()
+    public async Task StudentDisconnected_DoesNotInventAppliedRevokeResult()
     {
         using var rig = new Rig();
         var alice = rig.Join("alice");
@@ -190,9 +193,9 @@ public sealed class StudentRemoteInputGateTests
         rig.Disconnect("bob");
 
         Assert.Equal(CollaborationError.StaleConnection, (await Assert.ThrowsAsync<CollaborationException>(() => aliceGrant)).Code);
-        await bobRevoke;
-        // 끊긴 학생 앱은 공유 호스트를 닫으므로 이후 회수는 보내지 않고 성공한다.
-        await rig.Gate.RevokeAsync(aliceState.Revoke(), CancellationToken.None);
+        await Assert.ThrowsAsync<CollaborationException>(() => bobRevoke);
+        // 보호 채널과 WDS 연결은 별개다. 닫힘 확인이 없으면 이후 회수도 실패를 유지한다.
+        await Assert.ThrowsAsync<CollaborationException>(() => rig.Gate.RevokeAsync(aliceState.Revoke(), CancellationToken.None));
         Assert.Single(rig.Channel(alice).Frames);
     }
 
@@ -215,18 +218,63 @@ public sealed class StudentRemoteInputGateTests
     private static RemoteInputResultNotice Applied(RemoteInputCommandNotice command) =>
         new(command.CommandId, command.SessionId, command.Action, true, null);
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task DisconnectedRevoke_RequiresActualViewerCloseConfirmation(bool closed)
+    {
+        var closeCalls = 0;
+        using var rig = new Rig(disconnectViewer: (_, _) => { closeCalls++; return Task.FromResult(closed); });
+        var alice = rig.Join("alice");
+        rig.Share(alice);
+        var state = rig.Request(alice);
+        var grant = rig.Gate.GrantAsync(state, CancellationToken.None);
+        rig.Gate.HandleResult(alice, Applied(await rig.NextCommandAsync(alice)));
+        await grant;
+        rig.Disconnect("alice");
+        if (closed)
+        {
+            await rig.Gate.RevokeAsync(state.Revoke(), CancellationToken.None);
+            await rig.Gate.RevokeAsync(state.Revoke(), CancellationToken.None);
+            Assert.Equal(1, closeCalls);
+        }
+        else
+        {
+            await Assert.ThrowsAsync<CollaborationException>(() => rig.Gate.RevokeAsync(state.Revoke(), CancellationToken.None));
+            await Assert.ThrowsAsync<CollaborationException>(() => rig.Gate.RevokeAsync(state.Revoke(), CancellationToken.None));
+            Assert.Equal(2, closeCalls); // 실패한 회수는 다음 시도까지 기록을 유지한다.
+        }
+    }
+
+    [Fact]
+    public async Task RevokeTimeout_ClosesViewerOnlyAfterAckTimeout()
+    {
+        var closed = false;
+        using var rig = new Rig(TimeSpan.FromMilliseconds(100), (_, _) => { closed = true; return Task.FromResult(true); });
+        var alice = rig.Join("alice");
+        rig.Share(alice);
+        var state = rig.Request(alice);
+        var grant = rig.Gate.GrantAsync(state, CancellationToken.None);
+        rig.Gate.HandleResult(alice, Applied(await rig.NextCommandAsync(alice)));
+        await grant;
+        var revoke = rig.Gate.RevokeAsync(state.Revoke(), CancellationToken.None);
+        Assert.False(closed);
+        await revoke;
+        Assert.True(closed);
+    }
+
     private sealed class Rig : IDisposable
     {
         private readonly ConcurrentDictionary<Guid, FakeChannel> _channels = new();
         private readonly ConcurrentDictionary<Guid, Guid> _sharings = new();
 
-        public Rig(TimeSpan? timeout = null)
+        public Rig(TimeSpan? timeout = null, Func<ParticipantConnection, CancellationToken, Task<bool>>? disconnectViewer = null)
         {
             Professor = new ParticipantConnection(SessionId, Guid.NewGuid(), Guid.NewGuid(), ParticipantRole.Professor);
             Gate = new StudentRemoteInputGate(ProfessorId, Registry,
                 student => Registry.TryResolve(student.ConnectionId) is null ? null : Channel(student),
                 student => _sharings.TryGetValue(student.ConnectionId, out var sharing) ? sharing : null,
-                new InMemoryLogSink(), timeout);
+                new InMemoryLogSink(), timeout, disconnectViewer);
         }
 
         public Guid SessionId { get; } = Guid.NewGuid();
