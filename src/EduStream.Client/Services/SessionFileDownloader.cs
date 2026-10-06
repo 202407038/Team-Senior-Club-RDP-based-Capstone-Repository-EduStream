@@ -41,7 +41,11 @@ public sealed class SessionFileDownloader : ISessionFileDownloader
         try
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var directory = Path.GetFullPath(_directory.GetPath());
+            var suppliedDirectory = _directory.GetPath();
+            // Known Folder 조회 실패/잘못된 공급자를 현재 작업 폴더 저장으로 바꾸지 않습니다.
+            if (string.IsNullOrWhiteSpace(suppliedDirectory) || !Path.IsPathFullyQualified(suppliedDirectory))
+                throw new IOException("다운로드 폴더의 절대 경로를 확인할 수 없습니다.");
+            var directory = Path.GetFullPath(suppliedDirectory);
             Directory.CreateDirectory(directory);
             temporary = Path.Combine(directory, ".edustream-" + Guid.NewGuid().ToString("N") + ".partial");
             await using (var output = new FileStream(temporary, FileMode.CreateNew, FileAccess.Write,
