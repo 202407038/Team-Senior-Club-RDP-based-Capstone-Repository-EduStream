@@ -268,6 +268,9 @@ public sealed class StudentReverseShareServiceTests
         public Guid InvitationId { get; private set; }
         public string? Password { get; private set; }
         public bool Disposed { get; private set; }
+        public int ActiveViewerCount { get; set; }
+        public long ConnectionRevision { get; set; }
+        public Exception? DisposeFailure { get; set; }
 
         public Task<Guid> StartAsync(Guid sessionId, CancellationToken cancellationToken = default)
         {
@@ -297,6 +300,7 @@ public sealed class StudentReverseShareServiceTests
 
         public ValueTask DisposeAsync()
         {
+            if (DisposeFailure is not null) throw DisposeFailure;
             Disposed = true;
             return ValueTask.CompletedTask;
         }
