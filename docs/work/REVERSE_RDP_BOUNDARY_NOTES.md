@@ -55,7 +55,7 @@
 - 정방향 `RdpInvitationPacket`에 `ProfessorId`/`StudentId`를 추가하거나 `ViewOnly`를 풀지 마세요. 정방향 보기 전용 보장이 깨집니다.
 
 ### 2번 (Server 서비스 / 정책)
-- 학생 → 교수자 방향의 초대 전달 경로가 아직 없습니다. E2E는 JSON 왕복만 검증합니다.
+- 2026-10-06 #83으로 학생 → 교수자 초대/비밀 및 판서 인증 라우팅·복원이 main에 제공됐습니다. #82 호스트/뷰어 라이브러리와 실제 앱 수명·표시·학생 PC 제어를 연결하는 작업은 남습니다. 아래 예제는 API 접점이며 실제 다른 PC 전달까지 완성한 코드가 아닙니다.
 - `IRemoteInputGate` 구현체는 3번이 `ReverseWdsRemoteInputGate`로 제공했습니다. 2번은 자신의 정책/서비스 연결을 구현합니다. 아래는 연결 예제이며 UI 바인딩은 5번, 실제 학생 호스트/뷰어 기술 배치와 수명은 3번이 담당합니다.
   ```
   var gate = new ReverseWdsRemoteInputGate(
