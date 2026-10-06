@@ -106,8 +106,17 @@ public sealed class RdpViewerService : IRdpViewerService
                     _status = _status.Connected(invitation.ConnectionId);
                     Publish();
                 };
-                viewer.OnConnectionFailed += (_, _) => Fail(generation, RdpFailureReason.HostUnavailable);
-                viewer.OnConnectionTerminated += (_, _) => Fail(generation, RdpFailureReason.NetworkInterrupted);
+                viewer.OnConnectionFailed += (_, _) =>
+                {
+                    _log?.Write("[RDP] 네이티브 연결 실패 이벤트");
+                    Fail(generation, RdpFailureReason.HostUnavailable);
+                };
+                viewer.OnConnectionTerminated += (_, e) =>
+                {
+                    // 비밀번호·초대 문자열 없이 원인 코드만 남긴다.
+                    _log?.Write($"[RDP] 네이티브 연결 종료: reason=0x{e.discReason:X8}, extended=0x{e.extendedInfo:X8}");
+                    Fail(generation, RdpFailureReason.NetworkInterrupted);
+                };
                 viewer.OnError += (_, _) => Fail(generation, RdpFailureReason.Unknown);
                 ((ISupportInitialize)viewer).BeginInit();
                 _surface = new ViewerZoomSurface();
