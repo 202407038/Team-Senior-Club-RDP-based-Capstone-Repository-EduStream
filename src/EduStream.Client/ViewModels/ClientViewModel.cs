@@ -50,6 +50,8 @@ public sealed class ClientViewModel : ObservableObject
     private volatile bool _sessionEnded;
     private SessionFileRequestClient? _fileClient;
     private ReverseCollaborationClient? _reverseClient;
+    private StudentReverseShareService? _reverseShare;
+    private Func<Task> _reverseShareCleanup = () => Task.CompletedTask;
     // 참가 요청을 보낸 뒤 서버의 참가 승인(SessionJoined)을 기다리는 시도. 승인·거부·끊김·시간 초과 중 먼저 온 결과로 끝난다.
     private enum JoinAckResult { Joined, Rejected, Disconnected, TimedOut }
     private TaskCompletionSource<JoinAckResult>? _pendingJoinAck;
@@ -1392,12 +1394,19 @@ public sealed class ClientViewModel : ObservableObject
 
     private void AttachStudentStatus(SecureSessionChannel secure)
     {
+        StopReverseShare(Interlocked.Exchange(ref _reverseShare, null));
+        var previousCleanup = _reverseShareCleanup;
         var statusClient = new StudentStatusClient(secure.SessionId, secure.Connection, _logSink);
         statusClient.StatusChanged += status => RunOnUiThread(() => ApplyStudentStatus(status));
         var fileClient = new SessionFileRequestClient(secure.SessionId, secure.Connection, new SessionFileDownloader(), _logSink);
         fileClient.CatalogChanged += catalog => RunOnUiThread(() => ApplyFileCatalog(catalog));
         var reverseClient = new ReverseCollaborationClient(secure.SessionId, secure.Connection, _logSink);
         statusClient.RoomChanged += reverseClient.ApplyRoom;
+        // 서버가 확정한 보기 허용과 교수자/본인 연결이 정해진 뒤에만 이 PC의 화면 공유를 연다(초기 표시값으로 시작하지 않음).
+        var reverseShare = new StudentReverseShareService(reverseClient, _logSink,
+            beforeStart: previousCleanup);
+        reverseShare.SharingChanged += (_, message) => RunOnUiThread(() => ChatMessages.Add(ChatLine.System(message)));
+        statusClient.RoomChanged += _ => reverseShare.UpdateAsync(statusClient.Status.AllowViewing);
         secure.FrameReceived += frame =>
         {
             try
@@ -1443,6 +1452,7 @@ public sealed class ClientViewModel : ObservableObject
         _statusClient = statusClient;
         _fileClient = fileClient;
         _reverseClient = reverseClient;
+        _reverseShare = reverseShare;
         _permissionNoticeShown = false;
         RunOnUiThread(() => ApplyStudentStatus(StudentStatus.Initial));
     }
@@ -1451,6 +1461,7 @@ public sealed class ClientViewModel : ObservableObject
     {
         _statusClient = null;
         _reverseClient = null;
+        StopReverseShare(Interlocked.Exchange(ref _reverseShare, null));
         // 진행 중인 다운로드는 임시 파일을 지우고 실패로 끝난다.
         Interlocked.Exchange(ref _fileClient, null)?.ConnectionClosed();
         RunOnUiThread(() =>
@@ -1458,6 +1469,26 @@ public sealed class ClientViewModel : ObservableObject
             ApplyStudentStatus(StudentStatus.Initial);
             SessionFiles.Clear();
         });
+    }
+
+    /// <summary>이전 연결의 역방향 공유는 새 연결과 섞이지 않도록 닫는다. 정리 실패는 서비스가 로그로 남긴다.</summary>
+    private void StopReverseShare(StudentReverseShareService? share)
+    {
+        if (share is null) return;
+        var previous = _reverseShareCleanup;
+        // 세대별로 이전 정리만 기다린다. 자기 자신의 Dispose를 기다리는 순환 대기를 만들지 않는다.
+        _reverseShareCleanup = async () =>
+        {
+            await previous();
+            await share.DisposeAsync();
+        };
+        _ = ObserveReverseCleanupAsync(_reverseShareCleanup);
+    }
+
+    private async Task ObserveReverseCleanupAsync(Func<Task> cleanup)
+    {
+        try { await cleanup(); }
+        catch (Exception ex) { _logSink.Write("[Reverse] 이전 연결 공유 종료 재시도 필요: " + ex.GetType().Name); }
     }
 
     /// <summary>목록이 바뀌어도 받는 중인 항목의 진행 표시는 유지하고, 사라진 파일만 내립니다.</summary>
@@ -1536,6 +1567,7 @@ public sealed class ClientViewModel : ObservableObject
         if (statusClient is null) return;
         try
         {
+            if (_reverseShare is { } share) await share.SetLocalViewingAllowedAsync(allowViewing);
             await statusClient.SetPermissionsAsync(allowViewing, allowControl);
         }
         catch (Exception ex)
