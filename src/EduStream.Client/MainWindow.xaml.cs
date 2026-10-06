@@ -9,6 +9,7 @@ namespace EduStream.Client;
 public partial class MainWindow : Window
 {
     private bool _shutdownComplete;
+    private bool _shutdownInProgress;
     public MainWindow()
     {
         InitializeComponent();
@@ -54,9 +55,22 @@ public partial class MainWindow : Window
         {
             if (_shutdownComplete) return;
             e.Cancel = true;
+            if (_shutdownInProgress) return;
+            _shutdownInProgress = true;
             IsEnabled = false;
-            try { if (DataContext is ClientViewModel model) await model.ShutdownAsync(); }
-            finally { _shutdownComplete = true; Close(); }
+            try
+            {
+                if (DataContext is ClientViewModel model) await model.ShutdownAsync();
+                _shutdownComplete = true;
+                Close();
+            }
+            catch (Exception ex)
+            {
+                System.Windows.MessageBox.Show(this,
+                    "화면 공유 연결을 완전히 종료하지 못했습니다. 다시 닫기를 눌러 재시도해 주세요.\n" + ex.Message,
+                    "EduStream 종료 확인", MessageBoxButton.OK, MessageBoxImage.Warning);
+            }
+            finally { _shutdownInProgress = false; if (!_shutdownComplete) IsEnabled = true; }
         };
     }
 

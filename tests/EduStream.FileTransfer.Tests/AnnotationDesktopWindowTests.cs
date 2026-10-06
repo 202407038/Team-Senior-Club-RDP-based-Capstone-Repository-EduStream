@@ -1,5 +1,6 @@
 using System.Reflection;
 using System.Windows;
+using System.Windows.Threading;
 using EduStream.Server;
 using EduStream.Server.ViewModels;
 
@@ -15,6 +16,10 @@ public sealed class AnnotationDesktopWindowTests
         var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var thread = new Thread(() =>
         {
+            var dispatcher = Dispatcher.CurrentDispatcher;
+            Exception? failure = null;
+            dispatcher.BeginInvoke((Action)(() =>
+            {
             try
             {
                 var monitor = new EduStream.ShareHost.MonitorInfo
@@ -31,10 +36,28 @@ public sealed class AnnotationDesktopWindowTests
                     drawing.SetDrawing(false);
                     Assert.Equal(false, enabled);
                     Assert.True(overlay.IsVisible); // OFF는 레이어를 없애는 동작이 아니다.
+                    // 제목 표시줄 X/Alt+F4는 Closing 경로로 들어간다.
+                    for (var attempt = 0; attempt < 3; attempt++)
+                    {
+                        drawing.SetDrawing(true);
+                        Assert.True(toolbar.IsVisible);
+                        toolbar.Close();
+                        Assert.False(toolbar.IsVisible);
+                        Assert.True(overlay.IsVisible);
+                        Assert.Equal(false, enabled);
+                    }
+                    drawing.SetDrawing(true);
+                    Assert.True(toolbar.IsVisible);
+                    Assert.Equal(true, enabled);
                 }
-                completion.TrySetResult();
             }
-            catch (Exception error) { completion.TrySetException(error); }
+            catch (Exception error) { failure = error; }
+            finally { dispatcher.BeginInvokeShutdown(DispatcherPriority.Background); }
+            }));
+            // 실제 창의 메시지 큐와 Dispatcher 자원을 종료한 뒤 다음 native 검사를 시작한다.
+            Dispatcher.Run();
+            if (failure is null) completion.TrySetResult();
+            else completion.TrySetException(failure);
         }) { IsBackground = true };
         thread.SetApartmentState(ApartmentState.STA);
         thread.Start();

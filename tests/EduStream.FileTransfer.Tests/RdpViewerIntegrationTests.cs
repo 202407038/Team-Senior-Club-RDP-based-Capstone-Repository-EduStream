@@ -92,6 +92,41 @@ public sealed class RdpViewerIntegrationTests
         await vm.ShutdownAsync();
     }
 
+    [Fact]
+    public async Task RevocationClearsConnectedBanner_WithoutLeavingRoom()
+    {
+        var viewer = new FakeViewer();
+        var vm = new ClientViewModel(viewer);
+        try
+        {
+            var session = Guid.NewGuid();
+            var connection = Guid.NewGuid();
+            Set(vm, "_currentRdpConnectionId", connection);
+            Set(vm, "_rdpSessionId", session);
+            Set(vm, "_rdpParticipant", "Alice");
+            typeof(ClientViewModel).GetProperty("IsConnected")!.SetValue(vm, true);
+            var invitation = new RdpInvitationPacket
+            {
+                SessionId = session, ParticipantId = "Alice", ConnectionId = connection,
+                SharingId = Guid.NewGuid(), InvitationId = Guid.NewGuid(), ConnectionString = "test",
+                DataLength = 4, ExpiresAt = DateTimeOffset.UtcNow.AddMinutes(1), ViewOnly = true
+            };
+            await (Task)Invoke(vm, "HandleRdpInvitationAsync", invitation)!;
+            viewer.Emit(RdpConnectionStatus.Create(session, "Alice").BeginConnect(connection).Connected(connection));
+            Assert.Equal("교수자 화면에 연결되었습니다.", vm.StatusMessage);
+            await (Task)Invoke(vm, "HandleRdpInvitationRevokedAsync", new RdpInvitationRevokedPacket
+            {
+                SessionId = session, ParticipantId = "Alice", ConnectionId = connection,
+                InvitationId = invitation.InvitationId, Reason = RdpFailureReason.SessionClosed
+            })!;
+            Assert.True(vm.IsConnected);
+            Assert.False(vm.IsRdpActive);
+            Assert.Contains("다시 시작되면 자동으로 연결", vm.StatusMessage);
+            Assert.True(viewer.DisconnectCalls > 0);
+        }
+        finally { await vm.ShutdownAsync(); }
+    }
+
     private static readonly BindingFlags Private = BindingFlags.Instance | BindingFlags.NonPublic;
     private static object? Invoke(object target, string name, params object[] args) => target.GetType().GetMethod(name, Private)!.Invoke(target, args);
     private static void Set(object target, string name, object value) => target.GetType().GetField(name, Private)!.SetValue(target, value);
