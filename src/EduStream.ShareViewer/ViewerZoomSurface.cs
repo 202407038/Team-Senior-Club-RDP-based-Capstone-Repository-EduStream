@@ -10,12 +10,14 @@ public sealed class ViewerZoomSurface : Panel, IMessageFilter
     private Control? _viewer;
     private Size _source = new(16, 9);
     private double _zoom = 1;
+    private bool _arranging;
     public bool WheelZoomEnabled { get; set; } = true;
     public double Zoom => _zoom;
     public ViewerZoomSurface()
     {
-        Dock = DockStyle.Fill; BackColor = Color.Black; AutoScroll = true;
+        Dock = DockStyle.Fill; BackColor = Color.Black; AutoScroll = false;
         Application.AddMessageFilter(this);
+        System.Windows.Interop.ComponentDispatcher.ThreadFilterMessage += FilterWpfMessage;
         Resize += (_, _) => ArrangeViewer();
     }
     public void Attach(Control viewer)
@@ -44,27 +46,61 @@ public sealed class ViewerZoomSurface : Panel, IMessageFilter
     }
     private void ArrangeViewer()
     {
-        if (_viewer is null || _viewer.IsDisposed) return;
-        var fitted = FitSize(_source, ClientSize, _zoom);
-        if (fitted.IsEmpty) return;
-        AutoScrollMinSize = _zoom > 1 ? fitted : Size.Empty;
-        _viewer.Bounds = new Rectangle(
-            Math.Max(0, (ClientSize.Width - fitted.Width) / 2) + AutoScrollPosition.X,
-            Math.Max(0, (ClientSize.Height - fitted.Height) / 2) + AutoScrollPosition.Y,
-            fitted.Width, fitted.Height);
+        if (_arranging || _viewer is null || _viewer.IsDisposed) return;
+        _arranging = true;
+        try
+        {
+            // 이 표면은 테두리 없는 Panel이다. 스크롤바가 차지한 ClientSize를 기준으로
+            // 다시 확대하면 Resize마다 배율이 줄어든다. 바깥 표면 크기를 기준으로 고정한다.
+            var fitted = FitSize(_source, Size, _zoom);
+            if (fitted.IsEmpty) return;
+            if (_zoom == 1)
+            {
+                AutoScrollPosition = Point.Empty;
+                AutoScrollMinSize = Size.Empty;
+                AutoScroll = false;
+            }
+            else
+            {
+                AutoScroll = true;
+                AutoScrollMinSize = fitted;
+            }
+            _viewer.Bounds = new Rectangle(
+                Math.Max(0, (ClientSize.Width - fitted.Width) / 2) + AutoScrollPosition.X,
+                Math.Max(0, (ClientSize.Height - fitted.Height) / 2) + AutoScrollPosition.Y,
+                fitted.Width, fitted.Height);
+        }
+        finally { _arranging = false; }
     }
     public bool PreFilterMessage(ref Message m)
     {
-        if (!WheelZoomEnabled || m.Msg != 0x020A || _viewer is null || !_viewer.IsHandleCreated ||
-            (m.HWnd != _viewer.Handle && !IsChild(_viewer.Handle, m.HWnd))) return false;
+        if (!WheelZoomEnabled || m.Msg != 0x020A || !Visible || !IsHandleCreated ||
+            _viewer is null || !_viewer.IsHandleCreated || m.HWnd == IntPtr.Zero) return false;
+        // WPF 호스트에 포커스가 있으면 휠 메시지는 뷰어가 아닌 부모 창으로 온다.
+        // 같은 창 안에서 실제 포인터가 가리키는 표시 표면만 확대한다.
+        if (GetAncestor(m.HWnd, 2) != GetAncestor(Handle, 2)) return false;
+        var position = new Point(unchecked((short)((long)m.LParam & 0xffff)),
+            unchecked((short)(((long)m.LParam >> 16) & 0xffff)));
+        if (!RectangleToScreen(ClientRectangle).Contains(position)) return false;
         var delta = unchecked((short)(((long)m.WParam >> 16) & 0xffff));
+        if (delta == 0) return false;
         SetZoom(_zoom * Math.Pow(1.15, delta / 120.0));
         return true;
     }
     protected override void Dispose(bool disposing)
     {
-        if (disposing) Application.RemoveMessageFilter(this);
+        if (disposing)
+        {
+            Application.RemoveMessageFilter(this);
+            System.Windows.Interop.ComponentDispatcher.ThreadFilterMessage -= FilterWpfMessage;
+        }
         base.Dispose(disposing);
     }
-    [DllImport("user32.dll")] private static extern bool IsChild(IntPtr parent, IntPtr child);
+    private void FilterWpfMessage(ref System.Windows.Interop.MSG message, ref bool handled)
+    {
+        if (handled) return;
+        var formsMessage = Message.Create(message.hwnd, message.message, message.wParam, message.lParam);
+        if (PreFilterMessage(ref formsMessage)) handled = true;
+    }
+    [DllImport("user32.dll")] private static extern IntPtr GetAncestor(IntPtr window, uint flags);
 }
