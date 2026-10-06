@@ -20,7 +20,7 @@ public sealed class AnnotationToolsViewModelTests
         Assert.Equal(7, model.StrokeWidth);
         Assert.Equal(new[] { "Tool", "Color", "Placement", "StrokeWidth" }, changed);
         Assert.False(model.CanExecuteDrawing);
-        Assert.Contains("엔진 연결 대기", model.EngineStatus);
+        Assert.Contains("공유 시작 후", model.EngineStatus);
     }
 
     [Theory]

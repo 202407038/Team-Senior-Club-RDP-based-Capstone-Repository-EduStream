@@ -20,6 +20,10 @@
     <UseWPF>true</UseWPF>
     <UseWindowsForms>true</UseWindowsForms>
   </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="AxRDPCOMAPILib"><HintPath>..\EduStream.Client\libs\AxRDPCOMAPILib.dll</HintPath></Reference>
+    <Reference Include="RDPCOMAPILib"><HintPath>..\EduStream.Client\libs\RDPCOMAPILib.dll</HintPath></Reference>
+  </ItemGroup>
 
 
 
