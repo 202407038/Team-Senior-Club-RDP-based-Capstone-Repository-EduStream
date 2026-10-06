@@ -111,6 +111,40 @@ public sealed class RdpSharingContractTests
         Assert.Equal(3, mock.Invitations.AuthenticationStrings.Distinct().Count());
     }
 
+    [Fact]
+    public async Task FailedStopPreservesSessionUntilCloseRetrySucceeds()
+    {
+        var mock = new PasswordSession { CloseFailuresRemaining = 1 };
+        await using var service = new RdpSharingService(new InMemoryLogSink(), () => mock);
+        await service.StartAsync(Guid.NewGuid());
+        await Assert.ThrowsAsync<AggregateException>(() => service.StopAsync());
+        await Assert.ThrowsAsync<InvalidOperationException>(() => service.StartAsync(Guid.NewGuid()));
+        await service.StopAsync();
+        Assert.Equal(2, mock.CloseAttempts);
+        Assert.NotEqual(Guid.Empty, await service.StartAsync(Guid.NewGuid()));
+        await service.StopAsync();
+        Assert.Equal(3, mock.CloseAttempts);
+    }
+
+    [Fact]
+    public async Task FailedDisposeKeepsDispatcherAvailableForCleanupRetry()
+    {
+        var mock = new PasswordSession { CloseFailuresRemaining = 1 };
+        var service = new RdpSharingService(new InMemoryLogSink(), () => mock);
+        try
+        {
+            await service.StartAsync(Guid.NewGuid());
+            await Assert.ThrowsAsync<AggregateException>(() => service.DisposeAsync().AsTask());
+            Assert.False(mock.Dispatcher!.HasShutdownStarted);
+            await service.DisposeAsync();
+            Assert.Equal(2, mock.CloseAttempts);
+            Assert.True(mock.Dispatcher.HasShutdownFinished);
+            await service.DisposeAsync();
+            Assert.Equal(2, mock.CloseAttempts);
+        }
+        finally { await service.DisposeAsync(); }
+    }
+
     public sealed class PasswordSession
     {
         // 🎯 [피드백 5번 연동] 가짜 엔진에도 ColorDepth 속성을 추가하여 예외 방지!
@@ -118,7 +152,17 @@ public sealed class RdpSharingContractTests
 
         public System.Windows.Threading.Dispatcher? Dispatcher { get; private set; }
         public void Open() { Dispatcher = System.Windows.Threading.Dispatcher.CurrentDispatcher; }
-        public void Close() { }
+        public int CloseFailuresRemaining { get; set; }
+        public int CloseAttempts { get; private set; }
+        public void Close()
+        {
+            CloseAttempts++;
+            if (CloseFailuresRemaining > 0)
+            {
+                CloseFailuresRemaining--;
+                throw new InvalidOperationException("Injected native close failure");
+            }
+        }
         public PasswordInvitations Invitations { get; } = new();
     }
 
