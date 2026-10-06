@@ -22,6 +22,55 @@ public sealed class ReverseViewingControlRevokeTests
     private static readonly TimeSpan Wait = TimeSpan.FromSeconds(5);
 
     [Fact]
+    public async Task TargetWithdrawnWhilePreviousRevokeWaits_DoesNotGrantPendingTarget()
+    {
+        await using var rig = await Rig.OpenAsync();
+        await rig.JoinAsync("Alice");
+        await rig.JoinAsync("Bob");
+        var bob = rig.Connection("Bob");
+        await rig.DeliverInvitationAsync(bob, Guid.NewGuid());
+        await rig.SessionManager.RequestControlAsync("Alice");
+        rig.Gate.HoldRevoke = true;
+        var request = rig.SessionManager.RequestControlAsync("Bob");
+        try
+        {
+            await rig.Gate.RevokeEntered.Task.WaitAsync(Wait);
+            // 새 초대가 도착하며 이전 화면이 회수되는 실제 라우터 이벤트를 통과시킨다.
+            await rig.DeliverInvitationAsync(bob, Guid.NewGuid());
+        }
+        finally { rig.Gate.ResumeRevoke.TrySetResult(); }
+        await request.WaitAsync(Wait);
+        Assert.DoesNotContain(rig.Gate.Granted, state => state.Student == bob);
+        Assert.Equal(ControlPhase.Revoked, rig.SessionManager.CurrentControlState!.Phase);
+        // 공유 복귀만으로 재승인하지 않지만 명시적으로 새로 요청하면 가능하다.
+        await rig.SessionManager.RequestControlAsync("Bob");
+        Assert.Equal(bob, rig.SessionManager.CurrentControlState!.Student);
+        Assert.Equal(ControlPhase.Active, rig.SessionManager.CurrentControlState.Phase);
+    }
+
+    [Fact]
+    public async Task OtherTargetWithdrawnWhilePreviousRevokeWaits_PreservesPendingTarget()
+    {
+        await using var rig = await Rig.OpenAsync();
+        await rig.JoinAsync("Alice");
+        await rig.JoinAsync("Bob");
+        var alice = rig.Connection("Alice");
+        await rig.DeliverInvitationAsync(alice, Guid.NewGuid());
+        await rig.SessionManager.RequestControlAsync("Alice");
+        rig.Gate.HoldRevoke = true;
+        var request = rig.SessionManager.RequestControlAsync("Bob");
+        try
+        {
+            await rig.Gate.RevokeEntered.Task.WaitAsync(Wait);
+            await rig.DeliverInvitationAsync(alice, Guid.NewGuid());
+        }
+        finally { rig.Gate.ResumeRevoke.TrySetResult(); }
+        await request.WaitAsync(Wait);
+        Assert.Equal(rig.Connection("Bob"), rig.SessionManager.CurrentControlState!.Student);
+        Assert.Equal(ControlPhase.Active, rig.SessionManager.CurrentControlState.Phase);
+    }
+
+    [Fact]
     public async Task StudentRestartsReverseSharing_RevokesControl_AndDoesNotRegrant()
     {
         await using var rig = await Rig.OpenAsync();
@@ -103,6 +152,9 @@ public sealed class ReverseViewingControlRevokeTests
     {
         public ConcurrentQueue<RemoteControlState> Granted { get; } = new();
         public ConcurrentQueue<RemoteControlState> Revoked { get; } = new();
+        public bool HoldRevoke { get; set; }
+        public TaskCompletionSource RevokeEntered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource ResumeRevoke { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
         public Task GrantAsync(RemoteControlState requested, CancellationToken cancellationToken)
         {
@@ -110,10 +162,14 @@ public sealed class ReverseViewingControlRevokeTests
             return Task.CompletedTask;
         }
 
-        public Task RevokeAsync(RemoteControlState revoked, CancellationToken cancellationToken)
+        public async Task RevokeAsync(RemoteControlState revoked, CancellationToken cancellationToken)
         {
             Revoked.Enqueue(revoked);
-            return Task.CompletedTask;
+            if (HoldRevoke)
+            {
+                RevokeEntered.TrySetResult();
+                await ResumeRevoke.Task.WaitAsync(cancellationToken);
+            }
         }
     }
 
