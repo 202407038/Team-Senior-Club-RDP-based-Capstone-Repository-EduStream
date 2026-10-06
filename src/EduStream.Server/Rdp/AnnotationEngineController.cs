@@ -73,10 +73,14 @@ public sealed class AnnotationEngineController : IAnnotationController
     /// <summary>UI는 포인터 좌표만 넘긴다. 선택 도구·색·굵기는 엔진 어댑터가 적용한다.</summary>
     public Task SubmitStrokeAsync(string participantId, System.Collections.Generic.IReadOnlyList<Point> points,
         CancellationToken cancellationToken = default)
+        => _engine.ReceiveStrokeAsync(CreateStroke(participantId, points), cancellationToken);
+
+    /// <summary>미리보기는 이력에 추가하지 않고 확정 시와 같은 그리기 설정을 사용한다.</summary>
+    public AnnotationStroke CreateStroke(string participantId, System.Collections.Generic.IReadOnlyList<Point> points)
     {
         ArgumentNullException.ThrowIfNull(points);
         if (points.Count < 2) throw new ArgumentException("판서에는 점이 두 개 이상 필요합니다.", nameof(points));
-        return _engine.ReceiveStrokeAsync(new AnnotationStroke
+        return new AnnotationStroke
         {
             ParticipantId = participantId,
             Tool = CurrentTool switch
@@ -91,7 +95,7 @@ public sealed class AnnotationEngineController : IAnnotationController
             Color = new AnnotationColor((byte)(_argb >> 16), (byte)(_argb >> 8), (byte)_argb, CurrentAlpha),
             StrokeWidth = CurrentStrokeWidth,
             Points = System.Linq.Enumerable.ToArray(points)
-        }, cancellationToken);
+        };
     }
 }
 
