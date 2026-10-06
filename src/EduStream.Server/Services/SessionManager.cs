@@ -41,6 +41,7 @@ public sealed class SessionManager
     private ParticipantConnection? _professorConnection;
     private ServerRemoteControlCoordinator? _controlCoordinator;
     private IRemoteInputGate _remoteInputGate = UnavailableRemoteInputGate.Instance;
+    private StudentRemoteInputGate? _studentInputGate;
     private RoomPasswordVerifier? _roomPassword;
     private ISessionFileCatalog? _fileCatalog;
     private SecureCollaborationListener? _secureListener;
@@ -310,6 +311,8 @@ public sealed class SessionManager
     /// 교수자 viewer는 InvitationReady/InvitationWithdrawn을, 판서 엔진은 PublishAnnotationAsync를 연결합니다.
     /// </summary>
     public ReverseCollaborationRouter? ReverseCollaboration => _reverseRouter;
+    /// <summary>회수 ACK 실패 시 실제 학생 WDS viewer 종료를 확인하는 연결점. 미연결/실패는 회수 완료가 아니다.</summary>
+    public Func<ParticipantConnection, CancellationToken, Task<bool>>? CloseStudentViewerAsync { get; set; }
 
     /// <summary>
     /// 교수자 판서 엔진이 낸 JSON을 현재 화면 공유의 판서로 학생 전원에게 보냅니다. 공유가 없으면 SessionClosed로 실패합니다.
@@ -442,6 +445,14 @@ public sealed class SessionManager
             _reverseRouter.InvitationWithdrawn += (student, _) => coordinator.WithdrawTarget(student, "역방향 화면 회수");
             if (secureChannelCertificate is not null)
             {
+                // 보호 채널이 있으면 학생 PC로 실제 입력 허용/회수를 보낸다. 별도 입력 엔진을 붙였으면 그것을 유지한다.
+                var reverseRouter = _reverseRouter;
+                _studentInputGate = new StudentRemoteInputGate(reverseRouter.ProfessorId, _participantRegistry,
+                    FindSecureChannel,
+                    student => reverseRouter.TryGetInvitation(student.ConnectionId)?.Invitation.SharingId,
+                    _logSink, disconnectViewer: (student, token) =>
+                        CloseStudentViewerAsync?.Invoke(student, token) ?? Task.FromResult(false));
+                if (_remoteInputGate is UnavailableRemoteInputGate) coordinator.SetInputGate(_studentInputGate);
                 _secureListener = new SecureCollaborationListener(secureChannelCertificate, _logSink);
                 _secureGate = new SecureRoomGate(_secureListener, CurrentSession.SessionId, passwordVerifier, _logSink);
                 _secureGate.ConnectionClosed += OnSecureConnectionClosed;
@@ -507,6 +518,8 @@ public sealed class SessionManager
             _fileTransfers = null;
             _reverseRouter?.Dispose();
             _reverseRouter = null;
+            _studentInputGate?.Dispose();
+            _studentInputGate = null;
             _fileCatalog?.Dispose();
             _fileCatalog = null;
             secureGate = _secureGate;
@@ -545,7 +558,7 @@ public sealed class SessionManager
                 case CollaborationMessageKind.PermissionChange:
                     var request = CollaborationMessageCodec.Decode<PermissionChangeRequest>(frame, out _);
                     if (_clientDisplayNames.TryGetValue(clientId, out var displayName))
-                        await UpdatePermissionsForClientAsync(clientId, displayName, request.AllowViewing, request.AllowControl);
+                        _ = ApplyPermissionsWithoutBlockingReceiveAsync(clientId, displayName, request);
                     break;
                 case CollaborationMessageKind.FileRequest:
                 case CollaborationMessageKind.FileCancel:
@@ -562,6 +575,13 @@ public sealed class SessionManager
                     if (student is not null && reverse is not null)
                         await reverse.HandleFrameAsync(student, secure, frame);
                     break;
+                case CollaborationMessageKind.RemoteInputResult:
+                    var inputResult = CollaborationMessageCodec.Decode<RemoteInputResultNotice>(frame, out _);
+                    var sender = _participantRegistry.TryGetConnection(clientId);
+                    var inputGate = _studentInputGate;
+                    if (sender is not null && inputGate is not null)
+                        inputGate.HandleResult(sender, inputResult);
+                    break;
                 default:
                     _logSink.Write($"[Secure] 처리하지 않는 메시지 무시: kind={kind}, clientId={clientId}");
                     break;
@@ -571,6 +591,13 @@ public sealed class SessionManager
         {
             _logSink.Write($"[Secure] 잘못된 메시지 무시: clientId={clientId}, 사유={ex.Code}");
         }
+    }
+
+    private async Task ApplyPermissionsWithoutBlockingReceiveAsync(string clientId, string displayName, PermissionChangeRequest request)
+    {
+        // 권한 반영은 첫 await 전에 수행한다. ACK도 같은 수신 루프에 도착하므로 회수 대기는 루프 밖에서 한다.
+        try { await UpdatePermissionsForClientAsync(clientId, displayName, request.AllowViewing, request.AllowControl); }
+        catch (Exception ex) { _logSink.Write("[Control] 허용 변경/회수 확인 실패: " + ex.GetType().Name); }
     }
 
     /// <summary>
@@ -755,6 +782,12 @@ public sealed class SessionManager
             if (ReferenceEquals(bound, secure)) return clientId;
         }
         return null;
+    }
+
+    private SecureCollaborationConnection? FindSecureChannel(ParticipantConnection connection)
+    {
+        var clientId = FindClientId(connection);
+        return clientId is not null && _secureConnections.TryGetValue(clientId, out var secure) ? secure : null;
     }
 
     private string? FindClientId(ParticipantConnection connection)
