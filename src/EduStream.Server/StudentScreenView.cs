@@ -33,6 +33,7 @@ public sealed class StudentScreenView : System.Windows.Controls.UserControl
     private bool _subscribed;
     private bool _stopped;
     private string? _viewerKey;
+    private Guid? _viewerInvitationId;
     private EduStream.Core.Collaboration.ParticipantConnection? _viewerStudent;
     private readonly HashSet<EduStream.Core.Collaboration.ParticipantConnection> _releasedConnections = new();
     private string StudentName => DataContext as string ?? string.Empty;
@@ -47,7 +48,7 @@ public sealed class StudentScreenView : System.Windows.Controls.UserControl
         large.Click += (_, _) => Enlarge();
         _control.Click += async (_, _) => await ChangeControlAsync();
         var retry = new System.Windows.Controls.Button { Content = "다시 연결", Margin = new Thickness(3) };
-        retry.Click += async (_, _) => { if (_delivery is { } d) await ConnectAsync(d); };
+        retry.Click += async (_, _) => { if (_delivery is { } d) await ConnectAsync(d, retry: true); };
         actions.Children.Add(large); actions.Children.Add(_control); actions.Children.Add(retry);
         var fit = new System.Windows.Controls.Button { Content = "화면 맞춤", Margin = new Thickness(3) };
         fit.Click += (_, _) => _surface?.Fit(); actions.Children.Add(fit);
@@ -140,7 +141,7 @@ public sealed class StudentScreenView : System.Windows.Controls.UserControl
         }));
     }
 
-    private async Task ConnectAsync(ReverseInvitationDelivery delivery)
+    private async Task ConnectAsync(ReverseInvitationDelivery delivery, bool retry = false)
     {
         // 공유 종료 과정에서 입력 회수가 이 뷰어의 수명 잠금을 필요로 할 수 있다.
         // 잠금을 잡은 채 공유 종료를 기다리면 서로 기다리는 교착 상태가 된다.
@@ -149,6 +150,9 @@ public sealed class StudentScreenView : System.Windows.Controls.UserControl
         try
         {
             if (_stopped || _router?.TryGetInvitation(delivery.Student.ConnectionId) != delivery) return;
+            // Loaded/IsVisibleChanged/초대 알림이 겹쳐도 연결 중인 동일 뷰어를 끊지 않는다.
+            if (!retry && _viewerStudent == delivery.Student && _viewerInvitationId == delivery.Invitation.InvitationId &&
+                _connection is { Failed: false, Terminated: false } && _viewer is { IsDisposed: false }) return;
             // 창 캡처 제외를 WDS가 보장하지 않으므로 학생 화면을 열기 전에 정방향 공유를 중지한다.
             if (Model.IsRdpSharing) throw new InvalidOperationException("교수자 공유 종료 확인이 필요합니다.");
             await ReleaseAsync();
@@ -171,6 +175,7 @@ public sealed class StudentScreenView : System.Windows.Controls.UserControl
             _status.Text = "학생 화면 연결 중";
             _viewerKey = delivery.Invitation.StudentId;
             _viewerStudent = delivery.Student;
+            _viewerInvitationId = delivery.Invitation.InvitationId;
             _releasedConnections.Remove(delivery.Student);
             _connection = _reception.Watch(delivery.Invitation.StudentId, viewer,
                 delivery.Invitation.ConnectionString, delivery.Invitation.ProfessorId, delivery.Secret.Password);
@@ -219,7 +224,7 @@ public sealed class StudentScreenView : System.Windows.Controls.UserControl
     {
         if (_viewerKey is not null) await _reception.ReleaseAsync(_viewerKey);
         if (_viewerStudent is not null) _releasedConnections.Add(_viewerStudent);
-        _viewerKey = null; _viewerStudent = null;
+        _viewerKey = null; _viewerStudent = null; _viewerInvitationId = null;
         _surface?.Dispose(); _surface = null;
         _host.Child = null; _viewer = null; _connection = null; _control.IsEnabled = false;
     }
