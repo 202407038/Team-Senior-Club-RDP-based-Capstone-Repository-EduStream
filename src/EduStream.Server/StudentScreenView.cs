@@ -38,7 +38,8 @@ public sealed class StudentScreenView : System.Windows.Controls.UserControl
     private bool _stopped;
     private string? _viewerKey;
     private Guid? _viewerInvitationId;
-    private readonly HashSet<Guid> _usedInvitations = new();
+    private readonly HashSet<Guid> _connectedInvitations = new();
+    private string? _captureWarning;
     private EduStream.Core.Collaboration.ParticipantConnection? _viewerStudent;
     private readonly HashSet<EduStream.Core.Collaboration.ParticipantConnection> _releasedConnections = new();
     private string StudentName => DataContext as string ?? string.Empty;
@@ -157,7 +158,11 @@ public sealed class StudentScreenView : System.Windows.Controls.UserControl
         }));
     }
 
-    private void SetStatus(string text) { _status.Text = text; _cardStatus.Text = text; }
+    private void SetStatus(string text)
+    {
+        var message = _captureWarning is null ? text : text + " · " + _captureWarning;
+        _status.Text = message; _cardStatus.Text = message;
+    }
 
     private void Withdrawn(EduStream.Core.Collaboration.ParticipantConnection student, Guid invitationId)
     {
@@ -167,20 +172,30 @@ public sealed class StudentScreenView : System.Windows.Controls.UserControl
         }));
     }
 
-    private async Task ConnectAsync(ReverseInvitationDelivery delivery, bool retry = false)
+    private async Task ConnectAsync(ReverseInvitationDelivery delivery)
     {
         await _lifecycle.WaitAsync();
         try
         {
             if (_stopped || _router?.TryGetInvitation(delivery.Student.ConnectionId) != delivery) return;
             // Loaded/IsVisibleChanged/초대 알림이 겹쳐도 연결 중인 동일 뷰어를 끊지 않는다.
-            if (!retry && _viewerStudent == delivery.Student && _viewerInvitationId == delivery.Invitation.InvitationId &&
+            if (_viewerStudent == delivery.Student && _viewerInvitationId == delivery.Invitation.InvitationId &&
                 _connection is { Failed: false, Terminated: false } && _viewer is { IsDisposed: false }) return;
             await ReleaseAsync();
             _delivery = delivery;
+            if (_connectedInvitations.Contains(delivery.Invitation.InvitationId) || delivery.Invitation.ExpiresAt <= DateTimeOffset.UtcNow)
+            {
+                SetStatus("학생 쪽 새 초대를 기다리는 중입니다. 초대 갱신 후 자동으로 연결됩니다.");
+                return;
+            }
             var viewer = new AxRDPViewer();
             _viewer = viewer;
-            viewer.OnConnectionEstablished += (_, _) => { SetStatus("학생 화면 연결됨 · 보기 전용"); _control.IsEnabled = true; };
+            viewer.OnConnectionEstablished += (_, _) =>
+            {
+                if (!ReferenceEquals(_viewer, viewer)) return;
+                _connectedInvitations.Add(delivery.Invitation.InvitationId);
+                SetStatus("학생 화면 연결됨 · 보기 전용"); _control.IsEnabled = true;
+            };
             viewer.OnConnectionFailed += (_, _) => { SetStatus("학생 화면 연결 실패 · 새로고침을 눌러 주세요."); _control.IsEnabled = false; };
             viewer.OnConnectionTerminated += (_, _) => { SetStatus("학생 화면 연결 종료"); _control.IsEnabled = false; };
             ((ISupportInitialize)viewer).BeginInit();
@@ -197,7 +212,6 @@ public sealed class StudentScreenView : System.Windows.Controls.UserControl
             _viewerKey = delivery.Invitation.StudentId;
             _viewerStudent = delivery.Student;
             _viewerInvitationId = delivery.Invitation.InvitationId;
-            _usedInvitations.Add(delivery.Invitation.InvitationId);
             _releasedConnections.Remove(delivery.Student);
             _connection = _reception.Watch(delivery.Invitation.StudentId, viewer,
                 delivery.Invitation.ConnectionString, delivery.Invitation.ProfessorId, delivery.Secret.Password);
@@ -238,7 +252,16 @@ public sealed class StudentScreenView : System.Windows.Controls.UserControl
             Title = StudentName + " · 학생 화면", Width = 1000, Height = 700, Content = _windowLayout,
             Background = (System.Windows.Media.Brush)System.Windows.Application.Current.FindResource("BrushBgPrimary"),
         };
-        window.SourceInitialized += (_, _) => CaptureExclusion.Apply(window);
+        window.SourceInitialized += (_, _) =>
+        {
+            _captureWarning = CaptureExclusion.TryApply(window, out var error) ? null
+                : "캡처 제외 실패: 학생 화면이 재공유될 수 있습니다. 이 창을 공유하지 않는 모니터로 옮겨 주세요.";
+            if (_captureWarning is not null)
+            {
+                Model.ReportCaptureExclusionFailure(error);
+                SetStatus("학생 화면 보기");
+            }
+        };
         window.Closed += (_, _) =>
         {
             // 창을 닫으면 뷰어를 카드 미리보기로 되돌린다. 연결은 끊지 않는다.
@@ -255,21 +278,27 @@ public sealed class StudentScreenView : System.Windows.Controls.UserControl
 
     /// <summary>
     /// 새로고침: 연결이 살아 있으면 화면만 다시 그리고 연결은 건드리지 않는다.
-    /// 끊긴 상태면 다시 붙는다. 학생 앱은 한 번 쓴 초대를 다시 쓰지 않고 몇 초 안에 새 초대를 보내므로,
-    /// 이미 쓴 초대로 붙으면 흰 화면만 뜬다. 그래서 새 초대가 오면 그것으로 연결한다.
+    /// 최초 연결 실패는 같은 유효 초대로 재시도한다. 연결 성공 뒤 종료된 초대는 재사용하지 않는다.
+    /// 연결 중인 뷰어는 유지하며, 학생 측 새 초대 도착은 Ready에서 처리한다.
     /// </summary>
     private async Task RefreshViewAsync()
     {
-        if (_connection?.IsConnectionLive == true) { _viewer?.Refresh(); _surface?.Fit(); return; }
         if (_stopped || _delivery is null) { SetStatus("학생 화면 공유 연결 대기"); return; }
         var latest = _router?.TryGetInvitation(_delivery.Student.ConnectionId) ?? _delivery;
-        if (_usedInvitations.Contains(latest.Invitation.InvitationId))
+        var sameInvitation = _viewerInvitationId == latest.Invitation.InvitationId;
+        var action = StudentViewerRetryPolicy.Decide(
+            sameInvitation && _connection?.IsConnectionLive == true,
+            sameInvitation && _connection is { Established: false, Failed: false, Terminated: false } && _viewer is { IsDisposed: false },
+            _connectedInvitations.Contains(latest.Invitation.InvitationId), latest.Invitation.ExpiresAt <= DateTimeOffset.UtcNow);
+        if (action == StudentViewerRetryAction.Refresh) { _viewer?.Refresh(); _surface?.Fit(); return; }
+        if (action == StudentViewerRetryAction.KeepConnecting) { SetStatus("학생 화면 연결 중입니다."); return; }
+        if (action == StudentViewerRetryAction.WaitForInvitation)
         {
-            _delivery = latest;
-            SetStatus("학생 쪽 새 초대를 기다리는 중입니다. 몇 초 안에 자동으로 연결됩니다.");
+            // ConnectAsync가 기존 연결을 정리하고 소비/만료 초대의 재사용을 차단한다.
+            await ConnectAsync(latest);
             return;
         }
-        await ConnectAsync(latest, retry: true);
+        await ConnectAsync(latest);
     }
 
     private async Task ClearAsync()

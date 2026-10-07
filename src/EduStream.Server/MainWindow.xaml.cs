@@ -18,7 +18,10 @@ public partial class MainWindow : Window
     {
         InitializeComponent();
         _viewModel = new ServerViewModel();
-        SourceInitialized += (_, _) => CaptureExclusion.Apply(this);
+        SourceInitialized += (_, _) =>
+        {
+            if (!CaptureExclusion.TryApply(this, out var error)) _viewModel.ReportCaptureExclusionFailure(error);
+        };
         _viewModel.SessionManager.ConnectedStudentSharing = student => Dispatcher.Invoke(() =>
             _studentViews.Select(view => view.ConnectedSharingFor(student)).FirstOrDefault(id => id.HasValue));
         _viewModel.SessionManager.CloseStudentViewerAsync = async (student, token) =>

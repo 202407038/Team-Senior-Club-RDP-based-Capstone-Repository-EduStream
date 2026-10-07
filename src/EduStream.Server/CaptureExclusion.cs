@@ -12,12 +12,24 @@ internal static class CaptureExclusion
 {
     private const uint WdaExcludeFromCapture = 0x11;
 
-    [DllImport("user32.dll")]
+    [DllImport("user32.dll", SetLastError = true)]
     private static extern bool SetWindowDisplayAffinity(IntPtr hwnd, uint affinity);
 
-    public static void Apply(Window window)
+    public static bool TryApply(Window window, out int error)
     {
         var handle = new WindowInteropHelper(window).Handle;
-        if (handle != IntPtr.Zero) SetWindowDisplayAffinity(handle, WdaExcludeFromCapture);
+        return TryApply(handle, OperatingSystem.IsWindowsVersionAtLeast(10, 0, 19041),
+            SetWindowDisplayAffinity, Marshal.GetLastWin32Error, out error);
+    }
+
+    internal static bool TryApply(IntPtr handle, bool supported, Func<IntPtr, uint, bool> apply,
+        Func<int> lastError, out int error)
+    {
+        error = 0;
+        if (handle == IntPtr.Zero) { error = 1400; return false; }
+        if (!supported) { error = 50; return false; }
+        if (apply(handle, WdaExcludeFromCapture)) return true;
+        error = lastError();
+        return false;
     }
 }

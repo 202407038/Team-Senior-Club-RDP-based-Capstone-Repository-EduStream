@@ -259,6 +259,13 @@ public sealed class ServerViewModel : ObservableObject
         private set => SetProperty(ref _statusMessage, value);
     }
 
+    public void ReportCaptureExclusionFailure(int error)
+    {
+        StatusMessage = "캡처 제외 설정에 실패했습니다. 학생 화면을 공유하지 않는 모니터에 배치해 주세요.";
+        IsStatusError = true;
+        _logSink.Write($"[Capture] 캡처 제외 실패: Win32={error}. 교수자 화면 공유는 유지합니다.");
+    }
+
     public bool IsStatusError
     {
         get => _isStatusError;
