@@ -58,7 +58,6 @@ public sealed class ClientViewModel : ObservableObject
     private enum JoinAckResult { Joined, Rejected, Disconnected, TimedOut }
     private TaskCompletionSource<JoinAckResult>? _pendingJoinAck;
     private StudentStatus _studentStatus = StudentStatus.Initial;
-    private bool _permissionNoticeShown;
     private RdpInvitationPacket? _activeRdpInvitation;
     // 초대(TCP)와 비밀번호(보호 채널)는 도착 순서가 정해져 있지 않아, 둘이 같은 초대로 짝지어질 때까지 보관한다.
     private readonly object _rdpAutoConnectLock = new();
@@ -371,6 +370,25 @@ public sealed class ClientViewModel : ObservableObject
 
     /// <summary>교수자가 등록한 강의 파일 목록입니다. 항목의 다운로드 버튼으로 골라 받습니다(U08).</summary>
     public ObservableCollection<SessionFileItem> SessionFiles { get; } = [];
+
+    private bool _isFilesPanelExpanded;
+    private bool _hasNewFiles;
+    private readonly HashSet<(Guid FileId, long Revision)> _unseenFiles = new();
+    /// <summary>파일 패널이 펼쳐져 있는지. 펼치면 새 파일 표시(NEW!)를 지운다.</summary>
+    public bool IsFilesPanelExpanded
+    {
+        get => _isFilesPanelExpanded;
+        set
+        {
+            if (SetProperty(ref _isFilesPanelExpanded, value) && value)
+            {
+                _unseenFiles.Clear();
+                HasNewFiles = false;
+            }
+        }
+    }
+    /// <summary>패널이 닫혀 있는 동안 새 강의 파일이 등록됐으면 true입니다.</summary>
+    public bool HasNewFiles { get => _hasNewFiles; private set => SetProperty(ref _hasNewFiles, value); }
 
     public RelayCommand JoinSessionCommand { get; }
 
@@ -1479,7 +1497,6 @@ public sealed class ClientViewModel : ObservableObject
         _statusClient = statusClient;
         _fileClient = fileClient;
         _reverseClient = reverseClient;
-        _permissionNoticeShown = false;
         RunOnUiThread(() => ApplyStudentStatus(StudentStatus.Initial));
     }
 
@@ -1493,6 +1510,8 @@ public sealed class ClientViewModel : ObservableObject
         {
             ApplyStudentStatus(StudentStatus.Initial);
             SessionFiles.Clear();
+            _unseenFiles.Clear();
+            HasNewFiles = false;
         });
     }
 
@@ -1513,11 +1532,17 @@ public sealed class ClientViewModel : ObservableObject
         var next = catalog.Files.Select(file => (file.FileId, file.Revision)).ToHashSet();
         foreach (var item in SessionFiles.Where(item => !next.Contains((item.File.FileId, item.File.Revision))).ToArray())
             SessionFiles.Remove(item);
+        // 삭제/교체된 파일은 미확인 목록에서도 내려 실제 남은 파일만 NEW로 표시한다.
+        _unseenFiles.IntersectWith(next);
         foreach (var file in catalog.Files)
         {
             if (!current.ContainsKey((file.FileId, file.Revision)))
+            {
                 SessionFiles.Add(new SessionFileItem(file, DownloadSessionFileAsync));
+                if (!IsFilesPanelExpanded) _unseenFiles.Add((file.FileId, file.Revision));
+            }
         }
+        HasNewFiles = _unseenFiles.Count > 0;
     }
 
     private async Task DownloadSessionFileAsync(SessionFileItem item)
@@ -1566,12 +1591,6 @@ public sealed class ClientViewModel : ObservableObject
         StopControlNowCommand.RaiseCanExecuteChanged();
 
         if (_statusClient is null) return;
-        if (!_permissionNoticeShown && status.AllowControl)
-        {
-            // U07: 제어 허용이 기본 ON이라는 사실을 참가 시 알린다.
-            _permissionNoticeShown = true;
-            ChatMessages.Add(ChatLine.System("교수자 원격 제어 허용이 켜져 있습니다. 접속 상태 옆에서 언제든 끌 수 있습니다."));
-        }
         if (wasUnderControl != status.UnderControl)
             ChatMessages.Add(ChatLine.System(status.UnderControl ? "교수자가 원격 제어를 시작했습니다." : "원격 제어가 끝났습니다."));
     }
