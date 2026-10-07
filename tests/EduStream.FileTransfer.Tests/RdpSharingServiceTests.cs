@@ -200,11 +200,11 @@ public class RdpSharingServiceTests : IAsyncLifetime
         var sharingId = await _service.StartAsync(sessionId);
         var expiresAt = DateTimeOffset.UtcNow.AddMinutes(5);
 
-        await _service.CreateInvitationAsync(sessionId, sharingId, "student1", Guid.NewGuid(), "pass1", expiresAt);
-        await _service.CreateInvitationAsync(sessionId, sharingId, "student2", Guid.NewGuid(), "pass2", expiresAt);
+        for (var i = 1; i <= RdpSharingService.MaxInvitations; i++)
+            await _service.CreateInvitationAsync(sessionId, sharingId, $"student{i}", Guid.NewGuid(), $"pass{i}", expiresAt);
 
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            _service.CreateInvitationAsync(sessionId, sharingId, "student3", Guid.NewGuid(), "pass3", expiresAt));
+            _service.CreateInvitationAsync(sessionId, sharingId, "overflow", Guid.NewGuid(), "passX", expiresAt));
     }
 
     [Fact]

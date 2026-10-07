@@ -23,7 +23,6 @@ public sealed class ServerViewModel : ObservableObject
 {
     public AnnotationToolsViewModel AnnotationTools { get; } = new();
     public SessionManager SessionManager => _sessionManager;
-    public Func<bool>? HasVisibleStudentScreen { get; set; }
     public IReadOnlyList<EduStream.ShareHost.MonitorInfo> Monitors { get; } = new EduStream.ShareHost.MonitorDpiAdapter().GetMonitors();
     private EduStream.ShareHost.MonitorInfo? _selectedMonitor;
     public EduStream.ShareHost.MonitorInfo? SelectedMonitor
@@ -45,7 +44,7 @@ public sealed class ServerViewModel : ObservableObject
     private readonly FileDistributor _fileDistributor;
     private string _sessionName = "EduStream 강의";
     private int _port = 5000;
-    private string _chatInput = "Announcement: today's lecture note has been uploaded.";
+    private string _chatInput = string.Empty;
     private string _latestScreenStatus = "Screen sharing has not started yet.";
     private string _rdpStatus = "WDS 화면 공유 대기 중";
     private string _selectedFilePath = string.Empty;
@@ -258,6 +257,13 @@ public sealed class ServerViewModel : ObservableObject
     {
         get => _statusMessage;
         private set => SetProperty(ref _statusMessage, value);
+    }
+
+    public void ReportCaptureExclusionFailure(int error)
+    {
+        StatusMessage = "캡처 제외 설정에 실패했습니다. 학생 화면을 공유하지 않는 모니터에 배치해 주세요.";
+        IsStatusError = true;
+        _logSink.Write($"[Capture] 캡처 제외 실패: Win32={error}. 교수자 화면 공유는 유지합니다.");
     }
 
     public bool IsStatusError
@@ -558,11 +564,6 @@ public sealed class ServerViewModel : ObservableObject
 
     public async Task StartRdpShareAsync()
     {
-        if (HasVisibleStudentScreen?.Invoke() == true)
-        {
-            RdpStatus = "학생 화면이 다른 학생에게 다시 공유되지 않도록 학생 보기 창과 펼친 목록을 닫은 뒤 공유를 시작해 주세요.";
-            return;
-        }
         if (!IsSessionOpen || IsBusy || IsRdpBusy || IsRdpSharing || _shuttingDown) return;
         IsRdpBusy = true;
         await _rdpLifecycle.WaitAsync();
@@ -575,7 +576,7 @@ public sealed class ServerViewModel : ObservableObject
             var sharingId = await _rdpSharing.StartAsync(sessionId);
             _sessionManager.AttachRdpSharing(_rdpSharing, sharingId);
             IsRdpSharing = true;
-            RdpStatus = "WDS 공유 중 · 선택한 모니터를 학생에게 자동 공유합니다. (현재 검증 기준 학생 2명)";
+            RdpStatus = $"WDS 공유 중 · 선택한 모니터를 학생에게 자동 공유합니다. (최대 {RdpSharingService.MaxInvitations}명 · 2명 초과는 검증 전)";
         }
         catch (Exception ex)
         {
