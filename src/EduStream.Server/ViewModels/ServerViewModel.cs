@@ -23,7 +23,6 @@ public sealed class ServerViewModel : ObservableObject
 {
     public AnnotationToolsViewModel AnnotationTools { get; } = new();
     public SessionManager SessionManager => _sessionManager;
-    public Func<bool>? HasVisibleStudentScreen { get; set; }
     public IReadOnlyList<EduStream.ShareHost.MonitorInfo> Monitors { get; } = new EduStream.ShareHost.MonitorDpiAdapter().GetMonitors();
     private EduStream.ShareHost.MonitorInfo? _selectedMonitor;
     public EduStream.ShareHost.MonitorInfo? SelectedMonitor
@@ -558,11 +557,6 @@ public sealed class ServerViewModel : ObservableObject
 
     public async Task StartRdpShareAsync()
     {
-        if (HasVisibleStudentScreen?.Invoke() == true)
-        {
-            RdpStatus = "학생 화면이 다른 학생에게 다시 공유되지 않도록 학생 보기 창과 펼친 목록을 닫은 뒤 공유를 시작해 주세요.";
-            return;
-        }
         if (!IsSessionOpen || IsBusy || IsRdpBusy || IsRdpSharing || _shuttingDown) return;
         IsRdpBusy = true;
         await _rdpLifecycle.WaitAsync();

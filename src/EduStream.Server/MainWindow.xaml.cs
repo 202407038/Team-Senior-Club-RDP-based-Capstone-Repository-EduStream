@@ -18,7 +18,7 @@ public partial class MainWindow : Window
     {
         InitializeComponent();
         _viewModel = new ServerViewModel();
-        _viewModel.HasVisibleStudentScreen = () => _studentViews.Any(view => view.ShowingStudentScreen);
+        SourceInitialized += (_, _) => CaptureExclusion.Apply(this);
         _viewModel.SessionManager.ConnectedStudentSharing = student => Dispatcher.Invoke(() =>
             _studentViews.Select(view => view.ConnectedSharingFor(student)).FirstOrDefault(id => id.HasValue));
         _viewModel.SessionManager.CloseStudentViewerAsync = async (student, token) =>

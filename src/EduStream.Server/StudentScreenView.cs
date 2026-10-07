@@ -22,7 +22,7 @@ public sealed class StudentScreenView : System.Windows.Controls.UserControl
     private readonly StackPanel _root = new();
     private readonly ProfessorReception _reception = new();
     private readonly SemaphoreSlim _lifecycle = new(1, 1);
-    private readonly System.Windows.Controls.Button _control = new() { Content = "원격 제어", IsEnabled = false, Margin = new Thickness(3) };
+    private readonly System.Windows.Controls.Button _control = ThemedButton("원격 제어", enabled: false);
     private ReverseCollaborationRouter? _router;
     private ReverseInvitationDelivery? _delivery;
     private AxRDPViewer? _viewer;
@@ -37,30 +37,32 @@ public sealed class StudentScreenView : System.Windows.Controls.UserControl
     private EduStream.Core.Collaboration.ParticipantConnection? _viewerStudent;
     private readonly HashSet<EduStream.Core.Collaboration.ParticipantConnection> _releasedConnections = new();
     private string StudentName => DataContext as string ?? string.Empty;
-    public bool ShowingStudentScreen => !_stopped && (IsVisible || _large?.IsVisible == true) && _viewer is not null;
     public Guid? ConnectedSharingFor(EduStream.Core.Collaboration.ParticipantConnection student) =>
         _viewerStudent == student && _connection?.IsConnectionLive == true ? _delivery?.Invitation.SharingId : null;
+
+    private static System.Windows.Controls.Button ThemedButton(string text, bool enabled = true) => new()
+    {
+        Content = text, IsEnabled = enabled, Margin = new Thickness(3), Padding = new Thickness(10, 5, 10, 5), FontSize = 12,
+        Style = (Style)System.Windows.Application.Current.FindResource("GhostButton"),
+    };
 
     public StudentScreenView()
     {
         var actions = new WrapPanel();
-        var large = new System.Windows.Controls.Button { Content = "크게 보기", Margin = new Thickness(3) };
+        var large = ThemedButton("크게 보기");
         large.Click += (_, _) => Enlarge();
         _control.Click += async (_, _) => await ChangeControlAsync();
-        var retry = new System.Windows.Controls.Button { Content = "다시 연결", Margin = new Thickness(3) };
+        var retry = ThemedButton("다시 연결");
         retry.Click += async (_, _) => { if (_delivery is { } d) await ConnectAsync(d, retry: true); };
         actions.Children.Add(large); actions.Children.Add(_control); actions.Children.Add(retry);
-        var fit = new System.Windows.Controls.Button { Content = "화면 맞춤", Margin = new Thickness(3) };
+        var fit = ThemedButton("화면 맞춤");
         fit.Click += (_, _) => _surface?.Fit(); actions.Children.Add(fit);
         _root.Children.Add(_status); _root.Children.Add(_host); _root.Children.Add(actions);
         Content = _root;
         IsVisibleChanged += async (_, _) =>
         {
-            if (!_stopped && IsVisible && _delivery is { } delivery)
-            {
-                if (Model.IsRdpSharing) await Model.StopRdpShareAsync();
-                if (_connection?.IsConnectionLive != true) await ConnectAsync(delivery);
-            }
+            if (!_stopped && IsVisible && _delivery is { } delivery && _connection?.IsConnectionLive != true)
+                await ConnectAsync(delivery);
         };
         Loaded += (_, _) =>
         {
@@ -143,9 +145,6 @@ public sealed class StudentScreenView : System.Windows.Controls.UserControl
 
     private async Task ConnectAsync(ReverseInvitationDelivery delivery, bool retry = false)
     {
-        // 공유 종료 과정에서 입력 회수가 이 뷰어의 수명 잠금을 필요로 할 수 있다.
-        // 잠금을 잡은 채 공유 종료를 기다리면 서로 기다리는 교착 상태가 된다.
-        if (Model.IsRdpSharing) await Model.StopRdpShareAsync();
         await _lifecycle.WaitAsync();
         try
         {
@@ -153,8 +152,6 @@ public sealed class StudentScreenView : System.Windows.Controls.UserControl
             // Loaded/IsVisibleChanged/초대 알림이 겹쳐도 연결 중인 동일 뷰어를 끊지 않는다.
             if (!retry && _viewerStudent == delivery.Student && _viewerInvitationId == delivery.Invitation.InvitationId &&
                 _connection is { Failed: false, Terminated: false } && _viewer is { IsDisposed: false }) return;
-            // 창 캡처 제외를 WDS가 보장하지 않으므로 학생 화면을 열기 전에 정방향 공유를 중지한다.
-            if (Model.IsRdpSharing) throw new InvalidOperationException("교수자 공유 종료 확인이 필요합니다.");
             await ReleaseAsync();
             _delivery = delivery;
             var viewer = new AxRDPViewer();
@@ -209,6 +206,7 @@ public sealed class StudentScreenView : System.Windows.Controls.UserControl
         _root.Children.Remove(_host);
         _host.Height = double.NaN;
         _large = new Window { Title = StudentName + " · 학생 화면", Width = 1000, Height = 700, Content = _host, Background = Brushes.Black };
+        _large.SourceInitialized += (_, _) => CaptureExclusion.Apply(_large);
         _large.Closed += (_, _) => { _large.Content = null; _large = null; _host.Height = 180; _root.Children.Insert(1, _host); };
         _large.Show();
     }
