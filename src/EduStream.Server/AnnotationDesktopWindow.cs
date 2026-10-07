@@ -35,6 +35,7 @@ public sealed class AnnotationDesktopWindow : IDisposable
     private readonly Dictionary<string, ToggleButton> _colorButtons = new();
     private readonly Button _placementButton = new();
     private bool _drawing;
+    private bool _toolArmed;
     private bool _busy;
     private bool _disposed;
     public event Action<bool>? DrawingChanged;
@@ -72,7 +73,7 @@ public sealed class AnnotationDesktopWindow : IDisposable
         _toolbar.PreviewKeyDown += (_, e) => { if (e.Key == Key.Escape) { SetDrawing(false); e.Handled = true; } };
         _layer.Canvas.MouseLeftButtonDown += (_, e) =>
         {
-            if (!_drawing || _busy) return;
+            if (!_drawing || !_toolArmed || _busy) return;
             if (!_engine.CurrentState.IsVisible)
             {
                 _status.Text = "판서가 숨겨져 있습니다. 숨김 / 표시를 눌러 표시한 뒤 그려 주세요.";
@@ -190,7 +191,13 @@ public sealed class AnnotationDesktopWindow : IDisposable
         foreach (var name in tools.Tools)
         {
             var toggle = new ToggleButton { Content = ToolLabels.GetValueOrDefault(name, name), Style = ToolToggleStyle.Value, ToolTip = name };
-            toggle.Click += (_, _) => { tools.Tool = name; RefreshSelection(); };
+            toggle.Click += (_, _) =>
+            {
+                if (!_drawing) { SetDrawing(true); }
+                // 선택된 도구를 다시 누르면 화면 조작으로 돌아간다.
+                _toolArmed = !(_toolArmed && tools.Tool == name);
+                tools.Tool = name; ApplyInputMode();
+            };
             _toolButtons[name] = toggle; row.Children.Add(toggle);
         }
         row.Children.Add(Separator());
@@ -255,7 +262,7 @@ public sealed class AnnotationDesktopWindow : IDisposable
 
     private void RefreshSelection()
     {
-        foreach (var (name, button) in _toolButtons) button.IsChecked = name == _tools.Tool;
+        foreach (var (name, button) in _toolButtons) button.IsChecked = _toolArmed && name == _tools.Tool;
         foreach (var (name, button) in _colorButtons) button.IsChecked = name == _tools.Color;
         _placementButton.Content = "위치: " + _tools.Placement;
     }
@@ -281,19 +288,31 @@ public sealed class AnnotationDesktopWindow : IDisposable
             PlaceToolbar();
         }
         _drawing = enabled;
+        _toolArmed = false; // ON 직후에는 도구를 직접 골라야 그려진다.
         _controller.SetDrawing(enabled);
+        _drawingButton.Content = enabled ? "그림 유지하고 OFF" : "그리기 ON";
+        ApplyInputMode();
+        if (!enabled) CancelGesture();
+        DrawingChanged?.Invoke(enabled);
+    }
+
+    /// <summary>판서 ON이어도 도구를 고르기 전에는 마우스가 아래 앱으로 통과한다.</summary>
+    private void ApplyInputMode()
+    {
+        var interactive = _drawing && _toolArmed;
         // 완전 투명한 layered 창은 OS hit test에서 밑 창으로 통과할 수 있다.
-        // 그리기 중만 최소 알파 배경을 두고 OFF에는 투명/입력 통과로 복귀한다.
-        _overlay.Background = enabled
+        // 그리는 중만 최소 알파 배경을 두고 그 외에는 투명/입력 통과로 둔다.
+        _overlay.Background = interactive
             ? new SolidColorBrush(System.Windows.Media.Color.FromArgb(1, 0, 0, 0))
             : Brushes.Transparent;
         var hwnd = new WindowInteropHelper(_overlay).Handle;
         var style = GetWindowLong(hwnd, -20);
-        SetWindowLong(hwnd, -20, enabled ? style & ~0x20 : style | 0x20); // OFF는 그림을 보존하고 마우스를 아래 앱으로 통과시킨다.
-        _drawingButton.Content = enabled ? "그림 유지하고 OFF" : "그리기 ON";
-        _status.Text = enabled ? "그리기 중 · Esc로 화면 조작 복귀" : "화면 조작 중 · 그림 유지";
-        if (!enabled) CancelGesture();
-        DrawingChanged?.Invoke(enabled);
+        SetWindowLong(hwnd, -20, interactive ? style & ~0x20 : style | 0x20); // 그림은 보존하고 마우스를 아래 앱으로 통과시킨다.
+        _status.Text = !_drawing ? "화면 조작 중 · 그림 유지"
+            : _toolArmed ? "그리기 중 · Esc로 화면 조작 복귀"
+            : "판서 ON · 펜 등 도구를 누르면 그릴 수 있어요";
+        if (!interactive) CancelGesture();
+        RefreshSelection();
     }
     private async Task RunAsync(Func<Task> action)
     {
