@@ -1,4 +1,4 @@
-using System.ComponentModel;
+﻿using System.ComponentModel;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Forms.Integration;
@@ -17,8 +17,12 @@ public sealed class StudentScreenView : System.Windows.Controls.UserControl
 {
     public static readonly DependencyProperty ModelProperty = DependencyProperty.Register(nameof(Model), typeof(ServerViewModel), typeof(StudentScreenView));
     public ServerViewModel Model { get => (ServerViewModel)GetValue(ModelProperty); set => SetValue(ModelProperty, value); }
-    private readonly TextBlock _status = new() { Foreground = Brushes.LightGray, TextWrapping = TextWrapping.Wrap };
+    // 카드: 상태 + 미리보기 + 넓은 "원격 제어" 버튼 하나. 버튼을 누르면 같은 뷰어가 별도 창으로 옮겨가고,
+    // 창 상단에 원격 제어 · 다시 연결 · 화면 맞춤이 있다. 두 번째 연결은 만들지 않는다.
+    private readonly TextBlock _cardStatus = new() { Foreground = Brushes.LightGray, TextWrapping = TextWrapping.Wrap };
+    private readonly TextBlock _status = new() { Foreground = Brushes.LightGray, TextWrapping = TextWrapping.Wrap, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(8, 0, 0, 0) };
     private readonly WindowsFormsHost _host = new() { Height = 180 };
+    private readonly DockPanel _windowLayout = new();
     private readonly StackPanel _root = new();
     private readonly ProfessorReception _reception = new();
     private readonly SemaphoreSlim _lifecycle = new(1, 1);
@@ -34,6 +38,7 @@ public sealed class StudentScreenView : System.Windows.Controls.UserControl
     private bool _stopped;
     private string? _viewerKey;
     private Guid? _viewerInvitationId;
+    private readonly HashSet<Guid> _usedInvitations = new();
     private EduStream.Core.Collaboration.ParticipantConnection? _viewerStudent;
     private readonly HashSet<EduStream.Core.Collaboration.ParticipantConnection> _releasedConnections = new();
     private string StudentName => DataContext as string ?? string.Empty;
@@ -48,22 +53,39 @@ public sealed class StudentScreenView : System.Windows.Controls.UserControl
 
     public StudentScreenView()
     {
-        var actions = new WrapPanel();
-        var large = ThemedButton("크게 보기");
-        large.Click += (_, _) => Enlarge();
-        _control.Click += async (_, _) => await ChangeControlAsync();
-        var retry = ThemedButton("다시 연결");
-        retry.Click += async (_, _) => { if (_delivery is { } d) await ConnectAsync(d, retry: true); };
-        actions.Children.Add(large); actions.Children.Add(_control); actions.Children.Add(retry);
-        var fit = ThemedButton("화면 맞춤");
-        fit.Click += (_, _) => _surface?.Fit(); actions.Children.Add(fit);
-        _root.Children.Add(_status); _root.Children.Add(_host); _root.Children.Add(actions);
+        var open = new System.Windows.Controls.Button
+        {
+            Content = "원격 제어", Height = 34, Margin = new Thickness(0, 8, 0, 0),
+            HorizontalAlignment = System.Windows.HorizontalAlignment.Stretch,
+            Style = (Style)System.Windows.Application.Current.FindResource("PrimaryButton"),
+        };
+        open.Click += async (_, _) => await OpenWindowAsync();
+        _root.Children.Add(_cardStatus); _root.Children.Add(_host); _root.Children.Add(open);
         Content = _root;
         IsVisibleChanged += async (_, _) =>
         {
             if (!_stopped && IsVisible && _delivery is { } delivery && _connection?.IsConnectionLive != true)
                 await ConnectAsync(delivery);
         };
+
+        // 학생 화면 창 상단: 원격 제어 · 다시 연결 · 화면 맞춤. 한 번만 만들어 창을 다시 열 때도 재사용한다.
+        _control.Click += async (_, _) => await ChangeControlAsync();
+        var retry = ThemedButton("새로고침");
+        retry.Click += async (_, _) => await RefreshViewAsync();
+        var fit = ThemedButton("화면 맞춤");
+        fit.Click += (_, _) => _surface?.Fit();
+        var bar = new StackPanel { Orientation = System.Windows.Controls.Orientation.Horizontal };
+        bar.Children.Add(_control); bar.Children.Add(retry); bar.Children.Add(fit); bar.Children.Add(_status);
+        var toolbar = new Border
+        {
+            Child = bar, Padding = new Thickness(8, 6, 8, 6), BorderThickness = new Thickness(0, 0, 0, 1),
+            Background = (System.Windows.Media.Brush)System.Windows.Application.Current.FindResource("BrushBgSurface"),
+            BorderBrush = (System.Windows.Media.Brush)System.Windows.Application.Current.FindResource("BrushBorder"),
+        };
+        DockPanel.SetDock(toolbar, Dock.Top);
+        _windowLayout.Children.Add(toolbar);
+        SetStatus("학생 화면 공유 연결 대기");
+
         Loaded += (_, _) =>
         {
             if (_stopped) return;
@@ -100,7 +122,7 @@ public sealed class StudentScreenView : System.Windows.Controls.UserControl
             var active = state.Phase == EduStream.Core.Collaboration.ControlPhase.Active;
             _control.Content = active ? "제어 중지" : "원격 제어";
             if (_surface is not null) _surface.WheelZoomEnabled = !active;
-            _status.Text = active ? "원격 제어 중" : "보기 전용 · 제어 " + state.Phase;
+            SetStatus(active ? "원격 제어 중" : "보기 전용 · 제어 " + state.Phase);
         }));
     }
 
@@ -120,7 +142,7 @@ public sealed class StudentScreenView : System.Windows.Controls.UserControl
         foreach (var snapshot in student.Participants)
             if (snapshot.DisplayName == StudentName && _router.TryGetInvitation(snapshot.Connection.ConnectionId) is { } delivery)
             { Ready(delivery); return; }
-        _status.Text = "학생 화면 공유 연결 대기";
+        SetStatus("학생 화면 공유 연결 대기");
     }
 
     private void Ready(ReverseInvitationDelivery delivery)
@@ -131,9 +153,11 @@ public sealed class StudentScreenView : System.Windows.Controls.UserControl
             if (delivery.DisplayName != StudentName) return;
             if (ReferenceEquals(_delivery, delivery) && _connection?.IsConnectionLive == true) return;
             _delivery = delivery;
-            if (_loaded && IsVisible) await ConnectAsync(delivery);
+            if (_loaded && (IsVisible || _large is not null)) await ConnectAsync(delivery);
         }));
     }
+
+    private void SetStatus(string text) { _status.Text = text; _cardStatus.Text = text; }
 
     private void Withdrawn(EduStream.Core.Collaboration.ParticipantConnection student, Guid invitationId)
     {
@@ -156,9 +180,9 @@ public sealed class StudentScreenView : System.Windows.Controls.UserControl
             _delivery = delivery;
             var viewer = new AxRDPViewer();
             _viewer = viewer;
-            viewer.OnConnectionEstablished += (_, _) => { _status.Text = "학생 화면 연결됨 · 보기 전용"; _control.IsEnabled = true; };
-            viewer.OnConnectionFailed += (_, _) => { _status.Text = "학생 화면 연결 실패 · 다시 연결을 눌러 주세요."; _control.IsEnabled = false; };
-            viewer.OnConnectionTerminated += (_, _) => { _status.Text = "학생 화면 연결 종료"; _control.IsEnabled = false; };
+            viewer.OnConnectionEstablished += (_, _) => { SetStatus("학생 화면 연결됨 · 보기 전용"); _control.IsEnabled = true; };
+            viewer.OnConnectionFailed += (_, _) => { SetStatus("학생 화면 연결 실패 · 새로고침을 눌러 주세요."); _control.IsEnabled = false; };
+            viewer.OnConnectionTerminated += (_, _) => { SetStatus("학생 화면 연결 종료"); _control.IsEnabled = false; };
             ((ISupportInitialize)viewer).BeginInit();
             _surface = new ViewerZoomSurface();
             _host.Child = _surface;
@@ -169,15 +193,16 @@ public sealed class StudentScreenView : System.Windows.Controls.UserControl
             viewer.OnSharedRectChanged += (_, e) => _surface?.SetSourceSize(e.right - e.left, e.bottom - e.top);
             viewer.OnSharedDesktopSettingsChanged += (_, e) => _surface?.SetSourceSize(e.width, e.height);
             viewer.SmartSizing = true;
-            _status.Text = "학생 화면 연결 중";
+            SetStatus("학생 화면 연결 중");
             _viewerKey = delivery.Invitation.StudentId;
             _viewerStudent = delivery.Student;
             _viewerInvitationId = delivery.Invitation.InvitationId;
+            _usedInvitations.Add(delivery.Invitation.InvitationId);
             _releasedConnections.Remove(delivery.Student);
             _connection = _reception.Watch(delivery.Invitation.StudentId, viewer,
                 delivery.Invitation.ConnectionString, delivery.Invitation.ProfessorId, delivery.Secret.Password);
         }
-        catch (Exception ex) { _status.Text = "학생 화면 오류: " + ex.GetType().Name; _control.IsEnabled = false; }
+        catch (Exception ex) { SetStatus("학생 화면 오류: " + ex.GetType().Name); _control.IsEnabled = false; }
         finally { _lifecycle.Release(); }
     }
 
@@ -194,28 +219,64 @@ public sealed class StudentScreenView : System.Windows.Controls.UserControl
             var active = manager.CurrentControlState is { Phase: EduStream.Core.Collaboration.ControlPhase.Active } state && state.Student == _delivery.Student;
             _control.Content = active ? "제어 중지" : "원격 제어";
             if (_surface is not null) _surface.WheelZoomEnabled = !active; // 제어 중에는 휠을 학생 PC에 전달한다.
-            _status.Text = active ? "원격 제어 중 · 학생 화면에 마우스/키보드 입력" : "보기 전용 · 제어 비활성";
+            SetStatus(active ? "원격 제어 중 · 학생 화면에 마우스/키보드 입력" : "보기 전용 · 제어 비활성");
         }
-        catch (Exception ex) { _status.Text = "제어 확인 실패: " + ex.GetType().Name; }
+        catch (Exception ex) { SetStatus("제어 확인 실패: " + ex.GetType().Name); }
         finally { _control.IsEnabled = _connection?.IsConnectionLive == true; }
     }
 
-    private void Enlarge()
+    /// <summary>카드의 "원격 제어" 버튼: 카드의 뷰어를 별도 창으로 옮겨 크게 보여 준다. 이미 열려 있으면 앞으로 가져온다.</summary>
+    private async Task OpenWindowAsync()
     {
+        if (_stopped) return;
         if (_large is not null) { _large.Activate(); return; }
         _root.Children.Remove(_host);
         _host.Height = double.NaN;
-        _large = new Window { Title = StudentName + " · 학생 화면", Width = 1000, Height = 700, Content = _host, Background = Brushes.Black };
-        _large.SourceInitialized += (_, _) => CaptureExclusion.Apply(_large);
-        _large.Closed += (_, _) => { _large.Content = null; _large = null; _host.Height = 180; _root.Children.Insert(1, _host); };
-        _large.Show();
+        _windowLayout.Children.Add(_host);
+        var window = new Window
+        {
+            Title = StudentName + " · 학생 화면", Width = 1000, Height = 700, Content = _windowLayout,
+            Background = (System.Windows.Media.Brush)System.Windows.Application.Current.FindResource("BrushBgPrimary"),
+        };
+        window.SourceInitialized += (_, _) => CaptureExclusion.Apply(window);
+        window.Closed += (_, _) =>
+        {
+            // 창을 닫으면 뷰어를 카드 미리보기로 되돌린다. 연결은 끊지 않는다.
+            window.Content = null;
+            _windowLayout.Children.Remove(_host);
+            _host.Height = 180;
+            if (!_root.Children.Contains(_host)) _root.Children.Insert(1, _host);
+            if (ReferenceEquals(_large, window)) _large = null;
+        };
+        _large = window;
+        window.Show();
+        if (_delivery is { } delivery && _connection?.IsConnectionLive != true) await ConnectAsync(delivery);
+    }
+
+    /// <summary>
+    /// 새로고침: 연결이 살아 있으면 화면만 다시 그리고 연결은 건드리지 않는다.
+    /// 끊긴 상태면 다시 붙는다. 학생 앱은 한 번 쓴 초대를 다시 쓰지 않고 몇 초 안에 새 초대를 보내므로,
+    /// 이미 쓴 초대로 붙으면 흰 화면만 뜬다. 그래서 새 초대가 오면 그것으로 연결한다.
+    /// </summary>
+    private async Task RefreshViewAsync()
+    {
+        if (_connection?.IsConnectionLive == true) { _viewer?.Refresh(); _surface?.Fit(); return; }
+        if (_stopped || _delivery is null) { SetStatus("학생 화면 공유 연결 대기"); return; }
+        var latest = _router?.TryGetInvitation(_delivery.Student.ConnectionId) ?? _delivery;
+        if (_usedInvitations.Contains(latest.Invitation.InvitationId))
+        {
+            _delivery = latest;
+            SetStatus("학생 쪽 새 초대를 기다리는 중입니다. 몇 초 안에 자동으로 연결됩니다.");
+            return;
+        }
+        await ConnectAsync(latest, retry: true);
     }
 
     private async Task ClearAsync()
     {
         await _lifecycle.WaitAsync();
-        try { await ReleaseAsync(); _delivery = null; _status.Text = "학생 화면 공유 종료"; _large?.Close(); }
-        catch (Exception ex) { _status.Text = "화면 종료 확인 실패: " + ex.GetType().Name; }
+        try { await ReleaseAsync(); _delivery = null; SetStatus("학생 화면 공유 종료"); _large?.Close(); }
+        catch (Exception ex) { SetStatus("화면 종료 확인 실패: " + ex.GetType().Name); }
         finally { _lifecycle.Release(); }
     }
     private async Task ReleaseAsync()
@@ -242,7 +303,7 @@ public sealed class StudentScreenView : System.Windows.Controls.UserControl
         {
             if (_releasedConnections.Contains(student)) return true;
             if (_viewerStudent != student) return false;
-            await ReleaseAsync(); _status.Text = "입력 회수를 위해 학생 화면 연결 종료";
+            await ReleaseAsync(); SetStatus("입력 회수를 위해 학생 화면 연결 종료");
             return true;
         }
         finally { _lifecycle.Release(); }
