@@ -373,11 +373,19 @@ public sealed class ClientViewModel : ObservableObject
 
     private bool _isFilesPanelExpanded;
     private bool _hasNewFiles;
+    private readonly HashSet<(Guid FileId, long Revision)> _unseenFiles = new();
     /// <summary>파일 패널이 펼쳐져 있는지. 펼치면 새 파일 표시(NEW!)를 지운다.</summary>
     public bool IsFilesPanelExpanded
     {
         get => _isFilesPanelExpanded;
-        set { if (SetProperty(ref _isFilesPanelExpanded, value) && value) HasNewFiles = false; }
+        set
+        {
+            if (SetProperty(ref _isFilesPanelExpanded, value) && value)
+            {
+                _unseenFiles.Clear();
+                HasNewFiles = false;
+            }
+        }
     }
     /// <summary>패널이 닫혀 있는 동안 새 강의 파일이 등록됐으면 true입니다.</summary>
     public bool HasNewFiles { get => _hasNewFiles; private set => SetProperty(ref _hasNewFiles, value); }
@@ -1502,6 +1510,7 @@ public sealed class ClientViewModel : ObservableObject
         {
             ApplyStudentStatus(StudentStatus.Initial);
             SessionFiles.Clear();
+            _unseenFiles.Clear();
             HasNewFiles = false;
         });
     }
@@ -1523,16 +1532,17 @@ public sealed class ClientViewModel : ObservableObject
         var next = catalog.Files.Select(file => (file.FileId, file.Revision)).ToHashSet();
         foreach (var item in SessionFiles.Where(item => !next.Contains((item.File.FileId, item.File.Revision))).ToArray())
             SessionFiles.Remove(item);
-        var added = false;
+        // 삭제/교체된 파일은 미확인 목록에서도 내려 실제 남은 파일만 NEW로 표시한다.
+        _unseenFiles.IntersectWith(next);
         foreach (var file in catalog.Files)
         {
             if (!current.ContainsKey((file.FileId, file.Revision)))
             {
                 SessionFiles.Add(new SessionFileItem(file, DownloadSessionFileAsync));
-                added = true;
+                if (!IsFilesPanelExpanded) _unseenFiles.Add((file.FileId, file.Revision));
             }
         }
-        if (added && !IsFilesPanelExpanded) HasNewFiles = true;
+        HasNewFiles = _unseenFiles.Count > 0;
     }
 
     private async Task DownloadSessionFileAsync(SessionFileItem item)
