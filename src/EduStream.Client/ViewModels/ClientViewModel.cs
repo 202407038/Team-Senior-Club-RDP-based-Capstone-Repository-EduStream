@@ -372,6 +372,17 @@ public sealed class ClientViewModel : ObservableObject
     /// <summary>교수자가 등록한 강의 파일 목록입니다. 항목의 다운로드 버튼으로 골라 받습니다(U08).</summary>
     public ObservableCollection<SessionFileItem> SessionFiles { get; } = [];
 
+    private bool _isFilesPanelExpanded;
+    private bool _hasNewFiles;
+    /// <summary>파일 패널이 펼쳐져 있는지. 펼치면 새 파일 표시(NEW!)를 지운다.</summary>
+    public bool IsFilesPanelExpanded
+    {
+        get => _isFilesPanelExpanded;
+        set { if (SetProperty(ref _isFilesPanelExpanded, value) && value) HasNewFiles = false; }
+    }
+    /// <summary>패널이 닫혀 있는 동안 새 강의 파일이 등록됐으면 true입니다.</summary>
+    public bool HasNewFiles { get => _hasNewFiles; private set => SetProperty(ref _hasNewFiles, value); }
+
     public RelayCommand JoinSessionCommand { get; }
 
     public RelayCommand DisconnectCommand { get; }
@@ -1493,6 +1504,7 @@ public sealed class ClientViewModel : ObservableObject
         {
             ApplyStudentStatus(StudentStatus.Initial);
             SessionFiles.Clear();
+            HasNewFiles = false;
         });
     }
 
@@ -1513,11 +1525,16 @@ public sealed class ClientViewModel : ObservableObject
         var next = catalog.Files.Select(file => (file.FileId, file.Revision)).ToHashSet();
         foreach (var item in SessionFiles.Where(item => !next.Contains((item.File.FileId, item.File.Revision))).ToArray())
             SessionFiles.Remove(item);
+        var added = false;
         foreach (var file in catalog.Files)
         {
             if (!current.ContainsKey((file.FileId, file.Revision)))
+            {
                 SessionFiles.Add(new SessionFileItem(file, DownloadSessionFileAsync));
+                added = true;
+            }
         }
+        if (added && !IsFilesPanelExpanded) HasNewFiles = true;
     }
 
     private async Task DownloadSessionFileAsync(SessionFileItem item)
