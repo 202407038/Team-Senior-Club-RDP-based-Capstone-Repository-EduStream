@@ -18,7 +18,10 @@ public partial class MainWindow : Window
     {
         InitializeComponent();
         _viewModel = new ServerViewModel();
-        _viewModel.HasVisibleStudentScreen = () => _studentViews.Any(view => view.ShowingStudentScreen);
+        SourceInitialized += (_, _) =>
+        {
+            if (!CaptureExclusion.TryApply(this, out var error)) _viewModel.ReportCaptureExclusionFailure(error);
+        };
         _viewModel.SessionManager.ConnectedStudentSharing = student => Dispatcher.Invoke(() =>
             _studentViews.Select(view => view.ConnectedSharingFor(student)).FirstOrDefault(id => id.HasValue));
         _viewModel.SessionManager.CloseStudentViewerAsync = async (student, token) =>
@@ -42,6 +45,11 @@ public partial class MainWindow : Window
         {
             if (e.PropertyName == nameof(ServerViewModel.IsRdpSharing) && !_viewModel.IsRdpSharing)
             { _annotation?.Dispose(); _annotation = null; DrawingToggle.IsChecked = false; }
+            // 세션이 열리면 세션 관리를 접고, 닫히거나 오류가 나면 펼쳐 상태를 바로 볼 수 있게 한다.
+            if (e.PropertyName == nameof(ServerViewModel.IsSessionOpen))
+                SessionExpander.IsExpanded = !_viewModel.IsSessionOpen;
+            else if (e.PropertyName == nameof(ServerViewModel.IsStatusError) && _viewModel.IsStatusError)
+                SessionExpander.IsExpanded = true;
         };
        
         Closing += OnClosing;
