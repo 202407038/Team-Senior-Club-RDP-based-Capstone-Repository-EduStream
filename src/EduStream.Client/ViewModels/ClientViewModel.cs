@@ -58,7 +58,6 @@ public sealed class ClientViewModel : ObservableObject
     private enum JoinAckResult { Joined, Rejected, Disconnected, TimedOut }
     private TaskCompletionSource<JoinAckResult>? _pendingJoinAck;
     private StudentStatus _studentStatus = StudentStatus.Initial;
-    private bool _permissionNoticeShown;
     private RdpInvitationPacket? _activeRdpInvitation;
     // 초대(TCP)와 비밀번호(보호 채널)는 도착 순서가 정해져 있지 않아, 둘이 같은 초대로 짝지어질 때까지 보관한다.
     private readonly object _rdpAutoConnectLock = new();
@@ -1490,7 +1489,6 @@ public sealed class ClientViewModel : ObservableObject
         _statusClient = statusClient;
         _fileClient = fileClient;
         _reverseClient = reverseClient;
-        _permissionNoticeShown = false;
         RunOnUiThread(() => ApplyStudentStatus(StudentStatus.Initial));
     }
 
@@ -1583,12 +1581,6 @@ public sealed class ClientViewModel : ObservableObject
         StopControlNowCommand.RaiseCanExecuteChanged();
 
         if (_statusClient is null) return;
-        if (!_permissionNoticeShown && status.AllowControl)
-        {
-            // U07: 제어 허용이 기본 ON이라는 사실을 참가 시 알린다.
-            _permissionNoticeShown = true;
-            ChatMessages.Add(ChatLine.System("교수자 원격 제어 허용이 켜져 있습니다. 접속 상태 옆에서 언제든 끌 수 있습니다."));
-        }
         if (wasUnderControl != status.UnderControl)
             ChatMessages.Add(ChatLine.System(status.UnderControl ? "교수자가 원격 제어를 시작했습니다." : "원격 제어가 끝났습니다."));
     }
