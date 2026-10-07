@@ -44,7 +44,7 @@ public sealed class ServerViewModel : ObservableObject
     private readonly FileDistributor _fileDistributor;
     private string _sessionName = "EduStream 강의";
     private int _port = 5000;
-    private string _chatInput = "Announcement: today's lecture note has been uploaded.";
+    private string _chatInput = string.Empty;
     private string _latestScreenStatus = "Screen sharing has not started yet.";
     private string _rdpStatus = "WDS 화면 공유 대기 중";
     private string _selectedFilePath = string.Empty;
