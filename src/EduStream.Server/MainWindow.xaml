@@ -259,7 +259,8 @@
                                  PreviewKeyDown="ChatInput_PreviewKeyDown"
                                  Text="{Binding ChatInput, UpdateSourceTrigger=PropertyChanged}" />
                     </DockPanel>
-                    <TextBlock Grid.Row="2" Margin="0,-18,0,0" HorizontalAlignment="Left"
+                    <TextBlock Grid.Row="2" Margin="0,-18,0,0" HorizontalAlignment="Left" VerticalAlignment="Top"
+                               IsHitTestVisible="False"
                                Foreground="{StaticResource BrushTextMuted}" FontSize="10"
                                Text="Enter 전송 · Shift+Enter 줄바꿈 · 메시지는 드래그해서 복사" />
                 </Grid>
