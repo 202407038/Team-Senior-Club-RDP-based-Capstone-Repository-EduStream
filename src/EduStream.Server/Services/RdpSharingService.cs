@@ -26,6 +26,9 @@ public sealed class RdpSharingService : IRdpSharingService
     private DispatcherTimer? _expiryTimer;
     private bool _disposed;
 
+    /// <summary>한 WDS 공유 세션이 동시에 발급할 수 있는 학생 초대 수. 2명을 넘는 규모는 실제 환경 검증 전이다.</summary>
+    public const int MaxInvitations = 50;
+
 // 🌟 [추가] 역방향(학생->교수) 공유일 때만 true로 설정하는 스위치
     public bool IsInteractive { get; set; } = false;
     public System.Drawing.Rectangle? SelectedBounds { get; set; }
@@ -115,7 +118,7 @@ public sealed class RdpSharingService : IRdpSharingService
             throw new ArgumentException("초대 입력이 유효하지 않습니다.");
 
         SweepExpired();
-        if (_invitations.Count >= 2) throw new InvalidOperationException("최대 참가자 수(2)를 초과했습니다.");
+        if (_invitations.Count >= MaxInvitations) throw new InvalidOperationException($"최대 참가자 수({MaxInvitations})를 초과했습니다.");
 
         var id = Guid.NewGuid();
         var group = "EduStream_" + id.ToString("N");

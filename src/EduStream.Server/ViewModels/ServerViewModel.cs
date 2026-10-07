@@ -569,7 +569,7 @@ public sealed class ServerViewModel : ObservableObject
             var sharingId = await _rdpSharing.StartAsync(sessionId);
             _sessionManager.AttachRdpSharing(_rdpSharing, sharingId);
             IsRdpSharing = true;
-            RdpStatus = "WDS 공유 중 · 선택한 모니터를 학생에게 자동 공유합니다. (현재 검증 기준 학생 2명)";
+            RdpStatus = $"WDS 공유 중 · 선택한 모니터를 학생에게 자동 공유합니다. (최대 {RdpSharingService.MaxInvitations}명 · 2명 초과는 검증 전)";
         }
         catch (Exception ex)
         {
