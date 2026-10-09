@@ -35,6 +35,7 @@ public sealed class ClientViewModel : ObservableObject
     private readonly SessionClient _sessionClient;
     private readonly ScreenRenderer _screenRenderer;
     private readonly FileReceiver _fileReceiver;
+    private readonly IDownloadsDirectory _downloadsDirectory;
     private readonly TcpClientService _tcpClient;
     private readonly IPacketSerializer _serializer = new PacketSerializer();
     private readonly IRdpViewerService _rdpViewerService;
@@ -108,12 +109,13 @@ public sealed class ClientViewModel : ObservableObject
     private bool _isStatusError;
     private string _statusMessage = string.Empty;
 
-    public ClientViewModel(IRdpViewerService? rdpViewerService = null)
+    public ClientViewModel(IRdpViewerService? rdpViewerService = null, IDownloadsDirectory? downloadsDirectory = null)
     {
         _rdpViewerService = rdpViewerService ?? new RdpViewerService(_logSink);
         _sessionClient = new SessionClient(_logSink);
         _screenRenderer = new ScreenRenderer();
         _fileReceiver = new FileReceiver();
+        _downloadsDirectory = downloadsDirectory ?? new WindowsDownloadsDirectory();
         _tcpClient = new TcpClientService(_logSink, _serializer);
 
         _tcpClient.PacketReceived += OnPacketReceivedAsync;
@@ -1116,11 +1118,15 @@ public sealed class ClientViewModel : ObservableObject
     {
         try
         {
-            // 🟢 1. 클라이언트 프로세스 ID별 독립된 임시 폴더 생성
-            string baseTempPath = Path.Combine(Path.GetTempPath(), "EduStreamClient", Environment.ProcessId.ToString());
-
-            // 🟢 2. 파일 저장 처리(I/O)를 백그라운드 스레드에서 수행하여 UI Freeze(응답 없음) 방지
-            var result = await Task.Run(() => _fileReceiver.TrySaveAsync(packet, baseTempPath));
+            // 선택 다운로드와 같은 Windows 다운로드 폴더(사용자 지정 위치 포함)를 사용한다.
+            // 기존 사용자 파일은 덮어쓰지 않으며, 폴더 조회/저장 실패 시 임시 폴더로 우회하지 않는다.
+            var result = await Task.Run(() =>
+            {
+                var directory = _downloadsDirectory.GetPath();
+                if (!Path.IsPathFullyQualified(directory))
+                    throw new IOException("다운로드 폴더 경로를 확인할 수 없습니다.");
+                return _fileReceiver.TrySaveAsync(packet, directory, overwrite: false);
+            });
 
             // 🟢 3. 진행 중 (Pending)
             if (result.Pending)
@@ -1163,7 +1169,7 @@ public sealed class ClientViewModel : ObservableObject
             RunOnUiThread(() =>
             {
                 DownloadedFiles.Insert(0, Path.GetFileName(path));
-                DownloadStatus = result.StatusMessage;
+                DownloadStatus = $"{Path.GetFileName(path)} 저장 완료 (다운로드 폴더)";
                 LastServerMessage = "파일 수신이 완료되었습니다.";
                 LastSuccessMessage = result.StatusMessage;
                 FileTransferDetail = $"{BuildFileTransferDetail(packet, result)} / 저장 위치 {path}";
