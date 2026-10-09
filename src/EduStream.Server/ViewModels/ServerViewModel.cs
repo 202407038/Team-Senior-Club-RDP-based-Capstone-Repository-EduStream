@@ -639,19 +639,18 @@ public sealed class ServerViewModel : ObservableObject
         return IsRdpSharing && handoff?.ExpiresAt > DateTimeOffset.UtcNow ? handoff.Password : null;
     }
 
-    /// <summary>끌어 놓은 파일을 강의 파일 목록에 등록합니다. 본문은 학생이 요청할 때만 보냅니다.</summary>
-    public async Task RegisterDroppedFilesAsync(IEnumerable<string> paths)
+    /// <summary>파일 선택창과 동일하게 선택만 준비한다. 등록/전송은 명시적 버튼 조작으로만 한다.</summary>
+    public void PrepareDroppedFile(IEnumerable<string> paths)
     {
-        if (!IsSessionOpen)
+        var files = paths.Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+        if (files.Length != 1 || !File.Exists(files[0]))
         {
-            FileShareStatus = "세션을 먼저 열어 주세요.";
+            FileShareStatus = "파일을 한 개씩 끌어 놓아 주세요. 기존 선택은 유지됩니다.";
             return;
         }
-        foreach (var path in paths.Where(File.Exists))
-        {
-            SelectedFilePath = path;
-            await RegisterSelectedFileAsync();
-        }
+        SelectedFilePath = files[0];
+        FileShareStatus = $"선택됨: {Path.GetFileName(files[0])}. 등록 버튼을 누르면 학생 목록에 표시됩니다.";
+        IsStatusError = false;
     }
 
     private async Task RegisterSelectedFileAsync()
