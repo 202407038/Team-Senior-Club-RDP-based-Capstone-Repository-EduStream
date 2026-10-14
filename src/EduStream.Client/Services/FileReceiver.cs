@@ -30,7 +30,7 @@ public sealed class FileReceiver
         return result.FilePath!;
     }
 
-    public async Task<FileReceiveResult> TrySaveAsync(FilePacket packet, string targetDirectory)
+    public async Task<FileReceiveResult> TrySaveAsync(FilePacket packet, string targetDirectory, bool overwrite = true)
     {
         try
         {
@@ -49,7 +49,7 @@ public sealed class FileReceiver
                 }
 
                 Directory.CreateDirectory(targetDirectory);
-                await WriteAtomicallyAsync(targetPath, Array.Empty<byte>());
+                targetPath = await WriteAtomicallyAsync(targetPath, Array.Empty<byte>(), overwrite);
 
                 return FileReceiveResult.CreateSuccess(
                     targetPath,
@@ -69,7 +69,7 @@ public sealed class FileReceiver
                 }
 
                 Directory.CreateDirectory(targetDirectory);
-                await WriteAtomicallyAsync(targetPath, packet.Content);
+                targetPath = await WriteAtomicallyAsync(targetPath, packet.Content, overwrite);
                 return FileReceiveResult.CreateSuccess(
                     targetPath,
                     $"{packet.FileName} 저장 완료",
@@ -115,7 +115,7 @@ public sealed class FileReceiver
             }
 
             Directory.CreateDirectory(targetDirectory);
-            await WriteAtomicallyAsync(targetPath, addResult.AssembledContent);
+            targetPath = await WriteAtomicallyAsync(targetPath, addResult.AssembledContent, overwrite);
             return FileReceiveResult.CreateSuccess(
                 targetPath,
                 $"{packet.FileName} 저장 완료",
@@ -177,14 +177,18 @@ public sealed class FileReceiver
         }
     }
 
-    private static async Task WriteAtomicallyAsync(string targetPath, byte[] content)
+    private static async Task<string> WriteAtomicallyAsync(string targetPath, byte[] content, bool overwrite)
     {
         // 같은 볼륨의 임시 파일을 완성한 뒤 교체하여 실패 시 기존 파일을 보존합니다.
         var temporaryPath = targetPath + "." + Guid.NewGuid().ToString("N") + ".partial";
         try
         {
             await File.WriteAllBytesAsync(temporaryPath, content);
+            if (!overwrite)
+                return SessionFileDownloader.CommitWithoutOverwrite(temporaryPath, Path.GetDirectoryName(targetPath)!,
+                    Path.GetFileName(targetPath), CancellationToken.None);
             File.Move(temporaryPath, targetPath, overwrite: true);
+            return targetPath;
         }
         finally
         {

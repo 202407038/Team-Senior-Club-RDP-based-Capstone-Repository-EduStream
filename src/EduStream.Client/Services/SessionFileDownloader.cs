@@ -94,7 +94,7 @@ public sealed class SessionFileDownloader : ISessionFileDownloader
         }
     }
 
-    private static string CommitWithoutOverwrite(string source, string directory, string name, CancellationToken token)
+    internal static string CommitWithoutOverwrite(string source, string directory, string name, CancellationToken token)
     {
         for (var suffix = 0; suffix <= 1000; suffix++)
         {

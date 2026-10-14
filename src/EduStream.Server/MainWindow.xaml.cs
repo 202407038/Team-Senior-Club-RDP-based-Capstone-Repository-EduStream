@@ -126,10 +126,11 @@ public partial class MainWindow : Window
         e.Handled = true;
     }
 
-    private async void FileDropZone_Drop(object sender, System.Windows.DragEventArgs e)
+    private void FileDropZone_Drop(object sender, System.Windows.DragEventArgs e)
     {
         if (e.Data.GetData(System.Windows.DataFormats.FileDrop) is string[] paths)
-            await _viewModel.RegisterDroppedFilesAsync(paths);
+            _viewModel.PrepareDroppedFile(paths);
+        e.Handled = true;
     }
 
 private void ExpandAllStudents_Click(object sender, RoutedEventArgs e) => SetAllStudentsExpanded(true);
