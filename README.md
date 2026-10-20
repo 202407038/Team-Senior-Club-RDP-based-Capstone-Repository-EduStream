@@ -2,17 +2,19 @@
 
 ## ZIP을 풀고 바로 실행하기
 
-### [실행용 ZIP 다운로드 · EduStream-Portable-win-x64.zip](https://github.com/202407038/Team-Senior-Club-RDP-based-Capstone-Repository-EduStream/releases/download/v0.1.0-preview.4/EduStream-Portable-win-x64.zip)
+### [실행용 ZIP 다운로드 · EduStream-Portable-win-x64.zip](https://github.com/202407038/Team-Senior-Club-RDP-based-Capstone-Repository-EduStream/releases/download/v0.1.0-preview.7/EduStream-Portable-win-x64.zip)
 
 **다운로드 → 모두 압축 풀기 → EduStream 폴더 → `EduStream 교수자.exe` 또는 `EduStream 학생.exe` 더블클릭**
 
 설치나 명령어 입력 없이 실행할 수 있으며 .NET 실행 환경이 포함되어 있습니다. ZIP 안에서 바로 실행하지 말고 전체 압축을 풀어주세요. EXE 옆의 DLL과 하위 폴더도 필요하므로, 이동할 때는 폴더 전체를 옮깁니다. [실행 안내](docs/work/DESKTOP_LAUNCH.md)
 
-배포는 **실행용 ZIP만** 제공합니다. 현재 버전은 **v0.1.0-preview.4 (2026-10-07)**이며 실행 코드는 main `e75324d` (#94·#95 반영) 기준입니다. 중간 점검용 시험판이며 전체 기능 완료 버전이 아닙니다. 코드 서명은 미적용입니다. [배포 정보](https://github.com/202407038/Team-Senior-Club-RDP-based-Capstone-Repository-EduStream/releases/tag/v0.1.0-preview.4)
+배포는 **실행용 ZIP만** 제공합니다. 현재 버전은 **v0.1.0-preview.7 (2026-10-20 배포, 10/14 제작)**이며 실행 코드는 main `04dd114` (#97·#98·#99 포함) 기준입니다. 코드 서명 미적용 시험판이며 전체 실환경 인수 완료를 뜻하지 않습니다. [배포 정보](https://github.com/202407038/Team-Senior-Club-RDP-based-Capstone-Repository-EduStream/releases/tag/v0.1.0-preview.7)
 
 학생은 첫 화면에서 이름·교수자 IP·방 비밀번호(설정한 경우)로 참가합니다. 기본 포트는 5000이며 변경 시에만 고급 설정을 사용합니다. **접속 코드·별도 RDP 초대 비밀번호 입력은 없습니다.** 교수자 모니터 공유·판서, 학생별 화면 보기/큰 보기/제어 연결, 세션 파일 등록·선택 다운로드가 포함됩니다.
 
-**남은 문제:** 실제 휠 확대/축소, 큰 보기 최대화 표시 이상. 같은 Windows 로그인 환경의 교수자·학생 동시 송신은 인증 오류가 재현되어 보류 중입니다. 다른 PC의 양방향/실입력·회수/판서 수신, 반복·병행 인수는 미완료입니다. [현재 상태·후속 순서](docs/work/STATUS_AND_ROADMAP.md)
+**이번 반영:** 즉시 전송 파일도 Windows 다운로드 폴더에 저장하고 기존 동명 파일은 보존합니다. 파일 선택·드롭은 선택만 준비하며 **등록 버튼**을 눌러야 세션 목록에 등록합니다. 학생 화면을 열어도 교수자 공유를 자동 중지하지 않습니다.
+
+**검증 범위:** 기존 자동 회귀 918 통과·52 생략·실패 0, ZIP 양 앱 시작 확인. 사용자의 기존 실행 재확인 완료 보고와 자동 검증은 구분합니다. **휠 확대·축소는 요청에 따라 제외**했으며 수정 대기 항목이 아닙니다. 동일 Windows 로그인 환경의 동시 WDS 송신 제약과 다중 PC·부하 검증 근거는 [현재 상태·후속 순서](docs/work/STATUS_AND_ROADMAP.md)를 확인하세요.
 
 **위 실행용 ZIP과 `Code → Download ZIP`은 다릅니다.** `Code → Download ZIP`은 개발용 소스입니다. 소스 ZIP을 받은 경우 루트의 `Download-EduStream.url`에서도 실행용 ZIP을 받을 수 있습니다.
 
@@ -33,7 +35,7 @@ EduStream은 교수자 화면 공유, 파일 전송, 텍스트 채팅을 하나�
 
 자세한 실행 순서와 기본 설정은 [실행 및 설정 가이드](docs/work/RUN_GUIDE.md)를 확인합니다.
 
-2026-09-15 기준 WDS 기반 RDP가 메인 화면 공유 경로입니다. 현 PC에서 실제 학생 viewer 2개와 파일·채팅 병행을 자동 검증했으며, 다중 PC 실시간 표시·15분 실사용·전체 시연 2회는 별도 인수 대상입니다. [현재 검증 범위](docs/work/SEPTEMBER_RDP_INTEGRATION.md)를 확인합니다.
+WDS 기반 RDP가 메인 화면 공유 경로입니다. [현재 검증 범위](docs/work/FINAL_ACCEPTANCE_CHECKLIST.md)를 우선하며, [9월 통합 검증](docs/work/SEPTEMBER_RDP_INTEGRATION.md)은 당시 이력입니다. 자동 테스트 통과를 실제 다중 PC 화면·입력 검증으로 대체하지 않습니다.
 
 ### 빌드
 
