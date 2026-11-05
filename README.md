@@ -1,5 +1,9 @@
 # EduStream
 
+## 2026-11-05 추가 수업 기능
+
+추가 기능 소스에는 교수자 자동 찾기, 개인 채팅, 공지함, 엑셀 명단 대조·출입 기록, 학생 파일 제출, 라이트·다크 테마가 포함됩니다. 아래 실행용 ZIP은 기존 버전이므로 이 기능들이 모두 들어 있지 않습니다. 사용법과 검증 범위는 [추가 기능 안내](docs/work/ADDITIONAL_FEATURES_GUIDE.md), [현재 상태](docs/work/STATUS_AND_ROADMAP.md)를 확인하세요.
+
 ## ZIP을 풀고 바로 실행하기
 
 ### [실행용 ZIP 다운로드 · EduStream-Portable-win-x64.zip](https://github.com/202407038/Team-Senior-Club-RDP-based-Capstone-Repository-EduStream/releases/download/v0.1.0-preview.7/EduStream-Portable-win-x64.zip)
