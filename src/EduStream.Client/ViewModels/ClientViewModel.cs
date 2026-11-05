@@ -28,7 +28,7 @@ namespace EduStream.Client.ViewModels;
 /// 수강생 클라이언트의 세션/채팅/파일/화면 수신 상태를 화면에 표시하기 위한 ViewModel입니다.
 /// TcpClientService를 통해 실제 서버와 통신합니다.
 /// </summary>
-public sealed class ClientViewModel : ObservableObject
+public sealed partial class ClientViewModel : ObservableObject
 {
     private readonly InMemoryLogSink _logSink = new();
     private readonly object _activityLogSync = new();
@@ -36,13 +36,22 @@ public sealed class ClientViewModel : ObservableObject
     private readonly ScreenRenderer _screenRenderer;
     private readonly FileReceiver _fileReceiver;
     private readonly IDownloadsDirectory _downloadsDirectory;
+    private readonly IJoinPreferencesStore? _joinPreferences;
+    private readonly IDownloadLocationOpener _downloadLocationOpener;
     private readonly TcpClientService _tcpClient;
     private readonly IPacketSerializer _serializer = new PacketSerializer();
     private readonly IRdpViewerService _rdpViewerService;
     private SecureSessionChannel? _secureChannel;
     private StudentStatusClient? _statusClient;
     // 자동 재연결(U03): 마지막 참가 정보와 교수자가 준 일회용 토큰. 비밀번호는 보관하지 않는다.
-    private sealed record JoinTarget(string Host, int Port, string DisplayName);
+    private sealed record JoinTarget(string Host, int Port, string DisplayName)
+    {
+        public string RosterName { get; init; } = "";
+        public string StudentId { get; init; } = "";
+    }
+    private string NetworkDisplayName => _lastJoin?.DisplayName ?? DisplayName;
+    private string _studentId = "";
+    public string StudentId { get => _studentId; set => SetProperty(ref _studentId, value); }
     private JoinTarget? _lastJoin;
     private string? _reconnectToken;
     private TimeSpan _reconnectWindow = ReconnectRules.DefaultWindow;
@@ -55,6 +64,17 @@ public sealed class ClientViewModel : ObservableObject
     private bool _desktopAttached;
     private string _studentSharingStatus = "내 화면 공유 대기 중";
     public string StudentSharingStatus { get => _studentSharingStatus; private set => SetProperty(ref _studentSharingStatus, value); }
+    private bool _hasStudentSharingFailure;
+    private bool _canRetryStudentSharing;
+    private bool _retryingStudentSharing;
+    private bool _needsRdpRetry;
+    private bool _retryingRdp;
+    public bool HasStudentSharingFailure { get => _hasStudentSharingFailure; private set => SetProperty(ref _hasStudentSharingFailure, value); }
+    public bool NeedsRdpRetry
+    {
+        get => _needsRdpRetry;
+        private set { SetProperty(ref _needsRdpRetry, value); ReconnectRdpCommand?.RaiseCanExecuteChanged(); }
+    }
     // 참가 요청을 보낸 뒤 서버의 참가 승인(SessionJoined)을 기다리는 시도. 승인·거부·끊김·시간 초과 중 먼저 온 결과로 끝난다.
     private enum JoinAckResult { Joined, Rejected, Disconnected, TimedOut }
     private TaskCompletionSource<JoinAckResult>? _pendingJoinAck;
@@ -96,7 +116,7 @@ public sealed class ClientViewModel : ObservableObject
     private string _chatStatus = "채팅 대기 중";
     private string _renderStatus = "화면 프레임을 아직 받지 않았습니다.";
     private string _screenDetail = "프레임 메타데이터를 아직 받지 않았습니다.";
-    private string _downloadStatus = "다운로드 대기 중";
+    private string _downloadStatus = "";
     private string _fileTransferDetail = "파일 수신 이벤트가 없습니다.";
     private DateTimeOffset? _lastFrameReceivedAt;
     private string _frameFreshness = "프레임 없음";
@@ -109,8 +129,15 @@ public sealed class ClientViewModel : ObservableObject
     private bool _isStatusError;
     private string _statusMessage = string.Empty;
 
-    public ClientViewModel(IRdpViewerService? rdpViewerService = null, IDownloadsDirectory? downloadsDirectory = null)
+    public ClientViewModel(IRdpViewerService? rdpViewerService = null, IDownloadsDirectory? downloadsDirectory = null,
+        IJoinPreferencesStore? joinPreferences = null, IDownloadLocationOpener? downloadLocationOpener = null,
+        ITeacherDiscoveryClient? teacherDiscovery = null)
     {
+        _teacherDiscovery = teacherDiscovery ?? new TeacherDiscoveryClient();
+        InitializeSubmissions();
+        FindTeachersCommand = new RelayCommand(() => _ = FindTeachersAsync(), () => !IsConnected && !IsConnecting && !IsFindingTeachers);
+        _joinPreferences = joinPreferences;
+        _downloadLocationOpener = downloadLocationOpener ?? new DownloadLocationOpener();
         _rdpViewerService = rdpViewerService ?? new RdpViewerService(_logSink);
         _sessionClient = new SessionClient(_logSink);
         _screenRenderer = new ScreenRenderer();
@@ -127,7 +154,14 @@ public sealed class ClientViewModel : ObservableObject
         SendChatCommand = new RelayCommand(() => _ = SendChatAsync(), () => IsConnected && !string.IsNullOrWhiteSpace(ChatInput));
         SimulateScreenRenderCommand = new RelayCommand(() => _ = SimulateScreenRenderAsync());
         SimulateFileReceiveCommand = new RelayCommand(() => _ = SimulateFileReceiveAsync());
-        ReconnectRdpCommand = new RelayCommand(() => _ = SendRdpInvitationRequestAsync());
+        ReconnectRdpCommand = new RelayCommand(() => _ = RetryRdpAsync(), () => IsConnected && NeedsRdpRetry && !_retryingRdp && !_disposing);
+        RetryStudentSharingCommand = new RelayCommand(() => _ = RetryStudentSharingAsync(),
+            () => IsConnected && _canRetryStudentSharing && !_retryingStudentSharing && !_disposing);
+        OpenDownloadsFolderCommand = new RelayCommand(OpenDownloadsFolder);
+        ToggleCompanionPanelCommand = new RelayCommand(() => IsCompanionPanelVisible = !IsCompanionPanelVisible);
+        DismissAnnouncementCommand = new RelayCommand(Announcement.Dismiss);
+        ToggleAnnouncementInboxCommand = new RelayCommand(() => Announcement.IsOpen = !Announcement.IsOpen);
+        Announcement.Confirmed += item => _ = SendAnnouncementReceiptAsync(item.Id, AnnouncementReceipt.Confirmed);
         ToggleControlPermissionCommand = new RelayCommand(
             () => _ = ChangePermissionsAsync(_studentStatus.AllowViewing, !_studentStatus.AllowControl),
             () => _statusClient is not null && _studentStatus.AllowViewing);
@@ -141,10 +175,105 @@ public sealed class ClientViewModel : ObservableObject
         {
             Interval = TimeSpan.FromMilliseconds(500)
         };
-        _freshnessTimer.Tick += (_, _) => UpdateFrameFreshness();
+        _freshnessTimer.Tick += (_, _) => { UpdateFrameFreshness(); Announcement.Refresh(); };
         _freshnessTimer.Start();
 
+        LoadJoinPreferences();
+        Conversations.VisibleMessagesAdded += count => ChatReading.Receive(count);
+        ChatReading.PropertyChanged += (_, _) => OnPropertyChanged(nameof(CompanionPanelToggleText));
         SyncLogs();
+    }
+
+    private bool _rememberJoinDetails = true;
+    public bool RememberJoinDetails
+    {
+        get => _rememberJoinDetails;
+        set
+        {
+            if (SetProperty(ref _rememberJoinDetails, value) && !value)
+                SaveJoinPreferences(new JoinPreferences(false, "", "", 5000));
+        }
+    }
+    private string _preferencesNotice = "참가에 성공한 이름·IP·포트만 기억합니다. 비밀번호는 저장하지 않습니다.";
+    public string PreferencesNotice { get => _preferencesNotice; private set => SetProperty(ref _preferencesNotice, value); }
+    private bool _isCompanionPanelVisible = true;
+    public bool IsCompanionPanelVisible
+    {
+        get => _isCompanionPanelVisible;
+        set
+        {
+            if (SetProperty(ref _isCompanionPanelVisible, value))
+            {
+                ChatReading.IsVisible = value;
+                if (value && IsFilesPanelExpanded)
+                {
+                    _unseenFiles.Clear();
+                    HasNewFiles = false;
+                }
+                OnPropertyChanged(nameof(CompanionPanelToggleText));
+            }
+        }
+    }
+    public string CompanionPanelToggleText => IsCompanionPanelVisible ? "채팅·파일 접기" :
+        "채팅·파일 펼치기" + (ChatReading.HasUnread ? $" · 채팅 {ChatReading.UnreadCount}" : "") +
+        (HasNewFiles ? " · NEW!" : "");
+    public ChatReadingState ChatReading { get; } = new();
+    public AnnouncementBanner Announcement { get; } = new();
+    public RelayCommand DismissAnnouncementCommand { get; }
+    public RelayCommand ToggleAnnouncementInboxCommand { get; }
+    public RelayCommand ToggleCompanionPanelCommand { get; }
+    public RelayCommand OpenDownloadsFolderCommand { get; }
+    public ObservableCollection<ReceivedFileItem> ReceivedFiles { get; } = [];
+
+    private void LoadJoinPreferences()
+    {
+        try
+        {
+            if (_joinPreferences?.Load() is not { } saved) return;
+            _rememberJoinDetails = saved.Remember;
+            if (!saved.Remember) return;
+            DisplayName = saved.DisplayName;
+            HostAddress = saved.HostAddress;
+            Port = saved.Port;
+        }
+        catch (Exception ex)
+        {
+            PreferencesNotice = "이전 참가 정보를 읽지 못했습니다. 이름과 IP를 다시 입력해 주세요.";
+            _logSink.Write($"[Preferences] 읽기 실패: {ex.GetType().Name}");
+        }
+    }
+
+    private void SaveJoinPreferences(JoinPreferences value)
+    {
+        if (_joinPreferences is null) return;
+        try
+        {
+            _joinPreferences.Save(value);
+            PreferencesNotice = value.Remember ? "참가 정보를 기억했습니다. 비밀번호는 저장하지 않습니다." : "저장된 참가 정보를 지웠습니다.";
+        }
+        catch (Exception ex)
+        {
+            PreferencesNotice = value.Remember ? "참가는 유지되지만 참가 정보를 저장하지 못했습니다." : "저장된 참가 정보를 지우지 못했습니다.";
+            _logSink.Write($"[Preferences] 저장 실패: {ex.GetType().Name}");
+        }
+    }
+
+    private void OpenDownloadsFolder()
+    {
+        try { _downloadLocationOpener.OpenFolder(_downloadsDirectory.GetPath()); }
+        catch (Exception) { DownloadStatus = "다운로드 폴더를 열지 못했습니다. 폴더가 존재하는지와 접근 권한을 확인해 주세요."; }
+    }
+
+    private void RevealDownloadedFile(string path)
+    {
+        try { _downloadLocationOpener.RevealFile(path); }
+        catch (Exception) { DownloadStatus = "저장 위치를 열지 못했습니다. 파일이 이동·삭제되었는지와 접근 권한을 확인해 주세요."; }
+    }
+
+    private void RecordDownloadedFile(string path)
+    {
+        DownloadedFiles.Insert(0, Path.GetFileName(path));
+        ReceivedFiles.Insert(0, new ReceivedFileItem(path, RevealDownloadedFile));
     }
     private void UpdateFrameFreshness()
     {
@@ -284,11 +413,14 @@ public sealed class ClientViewModel : ObservableObject
         {
             if (SetProperty(ref _isConnected, value))
             {
+                if (!value) Announcement.Dismiss();
                 UpdatePlaceholder();
                 OnPropertyChanged(nameof(IsLectureViewActive));
                 JoinSessionCommand.RaiseCanExecuteChanged();
                 DisconnectCommand.RaiseCanExecuteChanged();
                 SendChatCommand.RaiseCanExecuteChanged();
+                ReconnectRdpCommand.RaiseCanExecuteChanged();
+                RetryStudentSharingCommand.RaiseCanExecuteChanged();
             }
         }
     }
@@ -310,7 +442,7 @@ public sealed class ClientViewModel : ObservableObject
     {
         PlaceholderTitle = IsConnected ? "공유 화면 대기 중" :
             _isReconnecting ? "세션 재연결 중" : "연결 대기 중";
-        PlaceholderSubtitle = IsConnected ? "세션에 참가했습니다. 공유 화면 연결 상태는 오른쪽 안내를 확인해 주세요." :
+        PlaceholderSubtitle = IsConnected ? "교수자가 공유를 시작하면 표시됩니다." :
             _isReconnecting ? "교수자 세션에 다시 연결하고 있습니다." : "세션에 참여하면 화면이 표시됩니다.";
     }
 
@@ -354,7 +486,13 @@ public sealed class ClientViewModel : ObservableObject
     public bool IsStatusError
     {
         get => _isStatusError;
-        private set => SetProperty(ref _isStatusError, value);
+        private set
+        {
+            SetProperty(ref _isStatusError, value);
+            OnPropertyChanged(nameof(HasActionStatus));
+            if (value)
+                IsCompanionPanelVisible = true; // 접어 둔 상태에서도 연결 실패 안내를 놓치지 않는다.
+        }
     }
 
     // 💡 UI 시스템 알림창의 텍스트와 연결되는 프로퍼티
@@ -367,6 +505,11 @@ public sealed class ClientViewModel : ObservableObject
     public ObservableCollection<string> ActivityLogs { get; } = [];
 
     public ObservableCollection<ChatLine> ChatMessages { get; } = [];
+    private ChatConversations? _conversations;
+    public ChatConversations Conversations => _conversations ??= new ChatConversations(ChatMessages) { KeepHistoryAcrossSessions = true };
+    private bool _supportsDirectChat;
+    private Guid _chatConnectionId;
+    private bool _isSendingChat;
 
     public ObservableCollection<string> DownloadedFiles { get; } = [];
 
@@ -382,7 +525,7 @@ public sealed class ClientViewModel : ObservableObject
         get => _isFilesPanelExpanded;
         set
         {
-            if (SetProperty(ref _isFilesPanelExpanded, value) && value)
+            if (SetProperty(ref _isFilesPanelExpanded, value) && value && IsCompanionPanelVisible)
             {
                 _unseenFiles.Clear();
                 HasNewFiles = false;
@@ -390,7 +533,14 @@ public sealed class ClientViewModel : ObservableObject
         }
     }
     /// <summary>패널이 닫혀 있는 동안 새 강의 파일이 등록됐으면 true입니다.</summary>
-    public bool HasNewFiles { get => _hasNewFiles; private set => SetProperty(ref _hasNewFiles, value); }
+    public bool HasNewFiles
+    {
+        get => _hasNewFiles;
+        private set
+        {
+            if (SetProperty(ref _hasNewFiles, value)) OnPropertyChanged(nameof(CompanionPanelToggleText));
+        }
+    }
 
     public RelayCommand JoinSessionCommand { get; }
 
@@ -403,6 +553,7 @@ public sealed class ClientViewModel : ObservableObject
     public RelayCommand SimulateFileReceiveCommand { get; }
 
     public RelayCommand ReconnectRdpCommand { get; }
+    public RelayCommand RetryStudentSharingCommand { get; }
 
     /// <summary>교수자 원격 제어 허용 켜기/끄기(U07). 화면 표시는 교수자가 반영한 상태로만 바뀝니다.</summary>
     public RelayCommand ToggleControlPermissionCommand { get; }
@@ -442,6 +593,7 @@ public sealed class ClientViewModel : ObservableObject
     public string ViewingToggleLabel => _studentStatus.AllowViewing ? "내 화면 보기 허용 끄기" : "내 화면 보기 허용 켜기";
     private async Task JoinSessionAsync()
     {
+        _discoveryCancellation?.Cancel();
         if (string.IsNullOrWhiteSpace(DisplayName))
         {
             ApplyJoinError(_sessionClient.CreateJoinError(HostAddress, Port, "표시 이름을 입력해야 합니다."));
@@ -451,6 +603,14 @@ public sealed class ClientViewModel : ObservableObject
         if (string.IsNullOrWhiteSpace(HostAddress) || Port <= 0)
         {
             ApplyJoinError(_sessionClient.CreateJoinError(HostAddress, Port, "접속 주소와 포트를 확인해 주세요."));
+            return;
+        }
+        var name = DisplayName.Trim(); var studentId = StudentId.Trim();
+        var connectionName = RosterIdentity.ConnectionName(name, studentId);
+        if (connectionName.Length > 80 || name.Any(char.IsControl) ||
+            (studentId.Length != 0 && (studentId.Length > 32 || !studentId.All(char.IsAsciiDigit))))
+        {
+            ApplyJoinError(_sessionClient.CreateJoinError(HostAddress, Port, "이름·학번을 확인해 주세요. 학번은 마스킹 없는 숫자로 입력합니다."));
             return;
         }
 
@@ -470,7 +630,9 @@ public sealed class ClientViewModel : ObservableObject
             _reconnectToken = null;
             _userLeaving = false;
             _sessionEnded = false;
-            _lastJoin = new JoinTarget(HostAddress, Port, DisplayName);
+            var target = new JoinTarget(HostAddress, Port, connectionName) { RosterName = name, StudentId = studentId };
+            Conversations.SetScope($"{target.Host.Trim().ToLowerInvariant()}:{target.Port}/{connectionName}");
+            _lastJoin = target;
 
             // 입력한 교수자 IP로 TLS 보호 채널을 연 뒤 방 비밀번호를 보내고 참가 티켓을 받는다.
             StatusMessage = "교수자 PC에 연결하는 중입니다...";
@@ -479,7 +641,7 @@ public sealed class ClientViewModel : ObservableObject
             try
             {
                 secure = await SecureRoomJoinClient.AuthenticateAsync(
-                    HostAddress, Port, DisplayName, roomPassword.AsMemory(), _logSink);
+                    target.Host, target.Port, target.DisplayName, roomPassword.AsMemory(), _logSink);
             }
             catch (SecureJoinException ex)
             {
@@ -505,7 +667,7 @@ public sealed class ClientViewModel : ObservableObject
 
             StatusMessage = "서버의 세션 참여 승인을 대기하고 있습니다.";
             // TCP 연결 (만약 서버가 꺼져있으면 여기서 catch 블록으로 튕깁니다)
-            var result = await SendJoinAndAwaitAckAsync(HostAddress, Port, DisplayName, secure.JoinTicket, CancellationToken.None);
+            var result = await SendJoinAndAwaitAckAsync(target.Host, target.Port, target.DisplayName, secure.JoinTicket, CancellationToken.None);
             SyncLogs();
             if (result == JoinAckResult.Joined || _userLeaving || _disposing) return;
 
@@ -599,7 +761,7 @@ public sealed class ClientViewModel : ObservableObject
         try
         {
             // Leave 패킷 전송
-            var leavePacket = _sessionClient.CreateLeaveRequest(DisplayName, "사용자 요청으로 연결 종료");
+            var leavePacket = _sessionClient.CreateLeaveRequest(NetworkDisplayName, "사용자 요청으로 연결 종료");
             await _tcpClient.SendAsync(leavePacket);
         }
         catch { }
@@ -625,10 +787,10 @@ public sealed class ClientViewModel : ObservableObject
             HasRemoteFrame = false;
             DisplaySource = null;
             ScreenDetail = "프레임 메타데이터를 아직 받지 않았습니다.";
-            DownloadStatus = "다운로드 대기 중";
+            DownloadStatus = "";
             FileTransferDetail = "파일 수신 이벤트가 없습니다.";
 
-            ChatMessages.Add(ChatLine.System($"{DisplayName} 님이 세션에서 나갔습니다."));
+            // 출입 기록은 교수자 명단에서 관리한다.
             _logSink.Write("세션 연결을 종료했습니다.");
             SyncLogs();
         });
@@ -636,26 +798,40 @@ public sealed class ClientViewModel : ObservableObject
 
     private async Task SendChatAsync()
     {
+        if (_isSendingChat || !IsConnected) return;
+        var original = ChatInput;
+        var conversation = Conversations.Selected;
         var trimmedMessage = ChatInput.Trim();
         if (string.IsNullOrWhiteSpace(trimmedMessage))
         {
             return;
         }
+        if (trimmedMessage.Length > 500 || (conversation.Key.Length != 0 && (!_supportsDirectChat || !conversation.IsAvailable)))
+        {
+            ChatStatus = "500자 이내로 입력해 주세요. 개인 채팅은 양쪽 앱이 지원해야 합니다.";
+            return;
+        }
 
         var chatPacket = PacketFactory.CreateChat(
-            senderId: DisplayName,
-            sender: DisplayName,
+            senderId: NetworkDisplayName,
+            sender: NetworkDisplayName,
             message: trimmedMessage,
             sessionId: _sessionClient.CurrentSession?.SessionId);
 
         try
         {
-            await _tcpClient.SendAsync(chatPacket);
+            _isSendingChat = true;
+            if (conversation.Key.Length == 0) await _tcpClient.SendAsync(chatPacket);
+            else await _tcpClient.SendAsync(new DirectChatPacket
+            {
+                SessionId = _sessionClient.CurrentSession?.SessionId, StudentConnectionId = _chatConnectionId,
+                Message = trimmedMessage
+            });
             _logSink.Write($"채팅 전송: {trimmedMessage}");
             LastServerMessage = "채팅 메시지를 서버로 전송했습니다.";
             LastSuccessMessage = "채팅 전송 성공";
             ChatStatus = $"최근 전송: {trimmedMessage}";
-            ChatInput = string.Empty;
+            if (ChatInput == original) ChatInput = string.Empty;
             SyncLogs();
         }
         catch (Exception ex)
@@ -665,6 +841,7 @@ public sealed class ClientViewModel : ObservableObject
             ChatStatus = "채팅 전송 실패";
             SyncLogs();
         }
+        finally { _isSendingChat = false; }
     }
 
     /// <summary>
@@ -690,6 +867,10 @@ public sealed class ClientViewModel : ObservableObject
                 }
                 break;
 
+            case PacketType.DirectChat:
+                var direct = JsonSerializer.Deserialize<DirectChatPacket>(payload);
+                if (direct is not null) HandleDirectChat(direct);
+                break;
             case PacketType.Chat:
                 var chatPacket = JsonSerializer.Deserialize<ChatPacket>(payload);
                 if (chatPacket is not null)
@@ -700,7 +881,7 @@ public sealed class ClientViewModel : ObservableObject
 
             case PacketType.Heartbeat:
                 var heartbeatResponse = PacketFactory.CreateHeartbeat(
-                    senderId: DisplayName,
+                    senderId: NetworkDisplayName,
                     sessionId: _sessionClient.CurrentSession?.SessionId);
                 try
                 {
@@ -745,6 +926,48 @@ public sealed class ClientViewModel : ObservableObject
                 break;
         }
     }
+    public async Task RetryRdpAsync()
+    {
+        if (!ReconnectRdpCommand.CanExecute(null)) return;
+        _retryingRdp = true;
+        ReconnectRdpCommand.RaiseCanExecuteChanged();
+        try { await SendRdpInvitationRequestAsync(); }
+        finally { _retryingRdp = false; ReconnectRdpCommand.RaiseCanExecuteChanged(); }
+    }
+
+    private async Task RetryStudentSharingAsync()
+    {
+        if (!RetryStudentSharingCommand.CanExecute(null) || _studentSharing is not { } sharing) return;
+        _retryingStudentSharing = true;
+        RetryStudentSharingCommand.RaiseCanExecuteChanged();
+        try { await sharing.RetryAsync(); }
+        catch (Exception ex) { _logSink.Write("[Reverse] 재시도 실패: " + ex.GetType().Name); }
+        finally
+        {
+            _retryingStudentSharing = false;
+            RefreshStudentSharingFailure(sharing);
+        }
+    }
+
+    private void RefreshStudentSharingFailure(StudentSharingSession sharing) => RunOnUiThread(() =>
+    {
+        if (!ReferenceEquals(_studentSharing, sharing)) return;
+        HasStudentSharingFailure = sharing.HasFailure;
+        _canRetryStudentSharing = sharing.CanRetry;
+        if (HasStudentSharingFailure) IsCompanionPanelVisible = true;
+        RetryStudentSharingCommand.RaiseCanExecuteChanged();
+    });
+
+    private void ReportRdpFailure(string message) => RunOnUiThread(() =>
+    {
+        if (!IsConnected || _disposing) return;
+        IsRdpActive = false;
+        RdpStatusText = message;
+        NeedsRdpRetry = true;
+        ResetStatusPriority();
+        UpdateStatus(message, StatusPriority.Error, isError: true);
+    });
+
     private async Task SendRdpInvitationRequestAsync()
     {
         try
@@ -756,7 +979,7 @@ public sealed class ClientViewModel : ObservableObject
             {
                 _currentRdpConnectionId = Guid.NewGuid();
                 _rdpSessionId = _sessionClient.CurrentSession.SessionId;
-                _rdpParticipant = DisplayName;
+                _rdpParticipant = NetworkDisplayName;
             }
             var requestPacket = PacketFactory.CreateRdpInvitationRequest(
                 _rdpParticipant, _rdpSessionId, _rdpParticipant, _currentRdpConnectionId);
@@ -766,7 +989,7 @@ public sealed class ClientViewModel : ObservableObject
         catch (Exception ex)
         {
             _logSink.Write($"[RDP] 초대 요청 실패: {ex.Message}");
-            RunOnUiThread(() => RdpStatusText = $"RDP 초대 요청 실패: {ex.Message}");
+            ReportRdpFailure($"RDP 초대 요청 실패: {ex.Message}");
         }
     }
 
@@ -838,7 +1061,7 @@ public sealed class ClientViewModel : ObservableObject
         if (expired)
         {
             _logSink.Write("[RDP] 만료된 초대 비밀번호로 자동 연결하지 않음");
-            RunOnUiThread(() => RdpStatusText = "RDP 초대가 만료되었습니다. 다시 요청해 주세요.");
+            ReportRdpFailure("RDP 초대가 만료되었습니다. 다시 시도해 주세요.");
             return;
         }
         _logSink.Write("[RDP] 보호 채널로 받은 초대로 자동 연결 시작");
@@ -867,7 +1090,16 @@ public sealed class ClientViewModel : ObservableObject
             }
             await _rdpViewerService.ConnectAsync(invitation, password);
         }
-        catch (Exception ex) { RunOnUiThread(() => RdpStatusText = $"RDP 연결 실패: {ex.Message}"); }
+        catch (Exception ex)
+        {
+            // 이전 시도의 늦은 실패가 새 연결의 성공 상태를 덮지 않는다.
+            RunOnUiThread(() =>
+            {
+                if (invitation is not null && invitation.ConnectionId == _currentRdpConnectionId &&
+                    invitation.InvitationId == _activeRdpInvitation?.InvitationId)
+                    ReportRdpFailure($"RDP 연결 실패: {ex.Message}");
+            });
+        }
     }
 
     private async Task HandleRdpInvitationRevokedAsync(RdpInvitationRevokedPacket revoked)
@@ -897,6 +1129,7 @@ public sealed class ClientViewModel : ObservableObject
             RdpStatusText = $"RDP: {status.State}" + (status.Failure != RdpFailureReason.None ? $" ({status.Failure})" : "");
             if (status.State == RdpConnectionState.Connected)
             {
+                NeedsRdpRetry = false;
                 ResetStatusPriority();
                 UpdateStatus("교수자 화면에 연결되었습니다.", StatusPriority.Success);
             }
@@ -907,6 +1140,7 @@ public sealed class ClientViewModel : ObservableObject
             }
             else if (IsConnected && status.State == RdpConnectionState.Failed)
             {
+                NeedsRdpRetry = true;
                 ResetStatusPriority();
                 UpdateStatus($"교수자 화면에 연결하지 못했습니다. ({status.Failure})", StatusPriority.Error, isError: true);
             }
@@ -930,8 +1164,16 @@ public sealed class ClientViewModel : ObservableObject
 
             if (packet.AckCode == AckCodes.SessionJoined)
             {
+                if (packet.SessionId is { } noticeSession) Announcement.SetSession(noticeSession);
                 _ = _sessionClient.ApplyJoinAckAsync(packet, HostAddress, Port);
+                if (packet.SessionId is { } chatSession) Conversations.SetSession(chatSession);
+                _supportsDirectChat = packet.SupportsDirectChat && packet.StudentConnectionId is not null;
+                _chatConnectionId = packet.StudentConnectionId ?? Guid.Empty;
+                if (_supportsDirectChat) Conversations.GetOrAdd("professor", "교수자").IsAvailable = true;
+                else foreach (var conversation in Conversations.Items.Where(x => x.Key.Length != 0)) conversation.IsAvailable = false;
                 IsConnected = true;
+                if (RememberJoinDetails && _lastJoin is { } joined)
+                    SaveJoinPreferences(new JoinPreferences(true, joined.RosterName.Length == 0 ? joined.DisplayName : joined.RosterName, joined.Host, joined.Port));
 
                 IsConnecting = false;
                 // 💡 변경: Success 우선순위 적용
@@ -943,7 +1185,7 @@ public sealed class ClientViewModel : ObservableObject
                 LastSuccessMessage = "세션 참가 성공";
                 LastErrorMessage = "오류 없음";
                 ChatStatus = "채팅 가능";
-                ChatMessages.Add(ChatLine.System($"{DisplayName} 님이 세션에 참가했습니다."));
+                // 참가 알림은 승인된 이름으로 서버가 방송한다. 로컬 알림을 더하면 두 줄이 된다.
                 _ = SendRdpInvitationRequestAsync();
             }
             else if (packet.AckCode == AckCodes.SessionLeft)
@@ -988,11 +1230,14 @@ public sealed class ClientViewModel : ObservableObject
 
             if (IsConnected && packet.ErrorCode == ErrorCodes.RdpSharingNotStarted)
             {
+                NeedsRdpRetry = false;
                 // 참가 직후 교수자가 아직 공유 전이면 서버가 대기열에 올려 두고, 공유가 시작되면 자동으로 다시 연결한다.
                 // 오류가 아니라 대기 상태이므로 지속되는 오류 표시로 남기지 않는다.
                 ResetStatusPriority();
                 UpdateStatus("교수자가 화면 공유를 시작하면 자동으로 연결됩니다.", StatusPriority.Info);
             }
+            else if (IsConnected && packet.ErrorCode == ErrorCodes.RdpInvitationFailed)
+                ReportRdpFailure($"화면 연결 정보를 받지 못했습니다. {packet.Message}");
             else
                 UpdateStatus($"[서버 에러] {packet.Message}", StatusPriority.Error, isError: true);
 
@@ -1016,6 +1261,18 @@ public sealed class ClientViewModel : ObservableObject
     {
         RunOnUiThread(() =>
         {
+            if (packet.AnnouncementReceipt != AnnouncementReceipt.None) return;
+            if (packet.IsAnnouncement)
+            {
+                if (packet.SessionId is { } session && session != _sessionClient.CurrentSession?.SessionId) return;
+                var id = packet.AnnouncementId ?? packet.CorrelationId;
+                var alreadySeen = Announcement.Items.Any(x => x.Id == id);
+                var item = Announcement.Receive(id, packet.Message, packet.IsImportantAnnouncement, packet.SentAt, packet.IsAnnouncementHistory);
+                if (packet.AnnouncementId is not null)
+                    _ = SendAnnouncementReceiptAsync(id, item.IsRead ? AnnouncementReceipt.Confirmed : AnnouncementReceipt.Received);
+                if (alreadySeen) return;
+                if (packet.IsImportantAnnouncement) Conversations.RequestAttention();
+            }
     
             if (packet.IsSystemMessage)
             {
@@ -1024,13 +1281,41 @@ public sealed class ClientViewModel : ObservableObject
             }
             else
             {
-                ChatMessages.Add(ChatLine.User(packet.Sender, packet.Message, isSelf: packet.Sender == DisplayName));
+                ChatMessages.Add(ChatLine.User(packet.IsAnnouncement ? packet.Sender + " · 공지" : packet.Sender,
+                    packet.Message, isSelf: packet.Sender == NetworkDisplayName));
                 ChatStatus = $"최근 수신: {packet.Sender} - {packet.Message}";
             }
 
             _logSink.Write($"채팅 수신: {packet.Sender}");
             SyncLogs();
         });
+    }
+
+    private void HandleDirectChat(DirectChatPacket packet)
+    {
+        RunOnUiThread(() =>
+        {
+            if (!_supportsDirectChat || !IsConnected || packet.SessionId != _sessionClient.CurrentSession?.SessionId ||
+                packet.StudentConnectionId != _chatConnectionId || string.IsNullOrWhiteSpace(packet.Message) || packet.Message.Length > 500) return;
+            Conversations.GetOrAdd("professor", "교수자").Messages.Add(ChatLine.User(
+                packet.FromProfessor ? "교수자" : DisplayName, packet.Message, isSelf: !packet.FromProfessor));
+            ChatStatus = packet.FromProfessor ? "교수자의 개인 메시지 수신" : "개인 메시지 서버 접수";
+        });
+    }
+
+    private async Task SendAnnouncementReceiptAsync(Guid id, AnnouncementReceipt receipt)
+    {
+        if (!IsConnected || _sessionClient.CurrentSession is not { } session) return;
+        try
+        {
+            await _tcpClient.SendAsync(new ChatPacket
+            { SessionId = session.SessionId, AnnouncementId = id, AnnouncementReceipt = receipt });
+        }
+        catch (Exception ex)
+        {
+            _logSink.Write($"[Announcement] 응답 전송 실패: {ex.GetType().Name}");
+            RunOnUiThread(() => ChatStatus = "공지 확인 상태를 보내지 못했습니다. 공지함에서 확인을 다시 눌러 주세요.");
+        }
     }
 
     private async Task HandleScreenAsync(ScreenPacket packet)
@@ -1168,8 +1453,8 @@ public sealed class ClientViewModel : ObservableObject
             // 🟢 5. 수신 및 저장 완료 UI 반영
             RunOnUiThread(() =>
             {
-                DownloadedFiles.Insert(0, Path.GetFileName(path));
-                DownloadStatus = $"{Path.GetFileName(path)} 저장 완료 (다운로드 폴더)";
+                RecordDownloadedFile(path);
+                DownloadStatus = "";
                 LastServerMessage = "파일 수신이 완료되었습니다.";
                 LastSuccessMessage = result.StatusMessage;
                 FileTransferDetail = $"{BuildFileTransferDetail(packet, result)} / 저장 위치 {path}";
@@ -1362,7 +1647,10 @@ public sealed class ClientViewModel : ObservableObject
         try
         {
             await _tcpClient.ConnectAsync(host, port);
-            await _tcpClient.SendAsync(_sessionClient.CreateJoinRequest(host, port, displayName, joinTicket));
+            var request = _sessionClient.CreateJoinRequest(host, port, displayName, joinTicket);
+            request.RosterName = _lastJoin?.RosterName ?? DisplayName;
+            request.StudentId = _lastJoin?.StudentId ?? StudentId;
+            await _tcpClient.SendAsync(request);
             _logSink.Write($"세션 참가 요청 전송: {displayName} -> {host}:{port}");
 
             // 승인과 시간 초과·취소가 겹쳐도 먼저 기록된 한쪽만 인정한다.
@@ -1400,7 +1688,7 @@ public sealed class ClientViewModel : ObservableObject
             _rdpSessionId = Guid.Empty;
             _rdpParticipant = string.Empty;
         }
-        RunOnUiThread(() => { IsRdpActive = false; RdpStatusText = "RDP 대기 중"; });
+        RunOnUiThread(() => { IsRdpActive = false; NeedsRdpRetry = false; RdpStatusText = "RDP 대기 중"; });
         await _rdpViewerService.DisconnectAsync();
     }
 
@@ -1408,6 +1696,7 @@ public sealed class ClientViewModel : ObservableObject
     {
         if (_disposing) return;
         _disposing = true;
+        _discoveryCancellation?.Cancel();
         _freshnessTimer.Stop();
         try
         {
@@ -1442,9 +1731,17 @@ public sealed class ClientViewModel : ObservableObject
 
     private void AttachStudentStatus(SecureSessionChannel secure)
     {
+        var submissionClient = new SubmissionClient(secure.SessionId, secure.Connection);
+        _submissionClient = submissionClient;
+        submissionClient.Changed += () => RunOnUiThread(() =>
+        {
+            if (!ReferenceEquals(_submissionClient, submissionClient)) return;
+            if (_submissionCancellation is null) SubmissionStatus = submissionClient.IsOpen ? "제출 열림" : "제출 닫힘";
+            RefreshSubmissionCommands();
+        });
         var statusClient = new StudentStatusClient(secure.SessionId, secure.Connection, _logSink);
         statusClient.StatusChanged += status => RunOnUiThread(() => ApplyStudentStatus(status));
-        var fileClient = new SessionFileRequestClient(secure.SessionId, secure.Connection, new SessionFileDownloader(), _logSink);
+        var fileClient = new SessionFileRequestClient(secure.SessionId, secure.Connection, new SessionFileDownloader(_downloadsDirectory), _logSink);
         fileClient.CatalogChanged += catalog => RunOnUiThread(() => ApplyFileCatalog(catalog));
         var reverseClient = new ReverseCollaborationClient(secure.SessionId, secure.Connection, _logSink);
         statusClient.RoomChanged += reverseClient.ApplyRoom;
@@ -1453,7 +1750,12 @@ public sealed class ClientViewModel : ObservableObject
         _studentSharing = sharing;
         if (sharing is not null)
         {
-            sharing.StatusChanged += message => RunOnUiThread(() => StudentSharingStatus = message);
+            sharing.StatusChanged += message => RunOnUiThread(() =>
+            {
+                if (!ReferenceEquals(_studentSharing, sharing)) return;
+                StudentSharingStatus = message;
+                RefreshStudentSharingFailure(sharing);
+            });
             statusClient.RoomChanged += room => _ = ApplySharingRoomAsync(sharing, room);
         }
         secure.FrameReceived += frame =>
@@ -1461,7 +1763,9 @@ public sealed class ClientViewModel : ObservableObject
             try
             {
                 var kind = CollaborationFrameInspector.PeekKind(frame);
-                if (StudentStatusClient.Handles(kind))
+                if (kind == CollaborationMessageKind.Submission)
+                    submissionClient.Receive(CollaborationMessageCodec.Decode<SubmissionMessage>(frame, out _));
+                else if (StudentStatusClient.Handles(kind))
                     statusClient.HandleFrame(frame);
                 else if (kind == CollaborationMessageKind.RemoteInputCommand && sharing is not null)
                     return sharing.HandleInputAsync(CollaborationMessageCodec.Decode<RemoteInputCommandNotice>(frame, out _));
@@ -1508,6 +1812,9 @@ public sealed class ClientViewModel : ObservableObject
 
     private void DetachStudentStatus()
     {
+        Interlocked.Exchange(ref _submissionClient, null)?.ConnectionClosed();
+        _submissionCancellation?.Cancel();
+        RunOnUiThread(() => { SubmissionStatus = "연결 종료 · 새 연결에서 제출 상태를 확인해 주세요."; RefreshSubmissionCommands(); });
         _statusClient = null;
         _reverseClient = null;
         // 진행 중인 다운로드는 임시 파일을 지우고 실패로 끝난다.
@@ -1515,6 +1822,9 @@ public sealed class ClientViewModel : ObservableObject
         RunOnUiThread(() =>
         {
             ApplyStudentStatus(StudentStatus.Initial);
+            HasStudentSharingFailure = false;
+            _canRetryStudentSharing = false;
+            RetryStudentSharingCommand.RaiseCanExecuteChanged();
             SessionFiles.Clear();
             _unseenFiles.Clear();
             HasNewFiles = false;
@@ -1529,6 +1839,7 @@ public sealed class ClientViewModel : ObservableObject
             _logSink.Write("[Reverse] 학생 공유 상태 적용 실패: " + ex.GetType().Name);
             RunOnUiThread(() => StudentSharingStatus = "공유/입력 차단 확인이 필요합니다.");
         }
+        finally { RefreshStudentSharingFailure(sharing); }
     }
 
     /// <summary>목록이 바뀌어도 받는 중인 항목의 진행 표시는 유지하고, 사라진 파일만 내립니다.</summary>
@@ -1545,7 +1856,7 @@ public sealed class ClientViewModel : ObservableObject
             if (!current.ContainsKey((file.FileId, file.Revision)))
             {
                 SessionFiles.Add(new SessionFileItem(file, DownloadSessionFileAsync));
-                if (!IsFilesPanelExpanded) _unseenFiles.Add((file.FileId, file.Revision));
+                if (!IsFilesPanelExpanded || !IsCompanionPanelVisible) _unseenFiles.Add((file.FileId, file.Revision));
             }
         }
         HasNewFiles = _unseenFiles.Count > 0;
@@ -1555,20 +1866,32 @@ public sealed class ClientViewModel : ObservableObject
     {
         var fileClient = _fileClient;
         if (fileClient is null || item.IsDownloading) return;
-        item.IsDownloading = true;
+        var cancellationToken = item.BeginDownload();
+        var finished = false;
         item.Status = "받는 중 0%";
         // UI 스레드에서 만든 Progress는 보고를 UI 스레드로 돌려준다.
         var progress = new Progress<DownloadProgress>(report =>
-            item.Status = report.TotalBytes == 0 ? "받는 중" : $"받는 중 {report.ReceivedBytes * 100 / report.TotalBytes}%");
+        {
+            if (!finished && !cancellationToken.IsCancellationRequested)
+                item.Status = report.TotalBytes == 0 ? "받는 중" : $"받는 중 {report.ReceivedBytes * 100 / report.TotalBytes}%";
+        });
         try
         {
-            var receipt = await fileClient.DownloadAsync(item.File.FileId, progress);
-            item.Status = "저장됨 (다운로드 폴더)";
-            DownloadedFiles.Insert(0, Path.GetFileName(receipt.LocalPath));
-            DownloadStatus = $"{item.File.FileName}을(를) 다운로드 폴더에 저장했습니다.";
+            var receipt = await fileClient.DownloadAsync(item.File.FileId, progress, cancellationToken);
+            finished = true;
+            item.Status = "";
+            RecordDownloadedFile(receipt.LocalPath);
+            DownloadStatus = "";
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            finished = true;
+            item.Status = "취소됨 · 다시 다운로드 가능";
+            DownloadStatus = $"{item.File.FileName} 다운로드를 취소했습니다.";
         }
         catch (Exception ex)
         {
+            finished = true;
             var failure = CollaborationErrorCatalog.FromException(ex);
             item.Status = "실패: " + failure.UserMessage;
             DownloadStatus = $"{item.File.FileName} 다운로드 실패: {failure.UserMessage}";
@@ -1576,7 +1899,8 @@ public sealed class ClientViewModel : ObservableObject
         }
         finally
         {
-            item.IsDownloading = false;
+            finished = true;
+            item.EndDownload();
             SyncLogs();
         }
     }
@@ -1674,6 +1998,7 @@ public sealed class ClientViewModel : ObservableObject
     }
 
     private StatusPriority _currentStatusPriority = StatusPriority.Idle;
+    public bool HasActionStatus => IsStatusError || _currentStatusPriority == StatusPriority.Progress;
     private string? _statusSource;
 
     /// <summary>
@@ -1696,6 +2021,7 @@ public sealed class ClientViewModel : ObservableObject
             _statusSource = source;
             IsStatusError = isError;
             StatusMessage = message;
+            OnPropertyChanged(nameof(HasActionStatus));
         });
     }
 
