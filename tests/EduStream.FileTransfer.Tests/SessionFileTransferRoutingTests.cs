@@ -54,6 +54,10 @@ public sealed class SessionFileTransferRoutingTests
         Assert.Equal(file.Sha256, notice.Sha256, ignoreCase: true);
         await WaitUntilAsync(() => fixture.Router.PendingTransferCount == 0);
         Assert.Equal(0, peer.Client.PendingDownloadCount);
+        var delivery = Assert.Single(fixture.Router.DeliveryStatus);
+        Assert.Equal("저장 완료", delivery.Status);
+        Assert.Equal(notice.RequestId, delivery.RequestId);
+        Assert.True(delivery.IsTerminal);
     }
 
     [Fact]
@@ -102,6 +106,7 @@ public sealed class SessionFileTransferRoutingTests
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => download.WaitAsync(Timeout));
         await WaitUntilAsync(() => fixture.Router.PendingTransferCount == 0);
         Assert.Empty(fixture.DownloadedFiles());
+        Assert.DoesNotContain(fixture.Router.DeliveryStatus, x => x.Status == "저장 완료");
     }
 
     [Fact]
