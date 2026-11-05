@@ -38,6 +38,14 @@ public sealed class AdditionalFeaturesHeadlessIntegrationTests
             await Until(() => manager.ParticipantCount == 3 && manager.DirectChatRecipients.Count == 3, "명단 연결");
             Assert.Equal(3, manager.Attendance.Presence.Count(x => x.Connected));
 
+            clients[0].ChatInput = "동명이인 공개 채팅";
+            clients[0].SendChatCommand.Execute(null);
+            await Until(() => publicMessages.All(messages => messages.Contains("동명이인 공개 채팅")), "공개 채팅 수신");
+            var echoes = clients.Select(client => client.ChatMessages.Single(line => line.Message == "동명이인 공개 채팅")).ToArray();
+            Assert.All(echoes, line => Assert.Equal("동명이인", line.Sender));
+            Assert.True(echoes[0].IsSelf);
+            Assert.All(echoes.Skip(1), line => Assert.False(line.IsSelf));
+
             var privateReceived = new ConcurrentQueue<DirectChatPacket>();
             var privateMessages = new ConcurrentQueue<string>[clients.Length];
             manager.DirectChatReceived += privateReceived.Enqueue;
