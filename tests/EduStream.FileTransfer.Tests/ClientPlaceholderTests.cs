@@ -7,9 +7,9 @@ public sealed class ClientPlaceholderTests
 {
     [Theory]
     [InlineData(false, false, "연결 대기 중", "세션에 참여하면")]
-    [InlineData(true, false, "공유 화면 대기 중", "세션에 참가했습니다")]
+    [InlineData(true, false, "공유 화면 대기 중", "교수자가 공유를 시작하면")]
     [InlineData(false, true, "세션 재연결 중", "다시 연결")]
-    [InlineData(true, true, "공유 화면 대기 중", "세션에 참가했습니다")]
+    [InlineData(true, true, "공유 화면 대기 중", "교수자가 공유를 시작하면")]
     public async Task Placeholder_FollowsConnectionInsteadOfAlwaysAskingToJoin(
         bool connected, bool reconnecting, string title, string subtitle)
     {

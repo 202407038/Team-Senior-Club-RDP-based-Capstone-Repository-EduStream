@@ -6,6 +6,22 @@ namespace EduStream.FileTransfer.Tests;
 
 public sealed class ClientNewFileBadgeTests
 {
+    [Fact]
+    public async Task HiddenSidebarDoesNotMarkNewFilesRead()
+    {
+        var vm = new ClientViewModel();
+        try
+        {
+            vm.IsFilesPanelExpanded = true;
+            vm.IsCompanionPanelVisible = false;
+            Apply(vm, File());
+            Assert.True(vm.HasNewFiles);
+            Assert.Contains("NEW!", vm.CompanionPanelToggleText);
+            vm.IsCompanionPanelVisible = true;
+            Assert.False(vm.HasNewFiles);
+        }
+        finally { await vm.ShutdownAsync(); }
+    }
     private static readonly Guid Session = Guid.NewGuid();
     private static SessionFileDescriptor File() => new(Session, Guid.NewGuid(), 1, "note.txt", 1, new string('a', 64), 1024);
     private static void Apply(ClientViewModel vm, params SessionFileDescriptor[] files) =>

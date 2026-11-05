@@ -110,6 +110,41 @@ public sealed class SessionFileTransferRoutingTests
     }
 
     [Fact]
+    public async Task ViewModelCancelButtonCancelsTransferAndAllowsCleanRetry()
+    {
+        using var fixture = new Fixture();
+        var file = await fixture.RegisterAsync(FileTransferRules.DefaultChunkSize * 4);
+        await using var peer = await fixture.ConnectAsync();
+        var gate = peer.ToClient.HoldChunksAfter(0);
+        var vm = new EduStream.Client.ViewModels.ClientViewModel();
+        var flags = System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance;
+        typeof(EduStream.Client.ViewModels.ClientViewModel).GetField("_fileClient", flags)!.SetValue(vm, peer.Client);
+        var apply = typeof(EduStream.Client.ViewModels.ClientViewModel).GetMethod("ApplyFileCatalog", flags)!;
+        apply.Invoke(vm, [peer.Client.Catalog]);
+        var item = Assert.Single(vm.SessionFiles);
+        try
+        {
+            item.DownloadCommand.Execute(null);
+            await gate.Reached.Task.WaitAsync(Timeout);
+            Assert.True(item.IsDownloading);
+            item.CancelCommand.Execute(null);
+            await WaitUntilAsync(() => !item.IsDownloading);
+            await WaitUntilAsync(() => fixture.Router.PendingTransferCount == 0);
+            Assert.Contains("취소됨", item.Status);
+            Assert.Empty(fixture.DownloadedFiles());
+            Assert.Empty(vm.ReceivedFiles);
+            gate.Release.TrySetResult();
+            item.DownloadCommand.Execute(null);
+            await WaitUntilAsync(() => !item.IsDownloading);
+            Assert.Empty(item.Status); // 성공은 아래 받은 파일 목록과 실제 바이트로 확인
+            Assert.Single(vm.ReceivedFiles);
+            Assert.Equal(await File.ReadAllBytesAsync(fixture.SourcePath(file)),
+                await File.ReadAllBytesAsync(vm.ReceivedFiles[0].LocalPath));
+        }
+        finally { await vm.ShutdownAsync(); }
+    }
+
+    [Fact]
     public async Task UnregisterDuringTransfer_CatalogUpdateCancelsStudentDownload()
     {
         using var fixture = new Fixture();
