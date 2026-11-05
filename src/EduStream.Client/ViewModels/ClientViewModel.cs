@@ -1281,8 +1281,11 @@ public sealed partial class ClientViewModel : ObservableObject
             }
             else
             {
+                var isSelf = _chatConnectionId != Guid.Empty && Guid.TryParseExact(packet.SenderId, "D", out var senderConnectionId)
+                    ? senderConnectionId == _chatConnectionId
+                    : packet.Sender == NetworkDisplayName;
                 ChatMessages.Add(ChatLine.User(packet.IsAnnouncement ? packet.Sender + " · 공지" : packet.Sender,
-                    packet.Message, isSelf: packet.Sender == NetworkDisplayName));
+                    packet.Message, isSelf: isSelf));
                 ChatStatus = $"최근 수신: {packet.Sender} - {packet.Message}";
             }
 
