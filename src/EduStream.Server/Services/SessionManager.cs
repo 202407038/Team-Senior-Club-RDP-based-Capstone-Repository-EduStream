@@ -94,8 +94,9 @@ public sealed partial class SessionManager
     /// </summary>
     public event Action<string>? RdpInvitationPasswordWithdrawn;
 
-    public SessionManager(ILogSink logSink, TcpServerService tcpServer)
+    public SessionManager(ILogSink logSink, TcpServerService tcpServer, string? submissionDirectory = null)
     {
+        _submissionDirectory = submissionDirectory ?? System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "EduStream", "학생제출");
         _logSink = logSink;
         _tcpServer = tcpServer;
 
@@ -460,6 +461,7 @@ public sealed partial class SessionManager
                 CurrentSession.SessionId, Guid.NewGuid(), Guid.NewGuid(), ParticipantRole.Professor);
             Announcements.Reset(CurrentSession.SessionId);
             Attendance.Start(CurrentSession.SessionId, _rosterAdmission.ActiveRows);
+            InitializeSubmissions(CurrentSession.SessionId);
             _controlCoordinator = new ServerRemoteControlCoordinator(
                 _professorConnection, _participantRegistry, _remoteInputGate, _logSink);
             _controlCoordinator.StateChanged += OnControlStateChanged;
@@ -544,6 +546,8 @@ public sealed partial class SessionManager
             _professorConnection = null;
             _roomPassword = null;
             _fileTransfers?.Dispose();
+            Submissions?.Dispose();
+            Submissions = null;
             _fileTransfers = null;
             _reverseRouter?.Dispose();
             _reverseRouter = null;
@@ -584,6 +588,9 @@ public sealed partial class SessionManager
             var kind = CollaborationFrameInspector.PeekKind(frame);
             switch (kind)
             {
+                case CollaborationMessageKind.Submission:
+                    await HandleSubmissionAsync(clientId, secure, frame);
+                    break;
                 case CollaborationMessageKind.PermissionChange:
                     var request = CollaborationMessageCodec.Decode<PermissionChangeRequest>(frame, out _);
                     if (_clientDisplayNames.TryGetValue(clientId, out var displayName))
@@ -764,6 +771,8 @@ public sealed partial class SessionManager
         try
         {
             await router.AttachAsync(participant, secure);
+            if (Submissions is { } submissions)
+                await SendSecureAsync(secure, CollaborationMessageCodec.Encode(Guid.NewGuid(), new SubmissionMessage(submissions.SessionId, Guid.Empty, SubmissionAction.State, IsOpen: submissions.IsOpen)), clientId);
         }
         catch (Exception ex)
         {
@@ -1549,6 +1558,7 @@ public sealed partial class SessionManager
         lock (_sessionLock)
         {
             if (!_clientDisplayNames.TryRemove(clientId, out displayName)) return null;
+            if (_participantRegistry.TryGetConnection(clientId) is { } leaving) Submissions?.Cancel(leaving.ConnectionId);
             Attendance.Leave(clientId, action);
             _directChatClients.TryRemove(clientId, out _);
             _participants.TryRemove(displayName, out _);
