@@ -84,6 +84,7 @@ public sealed class ServerRdpIntegrationTests
             await vm.StopRdpShareAsync();
             Assert.False(vm.IsRdpSharing);
             Assert.True(vm.IsSessionOpen);
+            Assert.Equal("WDS 화면 공유 중지됨 · 학생 화면/제어는 유지", vm.RdpStatus);
         }
         finally { await vm.ShutdownAsync(); }
         Assert.True(service.Disposed);
