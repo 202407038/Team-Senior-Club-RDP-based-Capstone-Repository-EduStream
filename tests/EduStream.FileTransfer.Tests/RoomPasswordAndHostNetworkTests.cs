@@ -343,6 +343,38 @@ public sealed class RoomPasswordAndHostNetworkTests
         Assert.Throws<InvalidOperationException>(() => rig.SessionManager.ConfigureRosterAdmission([], false));
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task PublicChat_OtherStudentReceivesNameAndOpaqueConnectionIdNotStudentNumber(bool rosterEnabled)
+    {
+        const string name = "합성 학생";
+        const string senderNumber = "99000001";
+        const string receiverNumber = "99000002";
+        await using var rig = await Rig.OpenAsync(roster: rosterEnabled
+            ? [new(2, name, senderNumber, "", ""), new(3, name, receiverNumber, "", "")]
+            : null);
+        var sender = await rig.ConnectRecorderAsync(null);
+        var receiver = await rig.ConnectRecorderAsync(null);
+        foreach (var (peer, number) in new[] { (sender, senderNumber), (receiver, receiverNumber) })
+        {
+            var join = PacketFactory.CreateSessionJoin("synthetic", RosterIdentity.ConnectionName(name, number), "127.0.0.1", rig.Port);
+            join.RosterName = name;
+            join.StudentId = number;
+            await peer.Client.SendAsync(join);
+            await WaitUntilAsync(() => peer.Count(PacketType.Ack) == 1, DefaultWait);
+        }
+
+        var identity = RosterIdentity.ConnectionName(name, senderNumber);
+        await sender.Client.SendAsync(new ChatPacket { Sender = "위조 이름", SenderId = identity, Message = "privacy-probe" });
+        await WaitUntilAsync(() => receiver.Chat("privacy-probe") is not null, DefaultWait);
+        var delivered = receiver.Chat("privacy-probe")!;
+        Assert.Equal(name, delivered.Sender);
+        Assert.True(Guid.TryParseExact(delivered.SenderId, "D", out var publicId));
+        Assert.Equal(sender.JoinedConnectionId(), publicId);
+        Assert.NotEqual(receiver.JoinedConnectionId(), publicId);
+    }
+
     private static async Task WaitUntilAsync(Func<bool> condition, TimeSpan timeout)
     {
         var deadline = DateTime.UtcNow + timeout;
@@ -364,6 +396,8 @@ public sealed class RoomPasswordAndHostNetworkTests
         public void Record(PacketType type, byte[] payload) => _received.Enqueue((type, payload));
 
         public int Count(PacketType type) => _received.Count(p => p.Type == type);
+        public Guid? JoinedConnectionId() => _received.Where(p => p.Type == PacketType.Ack)
+            .Select(p => JsonSerializer.Deserialize<AckPacket>(p.Payload)?.StudentConnectionId).Single();
         public DirectChatPacket? Direct() => _received.Where(p => p.Type == PacketType.DirectChat)
             .Select(p => JsonSerializer.Deserialize<DirectChatPacket>(p.Payload)).LastOrDefault();
         public ChatPacket? Chat(string message) => _received.Where(p => p.Type == PacketType.Chat)
