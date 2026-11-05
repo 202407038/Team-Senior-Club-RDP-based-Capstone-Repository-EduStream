@@ -611,6 +611,7 @@ public sealed class ServerViewModel : ObservableObject
                 RdpStatus = inputRevoke switch
                 {
                     RemoteInputRevokeStatus.Confirmed => "WDS 화면 공유 중지됨",
+                    RemoteInputRevokeStatus.Independent => "WDS 화면 공유 중지됨 · 학생 화면/제어는 유지",
                     RemoteInputRevokeStatus.Pending => "WDS 화면 공유 중지됨 · 원격 입력 차단 확인 대기 중",
                     _ => "WDS 화면 공유 중지됨 · 원격 입력 차단 확인 실패(재시도 대기)"
                 };
