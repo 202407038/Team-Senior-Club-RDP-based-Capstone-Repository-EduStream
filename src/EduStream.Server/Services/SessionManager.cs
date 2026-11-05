@@ -1071,8 +1071,11 @@ public sealed partial class SessionManager
             return;
         }
 
-        // 4) 송신자 이름을 서버 매핑 기준으로 강제 보정 (변조 방지)
-        chatPacket.Sender = verifiedName;
+        // 서버 내부의 이름(학번) 식별자는 참가·제어·파일에만 쓴다.
+        var participant = _participantRegistry.TryGetConnection(clientId);
+        if (participant is null) return;
+        chatPacket.Sender = PublicChatName(verifiedName);
+        chatPacket.SenderId = participant.ConnectionId.ToString("D");
         // 교수자 공지/시스템 안내는 학생 입력으로 만들 수 없다.
         chatPacket.IsAnnouncement = false;
         chatPacket.IsImportantAnnouncement = false;
@@ -1086,6 +1089,14 @@ public sealed partial class SessionManager
 
         ChatReceived?.Invoke(verifiedName, chatPacket.Message);
         _logSink.Write($"[Chat] 브로드캐스트: {verifiedName} → {targetCount}명");
+    }
+
+    private static string PublicChatName(string name)
+    {
+        var start = name.LastIndexOf(" (", StringComparison.Ordinal);
+        if (start <= 0 || !name.EndsWith(')')) return name;
+        var suffix = name[(start + 2)..^1];
+        return suffix.Length is > 0 and <= 32 && suffix.All(char.IsAsciiDigit) ? name[..start] : name;
     }
 
     private BasePacket HandleJoin(string clientId, SessionJoinPacket packet)
