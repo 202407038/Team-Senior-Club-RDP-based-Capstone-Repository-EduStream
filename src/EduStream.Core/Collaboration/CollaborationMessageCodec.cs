@@ -13,7 +13,8 @@ public enum CollaborationMessageKind
     RdpInvitationSecret = 14,
     ReverseRdpInvitation = 15, ReverseRdpInvitationSecret = 16,
     Annotation = 17,
-    RemoteInputCommand = 18, RemoteInputResult = 19
+    RemoteInputCommand = 18, RemoteInputResult = 19,
+    Submission = 20
 }
 public sealed record FileCancelRequest(Guid RequestId, Guid SessionId);
 public sealed record FileStoredNotice(Guid RequestId, Guid FileId, long Length, string Sha256);
@@ -71,6 +72,7 @@ public static class CollaborationMessageCodec
 
     private static CollaborationMessageKind KindFor(Type type)
     {
+        if (type == typeof(SubmissionMessage)) return CollaborationMessageKind.Submission;
         if (type == typeof(RoomJoined)) return CollaborationMessageKind.Participants;
         if (type == typeof(SessionFileCatalogSnapshot)) return CollaborationMessageKind.FileCatalog;
         if (type == typeof(SessionFileRequest)) return CollaborationMessageKind.FileRequest;
@@ -97,6 +99,7 @@ public static class CollaborationMessageCodec
     {
         switch (payload)
         {
+            case SubmissionMessage submission: submission.Validate(); break;
             case RoomJoined room:
                 if (room.Participants is null || room.Participants.Count > 256)
                     throw new CollaborationException(CollaborationError.ResourceLimit);
