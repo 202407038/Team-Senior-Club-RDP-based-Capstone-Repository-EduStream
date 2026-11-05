@@ -28,38 +28,38 @@
     <SolidColorBrush x:Key="BrushTextMuted" Color="{StaticResource TextMuted}" />
 
     <Style x:Key="PanelCard" TargetType="Border">
-        <Setter Property="Background" Value="{StaticResource BrushBgSurface}" />
-        <Setter Property="BorderBrush" Value="{StaticResource BrushBorder}" />
+        <Setter Property="Background" Value="{DynamicResource BrushBgSurface}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource BrushBorder}" />
         <Setter Property="BorderThickness" Value="1" />
         <Setter Property="CornerRadius" Value="10" />
         <Setter Property="Padding" Value="14" />
     </Style>
 
     <Style x:Key="SectionTitle" TargetType="TextBlock">
-        <Setter Property="Foreground" Value="{StaticResource BrushTextPrimary}" />
+        <Setter Property="Foreground" Value="{DynamicResource BrushTextPrimary}" />
         <Setter Property="FontWeight" Value="SemiBold" />
         <Setter Property="FontSize" Value="14" />
     </Style>
 
     <Style x:Key="FieldLabel" TargetType="TextBlock">
-        <Setter Property="Foreground" Value="{StaticResource BrushTextSecondary}" />
+        <Setter Property="Foreground" Value="{DynamicResource BrushTextSecondary}" />
         <Setter Property="FontSize" Value="12" />
         <Setter Property="Margin" Value="0,0,0,6" />
     </Style>
 
     <Style x:Key="DarkTextBox" TargetType="TextBox">
         <Setter Property="Padding" Value="10,8" />
-        <Setter Property="Background" Value="{StaticResource BrushBgInput}" />
-        <Setter Property="Foreground" Value="{StaticResource BrushTextPrimary}" />
-        <Setter Property="CaretBrush" Value="{StaticResource BrushAccentTeal}" />
+        <Setter Property="Background" Value="{DynamicResource BrushBgInput}" />
+        <Setter Property="Foreground" Value="{DynamicResource BrushTextPrimary}" />
+        <Setter Property="CaretBrush" Value="{DynamicResource BrushAccentTeal}" />
         <Setter Property="BorderThickness" Value="0" />
-        <Setter Property="SelectionBrush" Value="#5503DAC6" />
+        <Setter Property="SelectionBrush" Value="{DynamicResource BrushSelection}" />
     </Style>
 
     <Style x:Key="PrimaryButton" TargetType="Button">
         <Setter Property="Height" Value="38" />
-        <Setter Property="Background" Value="{StaticResource BrushAccentPurple}" />
-        <Setter Property="Foreground" Value="{StaticResource BrushBgPrimary}" />
+        <Setter Property="Background" Value="{DynamicResource BrushAccentPurple}" />
+        <Setter Property="Foreground" Value="{DynamicResource BrushBgPrimary}" />
         <Setter Property="FontWeight" Value="Bold" />
         <Setter Property="BorderThickness" Value="0" />
         <Setter Property="Cursor" Value="Hand" />
@@ -73,9 +73,6 @@
                         <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
                     </Border>
                     <ControlTemplate.Triggers>
-                        <Trigger Property="IsMouseOver" Value="True">
-                            <Setter TargetName="Root" Property="Background" Value="#D0A4FF" />
-                        </Trigger>
                         <Trigger Property="IsEnabled" Value="False">
                             <Setter TargetName="Root" Property="Opacity" Value="0.45" />
                         </Trigger>
@@ -83,15 +80,20 @@
                 </ControlTemplate>
             </Setter.Value>
         </Setter>
+        <Style.Triggers>
+            <Trigger Property="IsMouseOver" Value="True">
+                <Setter Property="Background" Value="{DynamicResource BrushPrimaryHover}" />
+            </Trigger>
+        </Style.Triggers>
     </Style>
 
     <Style x:Key="SecondaryButton" TargetType="Button" BasedOn="{StaticResource PrimaryButton}">
-        <Setter Property="Background" Value="#333333" />
-        <Setter Property="Foreground" Value="{StaticResource BrushAccentError}" />
+        <Setter Property="Background" Value="{DynamicResource BrushHover}" />
+        <Setter Property="Foreground" Value="{DynamicResource BrushAccentError}" />
         <Setter Property="FontWeight" Value="SemiBold" />
         <Style.Triggers>
             <Trigger Property="IsMouseOver" Value="True">
-                <Setter Property="Background" Value="#444444" />
+                <Setter Property="Background" Value="{DynamicResource BrushBorder}" />
             </Trigger>
         </Style.Triggers>
     </Style>
@@ -99,20 +101,20 @@
     <Style x:Key="GhostButton" TargetType="Button" BasedOn="{StaticResource PrimaryButton}">
         <Setter Property="Height" Value="Auto" />
         <Setter Property="Padding" Value="12,6" />
-        <Setter Property="Background" Value="{StaticResource BrushBgElevated}" />
-        <Setter Property="Foreground" Value="{StaticResource BrushAccentTeal}" />
+        <Setter Property="Background" Value="{DynamicResource BrushBgElevated}" />
+        <Setter Property="Foreground" Value="{DynamicResource BrushAccentTeal}" />
         <Setter Property="FontWeight" Value="Normal" />
         <Style.Triggers>
             <Trigger Property="IsMouseOver" Value="True">
-                <Setter Property="Background" Value="#303030" />
+                <Setter Property="Background" Value="{DynamicResource BrushHover}" />
             </Trigger>
         </Style.Triggers>
     </Style>
 
     <Style x:Key="DarkListBox" TargetType="ListBox">
-        <Setter Property="Background" Value="#151515" />
+        <Setter Property="Background" Value="{DynamicResource BrushListGround}" />
         <Setter Property="BorderThickness" Value="0" />
-        <Setter Property="Foreground" Value="#DDDDDD" />
+        <Setter Property="Foreground" Value="{DynamicResource BrushTextSecondary}" />
         <Setter Property="ScrollViewer.HorizontalScrollBarVisibility" Value="Disabled" />
         <Setter Property="ItemContainerStyle">
             <Setter.Value>
@@ -141,15 +143,15 @@
                 MaxWidth="320">
             <Border.Style>
                 <Style TargetType="Border">
-                    <Setter Property="Background" Value="#2A2A2A" />
+                    <Setter Property="Background" Value="{DynamicResource BrushChatOther}" />
                     <Setter Property="HorizontalAlignment" Value="Left" />
                     <Style.Triggers>
                         <DataTrigger Binding="{Binding IsSystem}" Value="True">
-                            <Setter Property="Background" Value="#1E2A28" />
+                            <Setter Property="Background" Value="{DynamicResource BrushChatSystem}" />
                             <Setter Property="HorizontalAlignment" Value="Stretch" />
                         </DataTrigger>
                         <DataTrigger Binding="{Binding IsSelf}" Value="True">
-                            <Setter Property="Background" Value="#2D2540" />
+                            <Setter Property="Background" Value="{DynamicResource BrushChatSelf}" />
                             <Setter Property="HorizontalAlignment" Value="Right" />
                         </DataTrigger>
                     </Style.Triggers>
@@ -160,13 +162,13 @@
                            FontWeight="SemiBold">
                     <TextBlock.Style>
                         <Style TargetType="TextBlock">
-                            <Setter Property="Foreground" Value="{StaticResource BrushAccentTeal}" />
+                            <Setter Property="Foreground" Value="{DynamicResource BrushAccentTeal}" />
                             <Style.Triggers>
                                 <DataTrigger Binding="{Binding IsSystem}" Value="True">
-                                    <Setter Property="Foreground" Value="{StaticResource BrushTextMuted}" />
+                                    <Setter Property="Foreground" Value="{DynamicResource BrushTextMuted}" />
                                 </DataTrigger>
                                 <DataTrigger Binding="{Binding IsSelf}" Value="True">
-                                    <Setter Property="Foreground" Value="{StaticResource BrushAccentPurple}" />
+                                    <Setter Property="Foreground" Value="{DynamicResource BrushAccentPurple}" />
                                 </DataTrigger>
                             </Style.Triggers>
                         </Style>
@@ -181,7 +183,7 @@
                          Background="Transparent"
                          BorderThickness="0"
                          Padding="0"
-                         Foreground="#E8E8E8"
+                         Foreground="{DynamicResource BrushTextPrimary}"
                          FontSize="13" />
             </StackPanel>
         </Border>
@@ -191,7 +193,7 @@
         <TextBlock Text="{Binding}"
                    TextWrapping="Wrap"
                    FontSize="12"
-                   Foreground="#999999"
+                   Foreground="{DynamicResource BrushTextMuted}"
                    Margin="0,2" />
     </DataTemplate>
 
@@ -202,7 +204,7 @@
                        VerticalAlignment="Center" />
             <TextBlock Text="{Binding}"
                        VerticalAlignment="Center"
-                       Foreground="#DDDDDD" />
+                       Foreground="{DynamicResource BrushTextSecondary}" />
         </StackPanel>
     </DataTemplate>
 
@@ -217,8 +219,8 @@
         <Setter Property="Height" Value="4" />
         <Setter Property="Width" Value="140" />
         <Setter Property="IsIndeterminate" Value="True" />
-        <Setter Property="Foreground" Value="{StaticResource BrushAccentPurple}" />
-        <Setter Property="Background" Value="#333333" />
+        <Setter Property="Foreground" Value="{DynamicResource BrushAccentPurple}" />
+        <Setter Property="Background" Value="{DynamicResource BrushHover}" />
         <Setter Property="BorderThickness" Value="0" />
     </Style>
 
