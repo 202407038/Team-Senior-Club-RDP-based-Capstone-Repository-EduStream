@@ -5,6 +5,9 @@ namespace EduStream.Core.Models;
 /// </summary>
 public sealed class SessionJoinPacket : BasePacket
 {
+    public bool SupportsDirectChat { get; set; }
+    public string StudentId { get; set; } = string.Empty;
+    public string RosterName { get; set; } = string.Empty;
     public SessionJoinPacket()
     {
         MessageType = PacketType.SessionJoin;

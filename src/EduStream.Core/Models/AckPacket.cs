@@ -5,6 +5,8 @@ namespace EduStream.Core.Models;
 /// </summary>
 public sealed class AckPacket : BasePacket
 {
+    public bool SupportsDirectChat { get; set; }
+    public Guid? StudentConnectionId { get; set; }
     public AckPacket()
     {
         MessageType = PacketType.Ack;

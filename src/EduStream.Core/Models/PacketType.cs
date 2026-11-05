@@ -16,5 +16,6 @@ public enum PacketType
     Heartbeat = 8,
     RdpInvitation = 9,
     RdpInvitationRequest = 10,
-    RdpInvitationRevoked = 11
+    RdpInvitationRevoked = 11,
+    DirectChat = 12
 }
