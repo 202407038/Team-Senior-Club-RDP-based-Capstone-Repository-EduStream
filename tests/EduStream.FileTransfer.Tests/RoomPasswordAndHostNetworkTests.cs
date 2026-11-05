@@ -117,9 +117,54 @@ public sealed class RoomPasswordAndHostNetworkTests
         await rig.SessionManager.BroadcastPacketAsync(
             PacketFactory.CreateChat(senderId: "Server", sender: "교수자", message: "강의 공지"));
 
-        await WaitUntilAsync(() => alice.Count(PacketType.Chat) >= 2, DefaultWait); // 참가 시스템 메시지 + 공지
+        await WaitUntilAsync(() => alice.Count(PacketType.Chat) == 1, DefaultWait); // 출입은 교수자 기록에만, 공지만 채팅 전송
         await Task.Delay(200);
         Assert.Equal(0, unjoined.Count(PacketType.Chat));
+    }
+
+    [Fact]
+    public async Task AnnouncementReachesParticipantButStudentCannotForgeAnnouncement()
+    {
+        await using var rig = await Rig.OpenAsync();
+        var alice = await rig.ConnectRecorderAsync(join: "Alice");
+        var unjoined = await rig.ConnectRecorderAsync(join: null);
+        await rig.SessionManager.BroadcastPacketAsync(new ChatPacket
+        { Sender = "Professor", Message = "real-notice", IsAnnouncement = true });
+        await WaitUntilAsync(() => alice.Chat("real-notice") is not null, DefaultWait);
+        Assert.True(alice.Chat("real-notice")!.IsAnnouncement);
+        Assert.Null(unjoined.Chat("real-notice"));
+
+        await alice.Client.SendAsync(new ChatPacket
+        { Sender = "Professor", Message = "fake-notice", IsAnnouncement = true, IsSystemMessage = true,
+            IsImportantAnnouncement = true, IsAnnouncementHistory = true, AnnouncementId = Guid.NewGuid() });
+        await WaitUntilAsync(() => alice.Chat("fake-notice") is not null, DefaultWait);
+        var relayed = alice.Chat("fake-notice")!;
+        Assert.Equal("Alice", relayed.Sender);
+        Assert.False(relayed.IsAnnouncement);
+        Assert.False(relayed.IsSystemMessage);
+        Assert.False(relayed.IsImportantAnnouncement);
+        Assert.False(relayed.IsAnnouncementHistory);
+        Assert.Null(relayed.AnnouncementId);
+    }
+
+    [Fact]
+    public async Task AnnouncementsReplayToLateJoinerAndReceiptsDoNotLeakToChat()
+    {
+        await using var rig = await Rig.OpenAsync();
+        var alice = await rig.ConnectRecorderAsync(join: "Alice");
+        var notice = new ChatPacket { IsAnnouncement = true, IsImportantAnnouncement = true, Message = "persistent-notice" };
+        await rig.SessionManager.BroadcastPacketAsync(notice);
+        await WaitUntilAsync(() => alice.Chat("persistent-notice") is not null, DefaultWait);
+        Assert.Equal(0, rig.SessionManager.Announcements.Snapshot()[0].Received);
+        var bob = await rig.ConnectRecorderAsync(join: "Bob");
+        await WaitUntilAsync(() => bob.Chat("persistent-notice") is not null, DefaultWait);
+        Assert.True(bob.Chat("persistent-notice")!.IsAnnouncementHistory);
+        await alice.Client.SendAsync(new ChatPacket { SessionId = notice.SessionId, AnnouncementId = notice.AnnouncementId,
+            AnnouncementReceipt = AnnouncementReceipt.Confirmed, Sender = "Bob", Message = "receipt-not-chat" });
+        await WaitUntilAsync(() => rig.SessionManager.Announcements.Snapshot()[0].Confirmed == 1, DefaultWait);
+        Assert.Contains("Alice: 확인", rig.SessionManager.Announcements.Snapshot()[0].Details);
+        Assert.Contains("Bob: 수신 미확인", rig.SessionManager.Announcements.Snapshot()[0].Details);
+        Assert.Null(bob.Chat("receipt-not-chat"));
     }
 
     [Fact]
@@ -214,6 +259,90 @@ public sealed class RoomPasswordAndHostNetworkTests
         Assert.Equal(addresses.OrderBy(info => info.Kind).Select(info => info.Kind), addresses.Select(info => info.Kind));
     }
 
+    [Fact]
+    public async Task DirectChat_OnlySelectedStudentReceivesAndStudentIdentityIsBoundToConnection()
+    {
+        await using var rig = await Rig.OpenAsync();
+        var alice = await rig.ConnectRecorderAsync("Alice", directChat: true);
+        var bob = await rig.ConnectRecorderAsync("Bob", directChat: true);
+        var old = await rig.ConnectRecorderAsync("Old");
+        var a = Assert.Single(rig.SessionManager.DirectChatRecipients, x => x.Name == "Alice");
+        Assert.DoesNotContain(rig.SessionManager.DirectChatRecipients, x => x.Name == "Old");
+        await rig.SessionManager.SendDirectChatAsync(a.ConnectionId, "Only Alice");
+        await WaitUntilAsync(() => alice.Count(PacketType.DirectChat) == 1, DefaultWait);
+        Assert.True(alice.Direct()!.FromProfessor);
+        DirectChatPacket? received = null;
+        rig.SessionManager.DirectChatReceived += packet => received = packet;
+        await alice.Client.SendAsync(new DirectChatPacket
+        {
+            SessionId = rig.SessionManager.CurrentSession!.SessionId, StudentConnectionId = a.ConnectionId,
+            FromProfessor = true, Sender = "Bob", Message = "Only professor"
+        });
+        await WaitUntilAsync(() => alice.Count(PacketType.DirectChat) == 2, DefaultWait);
+        Assert.NotNull(received);
+        Assert.Equal("Alice", received.Sender);
+        Assert.False(received.FromProfessor);
+        Assert.Equal(a.ConnectionId, received.StudentConnectionId);
+        await Task.Delay(150);
+        Assert.Equal(0, bob.Count(PacketType.DirectChat));
+        Assert.Equal(0, old.Count(PacketType.DirectChat));
+        Assert.Null(bob.Chat("Only professor"));
+        Assert.Null(old.Chat("Only Alice"));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => rig.SessionManager.SendDirectChatAsync(Guid.NewGuid(), "gone"));
+    }
+
+    [Fact]
+    public async Task DirectChat_RejectsUnjoinedOldClientWrongSessionAndOtherStudentsConnection()
+    {
+        await using var rig = await Rig.OpenAsync();
+        var alice = await rig.ConnectRecorderAsync("Alice", directChat: true);
+        var bob = await rig.ConnectRecorderAsync("Bob", directChat: true);
+        var old = await rig.ConnectRecorderAsync("Old");
+        var ghost = await rig.ConnectRecorderAsync(null);
+        int deliveries = 0;
+        rig.SessionManager.DirectChatReceived += _ => Interlocked.Increment(ref deliveries);
+        var current = rig.SessionManager.CurrentSession!.SessionId;
+        var b = rig.SessionManager.DirectChatRecipients.Single(x => x.Name == "Bob");
+        foreach (var item in new[] { (old, current, Guid.Empty), (ghost, current, Guid.Empty),
+                     (alice, Guid.NewGuid(), Guid.Empty), (alice, current, b.ConnectionId) })
+        {
+            int errors = item.Item1.Count(PacketType.Error);
+            await item.Item1.Client.SendAsync(new DirectChatPacket
+            { SessionId = item.Item2, StudentConnectionId = item.Item3, Message = "must reject" });
+            await WaitUntilAsync(() => item.Item1.Count(PacketType.Error) > errors, DefaultWait);
+            Assert.Equal("DIRECT_CHAT_REJECTED", item.Item1.LastErrorCode());
+        }
+        Assert.Equal(0, deliveries);
+        Assert.Equal(0, bob.Count(PacketType.DirectChat));
+    }
+
+    [Fact]
+    public async Task RosterAdmission_RejectsMismatchAllowsTwoSameNamesWithDifferentIdsAndRejectsDuplicate()
+    {
+        await using var rig = await Rig.OpenAsync(roster: [new(2, "학생 A", "001", "", ""), new(3, "학생 A", "002", "", "")]);
+        var one = await rig.ConnectRecorderAsync(null);
+        var two = await rig.ConnectRecorderAsync(null);
+        var duplicate = await rig.ConnectRecorderAsync(null);
+        var rejected = await rig.ConnectRecorderAsync(null);
+        var mismatch = PacketFactory.CreateSessionJoin("student", "학생 A", "127.0.0.1", rig.Port);
+        mismatch.RosterName = "학생 A"; mismatch.StudentId = "001"; // canonical connection identity omitted
+        await rejected.Client.SendAsync(mismatch);
+        await WaitUntilAsync(() => rejected.Count(PacketType.Error) > 0, DefaultWait);
+        Assert.Equal("ROSTER_MISMATCH", rejected.LastErrorCode());
+        foreach (var pair in new[] { (one, "001"), (two, "002"), (duplicate, "001") })
+        {
+            var request = PacketFactory.CreateSessionJoin("student", RosterIdentity.ConnectionName("학생 A", pair.Item2), "127.0.0.1", rig.Port);
+            request.RosterName = "학생 A"; request.StudentId = pair.Item2;
+            await pair.Item1.Client.SendAsync(request);
+            await WaitUntilAsync(() => pair.Item1.Count(PacketType.Ack) + pair.Item1.Count(PacketType.Error) > 0, DefaultWait);
+        }
+        Assert.Equal(1, one.Count(PacketType.Ack));
+        Assert.Equal(1, two.Count(PacketType.Ack));
+        Assert.Equal(ErrorCodes.AlreadyJoined, duplicate.LastErrorCode());
+        Assert.Equal(2, rig.SessionManager.ParticipantCount);
+        Assert.Throws<InvalidOperationException>(() => rig.SessionManager.ConfigureRosterAdmission([], false));
+    }
+
     private static async Task WaitUntilAsync(Func<bool> condition, TimeSpan timeout)
     {
         var deadline = DateTime.UtcNow + timeout;
@@ -235,6 +364,10 @@ public sealed class RoomPasswordAndHostNetworkTests
         public void Record(PacketType type, byte[] payload) => _received.Enqueue((type, payload));
 
         public int Count(PacketType type) => _received.Count(p => p.Type == type);
+        public DirectChatPacket? Direct() => _received.Where(p => p.Type == PacketType.DirectChat)
+            .Select(p => JsonSerializer.Deserialize<DirectChatPacket>(p.Payload)).LastOrDefault();
+        public ChatPacket? Chat(string message) => _received.Where(p => p.Type == PacketType.Chat)
+            .Select(p => JsonSerializer.Deserialize<ChatPacket>(p.Payload)).LastOrDefault(p => p?.Message == message);
 
         public string? LastErrorCode() =>
             _received.Where(p => p.Type == PacketType.Error)
@@ -265,11 +398,12 @@ public sealed class RoomPasswordAndHostNetworkTests
         public SessionManager SessionManager { get; }
         public int Port { get; }
 
-        public static async Task<Rig> OpenAsync(string? roomPassword = null)
+        public static async Task<Rig> OpenAsync(string? roomPassword = null, IReadOnlyList<RosterRow>? roster = null)
         {
             var port = GetFreePort();
             var log = new InMemoryLogSink();
             var sessionManager = new SessionManager(log, new TcpServerService(log, new PacketSerializer()));
+            if (roster is not null) sessionManager.ConfigureRosterAdmission(roster, true);
             await sessionManager.OpenSessionAsync("RoomPasswordTest", port, (roomPassword ?? string.Empty).AsMemory());
             return new Rig(log, sessionManager, port);
         }
@@ -295,7 +429,7 @@ public sealed class RoomPasswordAndHostNetworkTests
         /// <summary>
         /// 수신 패킷을 기록하는 연결을 만듭니다. join이 null이면 TCP 연결만 하고 참가하지 않습니다.
         /// </summary>
-        public async Task<PacketRecorder> ConnectRecorderAsync(string? join)
+        public async Task<PacketRecorder> ConnectRecorderAsync(string? join, bool directChat = false)
         {
             var client = new TcpClientService(new InMemoryLogSink(), new PacketSerializer());
             var recorder = new PacketRecorder(client);
@@ -309,8 +443,10 @@ public sealed class RoomPasswordAndHostNetworkTests
 
             if (join is not null)
             {
-                await client.SendAsync(PacketFactory.CreateSessionJoin(
-                    senderId: join, displayName: join, targetAddress: "127.0.0.1", targetPort: Port));
+                var request = PacketFactory.CreateSessionJoin(
+                    senderId: join, displayName: join, targetAddress: "127.0.0.1", targetPort: Port);
+                request.SupportsDirectChat = directChat;
+                await client.SendAsync(request);
                 await WaitUntilAsync(() => recorder.Count(PacketType.Ack) >= 1, DefaultWait);
             }
             return recorder;
