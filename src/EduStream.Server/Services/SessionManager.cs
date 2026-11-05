@@ -196,7 +196,7 @@ public sealed class SessionManager
     /// <summary>
     /// 교수자가 선택한 학생 한 명에게 원격 제어를 요청합니다. 기존 대상은 먼저 회수하고
     /// 3번의 실제 입력 회수 확인 후에 새 대상으로 전환합니다. Active는 입력 허용 완료 후에만 표시됩니다.
-    /// 화면 공유가 연결되어 있을 때만 요청할 수 있고, 요청 중 공유가 중지되면 요청은 회수되어 Active가 되지 않습니다.
+    /// 학생 입력 채널은 학생의 역방향 화면 수명을 따릅니다. 구형 입력 엔진만 교수자 공유 수명을 따릅니다.
     /// </summary>
     public async Task RequestControlAsync(string targetDisplayName)
     {
@@ -213,9 +213,13 @@ public sealed class SessionManager
         CancellationToken sharingToken;
         lock (_sessionLock)
         {
-            // 공유 중지가 시작되면 서비스 참조가 먼저 비워지므로, 중지 중·중지 후 요청은 여기서 막힌다.
-            if (_studentInputGate is not null && GetStudentSharingForInput(target) is not null)
+            // 제품 학생 입력 채널은 교수자 공유가 아니라 역방향 화면을 기준으로 판단한다.
+            if (UsesStudentInputGate)
+            {
+                if (GetStudentSharingForInput(target) is null)
+                    throw new InvalidOperationException("학생 화면이 연결된 뒤 제어를 요청해 주세요.");
                 sharingToken = CancellationToken.None;
+            }
             else if (_rdpSharingService is null || _sharingLifetime is null || _sharingLifetime.IsCancellationRequested)
                 throw new InvalidOperationException("현재 화면 공유가 시작되지 않았습니다.");
             else sharingToken = _sharingLifetime.Token;
@@ -358,13 +362,11 @@ public sealed class SessionManager
     public bool IsControlInputRevokePending => _controlCoordinator?.IsInputRevokePending ?? false;
 
     /// <summary>
-    /// 화면 공유가 종료될 때 팀장이 호출합니다. 남아 있는 초대와 진행 중인 원격 제어를 모두 정리합니다.
-    /// 공유가 없는 상태에서 제어만 남아 있는 것은 의미가 없으므로, 세션 종료가 아니라
-    /// "화면 공유만 중지"하는 경우에도 항상 함께 회수합니다.
+    /// 교수자 화면 공유의 초대만 정리합니다. 학생 역방향 화면·입력은 별도 수명이므로 유지합니다.
+    /// 교수자 공유에 종속된 구형 입력 엔진만 함께 회수합니다.
     /// </summary>
     /// <returns>
-    /// 실제 입력 차단 확인 결과. 승인 상태는 항상 즉시 회수되지만, Confirmed가 아니면
-    /// 학생 PC 입력이 막혔다고 표시하면 안 됩니다.
+    /// Independent는 학생 화면/제어를 유지했다는 뜻이며 입력 차단 완료가 아닙니다.
     /// </returns>
     public async Task<RemoteInputRevokeStatus> DetachRdpSharingAsync()
     {
@@ -375,12 +377,15 @@ public sealed class SessionManager
             if (_participants.TryGetValue(participantId, out var clientId))
                 TryAddScreenWaiter(clientId);
         }
-        // 공유 재시작 뒤 제어를 자동 재승인하지 않는다(화면 수신 자동 복귀와 별개, 협의 필요 항목).
-        var inputRevoke = await StopControlForTeardownAsync("공유 중지");
+        var inputRevoke = UsesStudentInputGate
+            ? (IsControlInputRevokePending ? RemoteInputRevokeStatus.Pending : RemoteInputRevokeStatus.Independent)
+            : await StopControlForTeardownAsync("공유 중지");
         await RevokeAllRdpInvitationsAsync(RdpFailureReason.SessionClosed);
         _logSink.Write($"[Rdp] 공유 서비스 연결 해제: 입력 차단={inputRevoke}");
         return inputRevoke;
     }
+
+    private bool UsesStudentInputGate => _studentInputGate is not null && _remoteInputGate is UnavailableRemoteInputGate;
 
     /// <summary>
     /// 방 비밀번호가 설정된 세션인지 여부입니다. 비밀번호 값 자체는 어디에도 노출하지 않습니다.
@@ -1340,7 +1345,7 @@ public sealed class SessionManager
     }
 
     /// <summary>
-    /// 새 초대 발급과 새 제어 요청을 막고, 이 공유에서 진행 중인 제어 요청을 취소합니다.
+    /// 교수자 초대 발급과 구형 공유 종속 제어 요청을 막습니다. 학생 역방향 화면/제어는 건드리지 않습니다.
     /// </summary>
     private void EndSharingLifetime()
     {

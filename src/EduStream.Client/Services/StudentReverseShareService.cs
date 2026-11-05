@@ -54,7 +54,8 @@ public sealed class StudentDesktopShareHost : IStudentShareHost
 /// </summary>
 /// <remarks>
 /// 접속 중인 viewer는 초대 갱신으로 끊지 않습니다. 미접속 초대는 갱신하고 viewer 이탈 후에는 새 공유 세대로 자동 복구합니다.
-/// 시작·초대가 실패하거나 거부되면 허용/대상이 바뀔 때까지 다시 시도하지 않습니다. 종료 실패는 성공으로 숨기지 않고 재시도합니다.
+/// 시작·초대 실패는 자동 반복하지 않으며, 권한을 유지한 채 명시적으로 다시 시도할 수 있습니다.
+/// 종료 실패는 성공으로 숨기지 않고 재시도합니다.
 /// </remarks>
 public sealed class StudentReverseShareService : IAsyncDisposable
 {
@@ -75,6 +76,7 @@ public sealed class StudentReverseShareService : IAsyncDisposable
     private bool _stopFailed;
     // 실패/거부된 대상. 같은 대상으로 재시도를 반복하지 않는다.
     private ReverseRdpInvitationTarget? _blockedTarget;
+    private bool _retrySupported = true;
     private IStudentShareHost? _host;
     private ReverseRdpInvitationTarget? _hostTarget;
     private Guid _invitationId;
@@ -104,6 +106,20 @@ public sealed class StudentReverseShareService : IAsyncDisposable
     {
         get { lock (_gate) return _host is not null; }
     }
+
+    public bool HasFailure
+    {
+        get { lock (_gate) return !_disposed && (_stopFailed ||
+            (_blockedTarget is not null && _blockedTarget == _reverse.Target && _allowViewing && _localAllowViewing)); }
+    }
+
+    public bool CanRetry
+    {
+        get { lock (_gate) return HasFailure && _retrySupported && _allowViewing && _localAllowViewing && _reverse.Target is not null; }
+    }
+
+    /// <summary>실패한 방향만 새 공유 세대로 재시도한다. 권한 변경/재참가나 정상 viewer 재시작은 하지 않는다.</summary>
+    public Task RetryAsync() => ReconcileAsync(retryFailure: true);
 
     /// <summary>
     /// 서버가 돌려준 보기 허용과 현재 대상으로 호스트 상태를 맞춥니다. 상태 스냅샷마다 호출해도 대상이 같으면 다시 열지 않습니다.
@@ -211,11 +227,12 @@ public sealed class StudentReverseShareService : IAsyncDisposable
         {
             if (_host is null || invitationId != _invitationId) return;
             _blockedTarget = _hostTarget;
+            _retrySupported = true; // 수동 재시도도 서버의 현재 권한/연결 검증을 다시 거친다.
         }
         _ = ReconcileAsync();
     }
 
-    private async Task ReconcileAsync()
+    private async Task ReconcileAsync(bool retryFailure = false)
     {
         await _order.WaitAsync().ConfigureAwait(false);
         try
@@ -225,6 +242,11 @@ public sealed class StudentReverseShareService : IAsyncDisposable
             ReverseRdpInvitationTarget? current;
             lock (_gate)
             {
+                if (retryFailure)
+                {
+                    if (!CanRetry) return;
+                    _blockedTarget = null;
+                }
                 desired = _disposed || !_allowViewing || !_localAllowViewing ? null : _reverse.Target;
                 blocked = _blockedTarget;
                 current = _hostTarget;
@@ -260,6 +282,14 @@ public sealed class StudentReverseShareService : IAsyncDisposable
         catch (Exception ex)
         {
             _logSink.Write($"[Reverse] 역방향 공유 상태 정리 실패: {ex.GetType().Name}");
+            // 미접속 초대 갱신 실패도 무한 반복/로그만 남김으로 끝내지 않는다.
+            lock (_gate)
+            {
+                _blockedTarget = _hostTarget;
+                _retrySupported = ex is not NotSupportedException;
+            }
+            if (await StopHostAsync(null).ConfigureAwait(false))
+                RaiseSharingChanged(false, "내 화면 공유 연결 정보를 갱신하지 못했습니다. 연결 상태를 확인한 뒤 다시 시도해 주세요.");
         }
         finally
         {
@@ -287,12 +317,16 @@ public sealed class StudentReverseShareService : IAsyncDisposable
         }
         catch (Exception ex)
         {
-            lock (_gate) _blockedTarget = target;
+            lock (_gate)
+            {
+                _blockedTarget = target;
+                _retrySupported = ex is not NotSupportedException;
+            }
             _logSink.Write($"[Reverse] 역방향 공유 시작 실패: {ex.GetType().Name}");
             if (!await StopHostAsync(null).ConfigureAwait(false)) return;
             RaiseSharingChanged(false, ex is NotSupportedException
                 ? "이 PC에서는 내 화면 공유(Windows Desktop Sharing)를 지원하지 않습니다."
-                : "내 화면 공유를 시작하지 못했습니다. 교수자 연결 상태를 확인해 주세요.");
+                : "내 화면 공유를 시작하지 못했습니다. 연결 상태를 확인한 뒤 다시 시도해 주세요.");
         }
     }
 

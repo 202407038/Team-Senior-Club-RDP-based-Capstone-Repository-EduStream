@@ -14,6 +14,15 @@ public sealed class StudentSharingSession : IAsyncDisposable
     private bool _localAllowControl = true;
     private bool _disposed;
     public event Action<string>? StatusChanged;
+    public bool HasFailure => _sharing.HasFailure;
+    public bool CanRetry => !_disposed && _sharing.CanRetry;
+
+    public async Task RetryAsync()
+    {
+        await _lifecycle.WaitAsync();
+        try { if (!_disposed) await _sharing.RetryAsync(); }
+        finally { _lifecycle.Release(); }
+    }
 
     public StudentSharingSession(ReverseCollaborationClient routing, ICollaborationChannel channel, ILogSink log)
     {
