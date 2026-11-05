@@ -492,6 +492,54 @@ public sealed partial class ReverseCollaborationRoutingTests
         Assert.Equal(restarted, alice.Applied.Last().SharingId);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ForwardSharingStop_PreservesReverseControl_WhileSessionCloseStillRevokes(bool pendingGrant)
+    {
+        await using var rig = await SecureRig.OpenAsync();
+        rig.SessionManager.AttachRdpSharing(new NoopSharing(), Guid.NewGuid());
+        var alice = await rig.JoinAsync("Alice");
+        await WaitUntilAsync(() => alice.Reverse.Target is not null);
+        var invitation = Invitation(alice.Reverse.Target!, Guid.NewGuid(), DateTimeOffset.UtcNow);
+        await alice.Reverse.SendInvitationAsync(invitation, Secret(invitation));
+        await WaitUntilAsync(() => rig.SessionManager.ReverseCollaboration!.TryGetInvitation(invitation.ConnectionId) is not null);
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var commands = new ConcurrentQueue<RemoteInputCommandNotice>();
+        // 제품 TLS 채널/게이트를 쓰되 native 입력 적용 결과만 통제한다. 실제 PC 입력 검증은 아니다.
+        alice.InputHandler = async command =>
+        {
+            commands.Enqueue(command);
+            if (command.Action == RemoteInputAction.Grant)
+            {
+                entered.TrySetResult();
+                if (pendingGrant) await release.Task;
+            }
+            await alice.Secure.Connection.SendAsync(CollaborationMessageCodec.Encode(Guid.NewGuid(),
+                new RemoteInputResultNotice(command.CommandId, command.SessionId, command.Action, true, null)));
+        };
+        var control = rig.SessionManager.RequestControlAsync("Alice");
+        try
+        {
+            await entered.Task.WaitAsync(Wait);
+            if (!pendingGrant) await control.WaitAsync(Wait);
+            Assert.Equal(RemoteInputRevokeStatus.Independent, await rig.SessionManager.DetachRdpSharingAsync());
+            Assert.DoesNotContain(commands, c => c.Action == RemoteInputAction.Revoke);
+            Assert.Equal(invitation.InvitationId, rig.SessionManager.ReverseCollaboration!.TryGetInvitation(invitation.ConnectionId)!.Invitation.InvitationId);
+        }
+        finally { release.TrySetResult(); await control.WaitAsync(Wait); }
+        Assert.Equal(ControlPhase.Active, rig.SessionManager.CurrentControlState!.Phase);
+
+        await rig.SessionManager.StopControlAsync();
+        Assert.Equal(ControlPhase.Revoked, rig.SessionManager.CurrentControlState!.Phase);
+        // 교수자 공유가 없는 상태에서도 학생 화면의 제어는 다시 요청할 수 있다.
+        await rig.SessionManager.RequestControlAsync("Alice");
+        Assert.Equal(ControlPhase.Active, rig.SessionManager.CurrentControlState!.Phase);
+        await rig.SessionManager.CloseSessionAsync();
+        Assert.Equal(2, commands.Count(c => c.Action == RemoteInputAction.Revoke));
+    }
+
     // ---------- 도우미 ----------
 
     private static ReverseRdpInvitationNotice Invitation(ReverseRdpInvitationTarget target, Guid sharingId, DateTimeOffset now)
@@ -648,6 +696,7 @@ public sealed partial class ReverseCollaborationRoutingTests
 
     private sealed class Student(TcpClientService tcp, SecureSessionChannel secure, ReverseCollaborationClient reverse)
     {
+        public Func<RemoteInputCommandNotice, Task>? InputHandler { get; set; }
         public TcpClientService Tcp { get; } = tcp;
         public SecureSessionChannel Secure { get; } = secure;
         public ReverseCollaborationClient Reverse { get; } = reverse;
@@ -700,6 +749,8 @@ public sealed partial class ReverseCollaborationRoutingTests
             {
                 var kind = CollaborationFrameInspector.PeekKind(frame);
                 if (StudentStatusClient.Handles(kind)) status.HandleFrame(frame);
+                else if (kind == CollaborationMessageKind.RemoteInputCommand && student.InputHandler is { } input)
+                    return input(CollaborationMessageCodec.Decode<RemoteInputCommandNotice>(frame, out _));
                 else if (ReverseCollaborationClient.Handles(kind)) return reverse.HandleFrameAsync(frame);
                 else if (kind == CollaborationMessageKind.Failure)
                 {

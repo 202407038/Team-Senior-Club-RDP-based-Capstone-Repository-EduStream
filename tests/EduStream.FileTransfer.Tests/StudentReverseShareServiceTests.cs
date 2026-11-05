@@ -128,11 +128,12 @@ public sealed class StudentReverseShareServiceTests
         Assert.False(rig.Share.IsSharing);
         Assert.Contains(rig.Messages, message => message.Contains("초대를 받지 않아"));
 
-        // 사용자가 허용을 다시 켜면 새 공유로 한 번 더 시도한다.
-        await rig.Share.UpdateAsync(false);
-        await rig.Share.UpdateAsync(true);
+        // 권한 토글/재참가 없이 실패 방향만 명시적으로 재시도한다.
+        Assert.True(rig.Share.CanRetry);
+        await rig.Share.RetryAsync();
         Assert.Equal(2, rig.Hosts.Count);
         Assert.True(rig.Share.IsSharing);
+        Assert.False(rig.Share.CanRetry);
     }
 
     [Fact]
@@ -167,6 +168,45 @@ public sealed class StudentReverseShareServiceTests
         Assert.Empty(rig.Channel.Frames);
         Assert.False(rig.Share.IsSharing);
         Assert.Contains(rig.Messages, message => message.Contains("지원하지 않습니다"));
+        Assert.True(rig.Share.HasFailure);
+        Assert.False(rig.Share.CanRetry);
+        await rig.Share.RetryAsync();
+        Assert.Single(rig.Hosts);
+    }
+
+    [Fact]
+    public async Task FailedStartup_ExplicitRetryRecoversWithoutRejoining_AndDoesNotRestartHealthyHost()
+    {
+        var rig = new Rig { StartFailure = new IOException("temporary startup failure") };
+        rig.ApplyRoom();
+        await rig.Share.UpdateAsync(true);
+        await rig.Share.RefreshAsync();
+        Assert.Single(rig.Hosts);
+        Assert.True(rig.Share.CanRetry);
+        rig.StartFailure = null;
+        await rig.Share.RetryAsync();
+        var recovered = rig.Hosts[1];
+        recovered.ActiveViewerCount = 1;
+        await rig.Share.RetryAsync();
+        Assert.Equal(2, rig.Hosts.Count);
+        Assert.False(recovered.Disposed);
+        Assert.False(rig.Share.HasFailure);
+    }
+
+    [Fact]
+    public async Task Retry_DoesNotOverrideRevokedPermissionOrDisposedSession()
+    {
+        var rig = new Rig { StartFailure = new IOException("temporary startup failure") };
+        rig.ApplyRoom();
+        await rig.Share.UpdateAsync(true);
+        await rig.Share.UpdateAsync(false);
+        rig.StartFailure = null;
+        await rig.Share.RetryAsync();
+        Assert.Single(rig.Hosts);
+        Assert.False(rig.Share.CanRetry);
+        await rig.Share.DisposeAsync();
+        await rig.Share.RetryAsync();
+        Assert.Single(rig.Hosts);
     }
 
     [Fact]
@@ -237,6 +277,27 @@ public sealed class StudentReverseShareServiceTests
         await rig.Share.RefreshAsync();
         Assert.Equal(2, rig.Channel.Frames.Count);
         Assert.False(rig.Hosts[0].Disposed);
+    }
+
+    [Fact]
+    public async Task RenewalFailure_IsVisibleAndRetryable_WithoutAutomaticFailureLoop()
+    {
+        var rig = new Rig();
+        rig.ApplyRoom();
+        await rig.Share.UpdateAsync(true);
+        rig.Channel.Failure = new IOException("renewal send failed");
+        rig.Now = rig.Now.AddMinutes(4);
+        await rig.Share.RefreshAsync();
+        Assert.True(rig.Share.HasFailure);
+        Assert.True(rig.Share.CanRetry);
+        Assert.True(rig.Hosts[0].Disposed);
+        Assert.Contains(rig.Messages, message => message.Contains("갱신하지 못했습니다"));
+        await rig.Share.RefreshAsync();
+        Assert.Single(rig.Hosts);
+        rig.Channel.Failure = null;
+        await rig.Share.RetryAsync();
+        Assert.Equal(2, rig.Hosts.Count);
+        Assert.False(rig.Share.HasFailure);
     }
 
     [Fact]
@@ -321,7 +382,7 @@ public sealed class StudentReverseShareServiceTests
         public StudentReverseShareService Share { get; }
         public List<FakeHost> Hosts { get; } = new();
         public ConcurrentQueue<string> Messages { get; } = new();
-        public Exception? StartFailure { get; init; }
+        public Exception? StartFailure { get; set; }
         public DateTimeOffset Now { get; set; } = DateTimeOffset.UtcNow;
 
         public Rig()
