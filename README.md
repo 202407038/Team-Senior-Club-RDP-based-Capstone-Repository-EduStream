@@ -1,24 +1,24 @@
 # EduStream
 
-## 2026-11-05 추가 수업 기능
+## 2026-11-06 추가 수업 기능
 
-추가 기능 소스에는 교수자 자동 찾기, 개인 채팅, 공지함, 엑셀 명단 대조·출입 기록, 학생 파일 제출, 라이트·다크 테마가 포함됩니다. 아래 실행용 ZIP은 기존 버전이므로 이 기능들이 모두 들어 있지 않습니다. 사용법과 검증 범위는 [추가 기능 안내](docs/work/ADDITIONAL_FEATURES_GUIDE.md), [현재 상태](docs/work/STATUS_AND_ROADMAP.md)를 확인하세요.
+이번 실행용 ZIP에는 교수자 자동 찾기, 개인 채팅, 공지함, 엑셀 명단 대조·출입 기록, 학생 파일 제출, 라이트·다크 테마가 포함됩니다. 사용법과 검증 범위는 [추가 기능 안내](docs/work/ADDITIONAL_FEATURES_GUIDE.md), [현재 상태](docs/work/STATUS_AND_ROADMAP.md)를 확인하세요.
 
 ## ZIP을 풀고 바로 실행하기
 
-### [실행용 ZIP 다운로드 · EduStream-Portable-win-x64.zip](https://github.com/202407038/Team-Senior-Club-RDP-based-Capstone-Repository-EduStream/releases/download/v0.1.0-preview.7/EduStream-Portable-win-x64.zip)
+### [실행용 ZIP 다운로드 · EduStream-Portable-win-x64.zip](https://github.com/202407038/Team-Senior-Club-RDP-based-Capstone-Repository-EduStream/releases/download/v0.1.0-preview.8/EduStream-Portable-win-x64.zip)
 
 **다운로드 → 모두 압축 풀기 → EduStream 폴더 → `EduStream 교수자.exe` 또는 `EduStream 학생.exe` 더블클릭**
 
 설치나 명령어 입력 없이 실행할 수 있으며 .NET 실행 환경이 포함되어 있습니다. ZIP 안에서 바로 실행하지 말고 전체 압축을 풀어주세요. EXE 옆의 DLL과 하위 폴더도 필요하므로, 이동할 때는 폴더 전체를 옮깁니다. [실행 안내](docs/work/DESKTOP_LAUNCH.md)
 
-배포는 **실행용 ZIP만** 제공합니다. 현재 버전은 **v0.1.0-preview.7 (2026-10-20 배포, 10/14 제작)**이며 실행 코드는 main `04dd114` (#97·#98·#99 포함) 기준입니다. 코드 서명 미적용 시험판이며 전체 실환경 인수 완료를 뜻하지 않습니다. [배포 정보](https://github.com/202407038/Team-Senior-Club-RDP-based-Capstone-Repository-EduStream/releases/tag/v0.1.0-preview.7)
+배포는 **실행용 ZIP만** 제공합니다. 현재 버전은 **v0.1.0-preview.8 (2026-11-06 배포)**이며 실행 코드는 main `0a8f03a` (#101~#106 포함) 기준입니다. 코드 서명은 적용하지 않았습니다. [배포 정보와 SHA-256](https://github.com/202407038/Team-Senior-Club-RDP-based-Capstone-Repository-EduStream/releases/tag/v0.1.0-preview.8)
 
-학생은 첫 화면에서 이름·교수자 IP·방 비밀번호(설정한 경우)로 참가합니다. 기본 포트는 5000이며 변경 시에만 고급 설정을 사용합니다. **접속 코드·별도 RDP 초대 비밀번호 입력은 없습니다.** 교수자 모니터 공유·판서, 학생별 화면 보기/큰 보기/제어 연결, 세션 파일 등록·선택 다운로드가 포함됩니다.
+학생은 첫 화면에서 교수자 자동 찾기 또는 IP 입력으로 참가합니다. 명단 대조를 켠 경우 이름·학번을, 방 비밀번호를 설정한 경우 비밀번호를 입력합니다. 기본 포트는 5000이며 변경 시에만 고급 설정을 사용합니다. **접속 코드·별도 RDP 초대 비밀번호 입력은 없습니다.**
 
-**이번 반영:** 즉시 전송 파일도 Windows 다운로드 폴더에 저장하고 기존 동명 파일은 보존합니다. 파일 선택·드롭은 선택만 준비하며 **등록 버튼**을 눌러야 세션 목록에 등록합니다. 학생 화면을 열어도 교수자 공유를 자동 중지하지 않습니다.
+**이번 반영:** 교수자 공유를 중지해도 유지 중인 학생 화면·제어를 실패로 표시하지 않습니다. 전체 채팅은 다른 학생에게 발신자 학번을 전송하지 않으며, 교수자 창과 학생 보기의 캡처 제외를 유지합니다.
 
-**검증 범위:** 기존 자동 회귀 918 통과·52 생략·실패 0, ZIP 양 앱 시작 확인. 사용자의 기존 실행 재확인 완료 보고와 자동 검증은 구분합니다. **휠 확대·축소는 요청에 따라 제외**했으며 수정 대기 항목이 아닙니다. 동일 Windows 로그인 환경의 동시 WDS 송신 제약과 다중 PC·부하 검증 근거는 [현재 상태·후속 순서](docs/work/STATUS_AND_ROADMAP.md)를 확인하세요.
+**검증 범위:** 비화면 선별 회귀 968개 통과, ZIP 압축 해제와 양 앱 시작, 교수자 창의 캡처 제외 값 확인. 양방향 공유·원격 제어·동시 접속은 사용자 현장 확인과 자동 검증을 구분합니다. **휠 확대·축소는 요청에 따라 제외**했습니다. 자세한 결과와 동일 Windows 로그인 환경의 WDS 제약은 [현재 상태](docs/work/STATUS_AND_ROADMAP.md)를 확인하세요.
 
 **위 실행용 ZIP과 `Code → Download ZIP`은 다릅니다.** `Code → Download ZIP`은 개발용 소스입니다. 소스 ZIP을 받은 경우 루트의 `Download-EduStream.url`에서도 실행용 ZIP을 받을 수 있습니다.
 
