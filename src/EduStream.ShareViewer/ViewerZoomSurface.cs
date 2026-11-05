@@ -1,23 +1,19 @@
 using System.Drawing;
-using System.Runtime.InteropServices;
 using System.Windows.Forms;
 
 namespace EduStream.ShareViewer;
 
-/// <summary>원본 비율 맞춤을 기본으로 하는 WDS 표시 표면. 휠 확대 후 스크롤로 이동하며 1배에서 전체 화면으로 복귀한다.</summary>
-public sealed class ViewerZoomSurface : Panel, IMessageFilter
+/// <summary>원본 비율 맞춤을 기본으로 하는 WDS 표시 표면. 휠 입력은 가로채지 않고 native 뷰어에 맡긴다.</summary>
+public sealed class ViewerZoomSurface : Panel
 {
     private Control? _viewer;
     private Size _source = new(16, 9);
     private double _zoom = 1;
     private bool _arranging;
-    public bool WheelZoomEnabled { get; set; } = true;
     public double Zoom => _zoom;
     public ViewerZoomSurface()
     {
         Dock = DockStyle.Fill; BackColor = Color.Black; AutoScroll = false;
-        Application.AddMessageFilter(this);
-        System.Windows.Interop.ComponentDispatcher.ThreadFilterMessage += FilterWpfMessage;
         Resize += (_, _) => ArrangeViewer();
     }
     public void Attach(Control viewer)
@@ -72,35 +68,4 @@ public sealed class ViewerZoomSurface : Panel, IMessageFilter
         }
         finally { _arranging = false; }
     }
-    public bool PreFilterMessage(ref Message m)
-    {
-        if (!WheelZoomEnabled || m.Msg != 0x020A || !Visible || !IsHandleCreated ||
-            _viewer is null || !_viewer.IsHandleCreated || m.HWnd == IntPtr.Zero) return false;
-        // WPF 호스트에 포커스가 있으면 휠 메시지는 뷰어가 아닌 부모 창으로 온다.
-        // 같은 창 안에서 실제 포인터가 가리키는 표시 표면만 확대한다.
-        if (GetAncestor(m.HWnd, 2) != GetAncestor(Handle, 2)) return false;
-        var position = new Point(unchecked((short)((long)m.LParam & 0xffff)),
-            unchecked((short)(((long)m.LParam >> 16) & 0xffff)));
-        if (!RectangleToScreen(ClientRectangle).Contains(position)) return false;
-        var delta = unchecked((short)(((long)m.WParam >> 16) & 0xffff));
-        if (delta == 0) return false;
-        SetZoom(_zoom * Math.Pow(1.15, delta / 120.0));
-        return true;
-    }
-    protected override void Dispose(bool disposing)
-    {
-        if (disposing)
-        {
-            Application.RemoveMessageFilter(this);
-            System.Windows.Interop.ComponentDispatcher.ThreadFilterMessage -= FilterWpfMessage;
-        }
-        base.Dispose(disposing);
-    }
-    private void FilterWpfMessage(ref System.Windows.Interop.MSG message, ref bool handled)
-    {
-        if (handled) return;
-        var formsMessage = Message.Create(message.hwnd, message.message, message.wParam, message.lParam);
-        if (PreFilterMessage(ref formsMessage)) handled = true;
-    }
-    [DllImport("user32.dll")] private static extern IntPtr GetAncestor(IntPtr window, uint flags);
 }

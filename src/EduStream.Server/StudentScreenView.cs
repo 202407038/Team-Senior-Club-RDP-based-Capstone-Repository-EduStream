@@ -54,6 +54,8 @@ public sealed class StudentScreenView : System.Windows.Controls.UserControl
 
     public StudentScreenView()
     {
+        _cardStatus.SetResourceReference(TextBlock.ForegroundProperty, "BrushTextSecondary");
+        _status.SetResourceReference(TextBlock.ForegroundProperty, "BrushTextSecondary");
         var open = new System.Windows.Controls.Button
         {
             Content = "원격 제어", Height = 34, Margin = new Thickness(0, 8, 0, 0),
@@ -122,8 +124,13 @@ public sealed class StudentScreenView : System.Windows.Controls.UserControl
             if (_stopped || _viewerStudent != state.Student) return;
             var active = state.Phase == EduStream.Core.Collaboration.ControlPhase.Active;
             _control.Content = active ? "제어 중지" : "원격 제어";
-            if (_surface is not null) _surface.WheelZoomEnabled = !active;
-            SetStatus(active ? "원격 제어 중" : "보기 전용 · 제어 " + state.Phase);
+            SetStatus(state.Phase switch
+            {
+                EduStream.Core.Collaboration.ControlPhase.Active => "원격 제어 중",
+                EduStream.Core.Collaboration.ControlPhase.Requested => "제어 연결 중",
+                EduStream.Core.Collaboration.ControlPhase.Failed => "제어 연결 실패",
+                _ => ""
+            });
         }));
     }
 
@@ -162,6 +169,7 @@ public sealed class StudentScreenView : System.Windows.Controls.UserControl
     {
         var message = _captureWarning is null ? text : text + " · " + _captureWarning;
         _status.Text = message; _cardStatus.Text = message;
+        _status.Visibility = _cardStatus.Visibility = string.IsNullOrWhiteSpace(message) ? Visibility.Collapsed : Visibility.Visible;
     }
 
     private void Withdrawn(EduStream.Core.Collaboration.ParticipantConnection student, Guid invitationId)
@@ -194,7 +202,7 @@ public sealed class StudentScreenView : System.Windows.Controls.UserControl
             {
                 if (!ReferenceEquals(_viewer, viewer)) return;
                 _connectedInvitations.Add(delivery.Invitation.InvitationId);
-                SetStatus("학생 화면 연결됨 · 보기 전용"); _control.IsEnabled = true;
+                SetStatus(""); _control.IsEnabled = true;
             };
             viewer.OnConnectionFailed += (_, _) => { SetStatus("학생 화면 연결 실패 · 새로고침을 눌러 주세요."); _control.IsEnabled = false; };
             viewer.OnConnectionTerminated += (_, _) => { SetStatus("학생 화면 연결 종료"); _control.IsEnabled = false; };
@@ -232,8 +240,7 @@ public sealed class StudentScreenView : System.Windows.Controls.UserControl
             else await manager.RequestControlAsync(StudentName);
             var active = manager.CurrentControlState is { Phase: EduStream.Core.Collaboration.ControlPhase.Active } state && state.Student == _delivery.Student;
             _control.Content = active ? "제어 중지" : "원격 제어";
-            if (_surface is not null) _surface.WheelZoomEnabled = !active; // 제어 중에는 휠을 학생 PC에 전달한다.
-            SetStatus(active ? "원격 제어 중 · 학생 화면에 마우스/키보드 입력" : "보기 전용 · 제어 비활성");
+            SetStatus(active ? "원격 제어 중" : "");
         }
         catch (Exception ex) { SetStatus("제어 확인 실패: " + ex.GetType().Name); }
         finally { _control.IsEnabled = _connection?.IsConnectionLive == true; }
