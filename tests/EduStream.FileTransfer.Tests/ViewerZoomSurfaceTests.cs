@@ -64,6 +64,17 @@ public sealed class ViewerZoomSurfaceTests
         Assert.False(surface.VerticalScroll.Visible);
     });
 
+    [Fact]
+    public Task WheelIsNotInterceptedOrUsedForZoom() => OnSta(() =>
+    {
+        using var surface = new ViewerZoomSurface();
+        Assert.False(typeof(Forms.IMessageFilter).IsAssignableFrom(typeof(ViewerZoomSurface)));
+        var message = new System.Windows.Interop.MSG { message = 0x020A, wParam = new IntPtr(120 << 16) };
+        Assert.False(System.Windows.Interop.ComponentDispatcher.RaiseThreadMessage(ref message));
+        Assert.Equal(1, surface.Zoom);
+        surface.Dispose();
+        Assert.False(System.Windows.Interop.ComponentDispatcher.RaiseThreadMessage(ref message));
+    });
 
     private static Task OnSta(Action body)
     {
