@@ -39,6 +39,20 @@ public sealed class SessionFileTransferRouter : IDisposable
     private readonly ParticipantRegistry _registry;
     private readonly ILogSink _logSink;
     private bool _disposed;
+    private readonly Dictionary<(Guid, Guid), FileDeliveryStatus> _delivery = new();
+    public event Action? DeliveryChanged;
+    public IReadOnlyList<FileDeliveryStatus> DeliveryStatus { get { lock (_gate) return _delivery.Values.Reverse().ToArray(); } }
+    private void Report(Peer peer, Transfer transfer, string status, bool terminal = false)
+    {
+        lock (_gate)
+        {
+            var key = (peer.Connection.ConnectionId, transfer.Request.RequestId);
+            if (_delivery.TryGetValue(key, out var old) && old.IsTerminal) return;
+            var name = old?.Student ?? _registry.TryResolve(peer.Connection.ConnectionId)?.DisplayName ?? "연결 종료 학생";
+            _delivery[key] = new(key.Item1, key.Item2, transfer.File.FileId, name, transfer.File.FileName, status, terminal);
+        }
+        DeliveryChanged?.Invoke();
+    }
 
     /// <summary>
     /// 학생이 보낸 저장 완료 알림이 원 요청·파일 길이·SHA256과 모두 일치할 때만 발생합니다.
@@ -98,13 +112,15 @@ public sealed class SessionFileTransferRouter : IDisposable
     public void Detach(Guid connectionId)
     {
         Transfer[] cancelled;
+        Peer? removedPeer;
         lock (_gate)
         {
             if (!_peers.Remove(connectionId, out var peer)) return;
+            removedPeer = peer;
             cancelled = peer.Transfers.Values.ToArray();
             peer.Transfers.Clear();
         }
-        foreach (var transfer in cancelled) transfer.Cancellation.Cancel();
+        foreach (var transfer in cancelled) { Report(removedPeer, transfer, "연결 종료 · 저장 미확인", true); transfer.Cancellation.Cancel(); }
         _logSink.Write($"[FileRoute] 채널 해제: connection={connectionId}, 취소={cancelled.Length}건");
     }
 
@@ -199,6 +215,7 @@ public sealed class SessionFileTransferRouter : IDisposable
             return;
         }
 
+        Report(peer, transfer, "전송 중");
         _ = RunTransferAsync(peer, transfer);
     }
 
@@ -231,6 +248,7 @@ public sealed class SessionFileTransferRouter : IDisposable
                 }
             }
             _logSink.Write($"[FileRoute] 송신 완료, 저장 확인 대기: request={request.RequestId}");
+            Report(peer, transfer, "송신 완료 · 저장 확인 대기");
             if (earlyStored is not null) CompleteStored(peer, earlyStored);
             return;
         }
@@ -254,6 +272,7 @@ public sealed class SessionFileTransferRouter : IDisposable
         }
 
         RemoveTransfer(peer, transfer);
+        Report(peer, transfer, token.IsCancellationRequested ? "취소 · 저장 미확인" : "실패 · 저장 미확인", true);
         if (failure is { } code)
         {
             _logSink.Write($"[FileRoute] 전송 실패: request={request.RequestId}, 사유={code}");
@@ -271,6 +290,7 @@ public sealed class SessionFileTransferRouter : IDisposable
                 return;
         }
         transfer.Cancellation.Cancel();
+        Report(peer, transfer, "취소 · 저장 미확인", true);
         _logSink.Write($"[FileRoute] 학생 취소: request={cancel.RequestId}");
     }
 
@@ -301,10 +321,12 @@ public sealed class SessionFileTransferRouter : IDisposable
 
         if (!matches)
         {
+            Report(peer, transfer, "저장 정보 불일치", true);
             _logSink.Write($"[FileRoute] 저장 완료 정보 불일치: request={stored.RequestId}");
             return;
         }
         _logSink.Write($"[FileRoute] 학생 저장 완료: request={stored.RequestId}, file={stored.FileId}");
+        Report(peer, transfer, "저장 완료", true);
         FileStored?.Invoke(peer.Connection, stored);
     }
 
