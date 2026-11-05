@@ -139,6 +139,39 @@ public sealed class RdpInvitationSecretDeliveryTests
         finally { await vm.ShutdownAsync(); }
     }
 
+    [Fact]
+    public async Task FailedViewer_ManualRecoveryGetsFreshSecret_WithoutLeavingRoomOrRetryLoop()
+    {
+        await using var rig = await Rig.OpenAsync();
+        var viewer = new RecordingViewer { FailConnect = true };
+        var vm = rig.CreateViewModel("Alice", viewer);
+        try
+        {
+            Assert.False(vm.ReconnectRdpCommand.CanExecute(null));
+            vm.JoinSessionCommand.Execute(null);
+            var first = await viewer.Connects.Reader.ReadAsync().AsTask().WaitAsync(Wait);
+            await WaitUntilAsync(() => vm.NeedsRdpRetry);
+            Assert.True(vm.IsConnected);
+            Assert.True(vm.ReconnectRdpCommand.CanExecute(null));
+            Assert.Contains("실패", vm.StatusMessage);
+            Assert.False(viewer.Connects.Reader.TryRead(out _));
+
+            viewer.FailConnect = false;
+            await vm.RetryRdpAsync();
+            var second = await viewer.Connects.Reader.ReadAsync().AsTask().WaitAsync(Wait);
+            await WaitUntilAsync(() => !vm.NeedsRdpRetry && vm.IsRdpActive);
+            Assert.NotEqual(first.Invitation.ConnectionId, second.Invitation.ConnectionId);
+            Assert.NotEqual(first.Invitation.InvitationId, second.Invitation.InvitationId);
+            Assert.NotEqual(first.Password, second.Password);
+            Assert.Equal(1, rig.SessionManager.ParticipantCount);
+            Assert.True(vm.IsConnected);
+            // 정상 연결에는 재시도가 적용되지 않는다.
+            await vm.RetryRdpAsync();
+            Assert.False(viewer.Connects.Reader.TryRead(out _));
+        }
+        finally { await vm.ShutdownAsync(); }
+    }
+
     private static async Task WaitUntilAsync(Func<bool> condition)
     {
         var deadline = DateTime.UtcNow + Wait;
@@ -155,11 +188,15 @@ public sealed class RdpInvitationSecretDeliveryTests
     private sealed class RecordingViewer : IRdpViewerService
     {
         public Channel<ConnectCall> Connects { get; } = Channel.CreateUnbounded<ConnectCall>();
-        public event Action<RdpConnectionStatus>? StatusChanged { add { } remove { } }
+        public bool FailConnect { get; set; }
+        public event Action<RdpConnectionStatus>? StatusChanged;
 
         public Task ConnectAsync(RdpInvitationPacket invitation, string invitationPassword, CancellationToken cancellationToken = default)
         {
             Connects.Writer.TryWrite(new ConnectCall(invitation, invitationPassword));
+            if (FailConnect) throw new IOException("controlled viewer failure");
+            StatusChanged?.Invoke(RdpConnectionStatus.Create(invitation.SessionId!.Value, invitation.ParticipantId)
+                .BeginConnect(invitation.ConnectionId).Connected(invitation.ConnectionId));
             return Task.CompletedTask;
         }
 

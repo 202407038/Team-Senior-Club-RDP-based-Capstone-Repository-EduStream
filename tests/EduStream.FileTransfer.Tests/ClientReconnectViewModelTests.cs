@@ -3,6 +3,7 @@ using System.Net.Sockets;
 using System.Reflection;
 using System.Security.Cryptography.X509Certificates;
 using EduStream.Client.ViewModels;
+using EduStream.Client.Services;
 using EduStream.Core.Collaboration;
 using EduStream.Core.Factories;
 using EduStream.Core.Logging;
@@ -22,6 +23,54 @@ namespace EduStream.FileTransfer.Tests;
 public sealed class ClientReconnectViewModelTests
 {
     private static readonly TimeSpan Wait = TimeSpan.FromSeconds(10);
+
+    [Fact]
+    public async Task JoinPreferencesSavedOnlyAfterApproval()
+    {
+        await using var rig = await Rig.OpenAsync();
+        var store = new RecordingJoinStore();
+        var vm = rig.CreateViewModel(store);
+        try
+        {
+            Assert.Null(store.Saved);
+            vm.JoinSessionCommand.Execute(null);
+            await WaitUntilAsync(() => vm.IsConnected && store.Saved is not null);
+            Assert.Equal(new JoinPreferences(true, "Alice", "127.0.0.1", rig.Port), store.Saved);
+        }
+        finally { await vm.ShutdownAsync(); }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task JoinRejectOrStoreFailureDoesNotCorruptConnectionOutcome(bool failStore)
+    {
+        await using var rig = await Rig.OpenAsync();
+        rig.Replies.Enqueue(failStore ? JoinReply.Approve : JoinReply.Reject);
+        var store = new RecordingJoinStore { Fail = failStore };
+        var vm = rig.CreateViewModel(store);
+        try
+        {
+            vm.JoinSessionCommand.Execute(null);
+            await WaitUntilAsync(() => rig.JoinRequests > 0 && !vm.IsConnecting);
+            Assert.Equal(failStore, vm.IsConnected);
+            Assert.Null(store.Saved);
+            if (failStore) Assert.Contains("저장하지 못했습니다", vm.PreferencesNotice);
+        }
+        finally { await vm.ShutdownAsync(); }
+    }
+
+    private sealed class RecordingJoinStore : IJoinPreferencesStore
+    {
+        public volatile JoinPreferences? Saved;
+        public bool Fail;
+        public JoinPreferences? Load() => null;
+        public void Save(JoinPreferences value)
+        {
+            if (Fail) throw new IOException();
+            Saved = value;
+        }
+    }
 
     [Fact]
     public async Task Reconnect_WithApproval_RejoinsAfterAck()
@@ -210,7 +259,7 @@ public sealed class ClientReconnectViewModelTests
             _ = AcceptLoopAsync();
         }
 
-        public ClientViewModel CreateViewModel() => new()
+        public ClientViewModel CreateViewModel(IJoinPreferencesStore? store = null) => new(joinPreferences: store)
         {
             HostAddress = "127.0.0.1",
             Port = Port,

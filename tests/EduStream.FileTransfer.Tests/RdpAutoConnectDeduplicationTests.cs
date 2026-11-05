@@ -104,13 +104,39 @@ public sealed class RdpAutoConnectDeduplicationTests
         rig.DeliverSecret(first.Secret);
         Assert.Single(rig.Viewer.Calls);
         Assert.Contains("RDP 연결 실패", rig.ViewModel.RdpStatusText);
+        Assert.True(rig.ViewModel.NeedsRdpRetry);
+        Assert.True(rig.ViewModel.ReconnectRdpCommand.CanExecute(null));
 
         await rig.ResetAsync();
+        Assert.False(rig.ViewModel.NeedsRdpRetry);
         rig.Viewer.Completion = Task.CompletedTask;
         var next = rig.NewRequest();
         await rig.DeliverInvitationAsync(next.Invitation);
         rig.DeliverSecret(next.Secret);
         Assert.Equal(2, rig.Viewer.Calls.Count);
+    }
+
+    [Fact]
+    public async Task LateFailureFromOldConnection_DoesNotOfferRetryForNewConnection()
+    {
+        await using var rig = new CallbackRig();
+        var pending = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        rig.Viewer.Completion = pending.Task;
+        var first = rig.NewRequest();
+        await rig.DeliverInvitationAsync(first.Invitation);
+        var oldConnect = rig.ViewModel.ConnectRdpWithPasswordAsync(first.Secret.Password);
+        try
+        {
+            await rig.ResetAsync();
+            rig.Viewer.Completion = Task.CompletedTask;
+            var next = rig.NewRequest();
+            await rig.DeliverInvitationAsync(next.Invitation);
+            rig.DeliverSecret(next.Secret);
+        }
+        finally { pending.TrySetException(new IOException("late failure")); await oldConnect; }
+        Assert.Equal(2, rig.Viewer.Calls.Count);
+        Assert.False(rig.ViewModel.NeedsRdpRetry);
+        Assert.DoesNotContain("late failure", rig.ViewModel.RdpStatusText);
     }
 
     private sealed record ConnectCall(RdpInvitationPacket Invitation, string Password);

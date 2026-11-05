@@ -17,6 +17,13 @@ public sealed class AnnotationDesktopWindowTests
         var thread = new Thread(() =>
         {
             var dispatcher = Dispatcher.CurrentDispatcher;
+            // 실제 앱과 같이 테마/컨트롤 리소스를 먼저 준비한다.
+            // Application 없이 도구창만 만들던 fixture는 테마 연동 이후 앱 실행 조건과 달랐다.
+            var application = new Application { ShutdownMode = ShutdownMode.OnExplicitShutdown };
+            application.Resources.MergedDictionaries.Add(new ResourceDictionary
+            { Source = new Uri("pack://application:,,,/EduStream.Server;component/Themes/EduStreamTheme.xaml") });
+            application.Resources.MergedDictionaries.Add(new ResourceDictionary
+            { Source = new Uri("pack://application:,,,/EduStream.Server;component/SharedControls.xaml") });
             Exception? failure = null;
             dispatcher.BeginInvoke((Action)(() =>
             {
@@ -52,7 +59,7 @@ public sealed class AnnotationDesktopWindowTests
                 }
             }
             catch (Exception error) { failure = error; }
-            finally { dispatcher.BeginInvokeShutdown(DispatcherPriority.Background); }
+            finally { application.Shutdown(); }
             }));
             // 실제 창의 메시지 큐와 Dispatcher 자원을 종료한 뒤 다음 native 검사를 시작한다.
             Dispatcher.Run();
