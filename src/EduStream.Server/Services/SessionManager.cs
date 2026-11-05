@@ -17,7 +17,7 @@ namespace EduStream.Server.Services;
 /// 세션 개설/종료, 참여자 관리, 패킷 라우팅을 담당합니다.
 /// TcpServerService를 통해 실제 네트워크 전송을 수행합니다.
 /// </summary>
-public sealed class SessionManager
+public sealed partial class SessionManager
 {
     private const int MaxChatMessageLength = 500;
     private const string ProfessorDisplayName = "교수자";
@@ -56,7 +56,7 @@ public sealed class SessionManager
         bool AllowViewing, bool AllowControl);
 
     /// <summary>재연결 티켓으로 참가할 때 복원할 허용 상태입니다.</summary>
-    private sealed record ReconnectRestore(bool AllowViewing, bool AllowControl);
+    private sealed record ReconnectRestore(bool AllowViewing, bool AllowControl, string PreviousClientId);
     private SessionFileTransferRouter? _fileTransfers;
     private ReverseCollaborationRouter? _reverseRouter;
 
@@ -70,6 +70,16 @@ public sealed class SessionManager
     /// (sender, message)
     /// </summary>
     public event Action<string, string>? ChatReceived;
+    public AnnouncementJournal Announcements { get; } = new();
+    public SessionAttendance Attendance { get; } = new();
+    private readonly RosterAdmissionPolicy _rosterAdmission = new();
+    public bool IsRosterAdmissionEnabled => _rosterAdmission.IsEnabled;
+    public int RosterCount => _rosterAdmission.Count;
+    public void ConfigureRosterAdmission(IReadOnlyList<RosterRow> rows, bool enabled)
+    {
+        if (CurrentSession is not null) throw new InvalidOperationException("명단 대조 설정은 세션을 닫은 뒤 바꿀 수 있습니다.");
+        _rosterAdmission.Configure(rows, enabled);
+    }
 
     /// <summary>
     /// RDP 초대 비밀번호가 발급되어 교수자 앱이 별도 채널(화면 표시, 구두 전달 등)로
@@ -448,6 +458,8 @@ public sealed class SessionManager
 
             _professorConnection = new ParticipantConnection(
                 CurrentSession.SessionId, Guid.NewGuid(), Guid.NewGuid(), ParticipantRole.Professor);
+            Announcements.Reset(CurrentSession.SessionId);
+            Attendance.Start(CurrentSession.SessionId, _rosterAdmission.ActiveRows);
             _controlCoordinator = new ServerRemoteControlCoordinator(
                 _professorConnection, _participantRegistry, _remoteInputGate, _logSink);
             _controlCoordinator.StateChanged += OnControlStateChanged;
@@ -732,7 +744,7 @@ public sealed class SessionManager
         }
 
         _logSink.Write($"[Reconnect] 토큰 확인: 이름={displayName}");
-        return new ReconnectRestore(grant.AllowViewing, grant.AllowControl);
+        return new ReconnectRestore(grant.AllowViewing, grant.AllowControl, grant.ClientId);
     }
 
     private static string HashToken(string token) =>
@@ -836,6 +848,13 @@ public sealed class SessionManager
     public async Task BroadcastPacketAsync(BasePacket packet)
     {
         ValidateOutboundPacket(packet);
+        if (packet is ChatPacket { IsAnnouncement: true } notice)
+        {
+            notice.SessionId = CurrentSession?.SessionId;
+            notice.Sender = "교수자";
+            notice.SenderId = "Server";
+            Announcements.Publish(notice, _clientDisplayNames.Select(x => new AnnouncementRecipient(x.Key, x.Value)));
+        }
         _logSink.Write($"[Packet] 브로드캐스트: 타입={packet.MessageType}, 길이={packet.DataLength}");
         await BroadcastToParticipantsAsync(packet);
     }
@@ -905,7 +924,10 @@ public sealed class SessionManager
                         }
                         else
                         {
-                            await BroadcastSystemMessageAsync($"{joinPacket.DisplayName}님이 세션에 참여했습니다.");
+                            if (CurrentSession is { } joinedSession)
+                                foreach (var notice in Announcements.Replay(joinedSession.SessionId, new(clientId, joinPacket.DisplayName)))
+                                    await _tcpServer.SendToClientAsync(clientId, notice);
+                            // 출입은 Attendance에 기록하고 교수자 학생 목록에서만 표시한다.
                         }
                     }
                     break;
@@ -924,7 +946,7 @@ public sealed class SessionManager
                             RevokeReconnectGrant(clientId);
                             await RevokeControlIfDisconnectedAsync(clientId);
                             await RevokeRdpInvitationAsync(leaveName, RdpFailureReason.SessionClosed, notifyClientId: null);
-                            await BroadcastSystemMessageAsync($"{leaveName}님이 세션에서 나갔습니다.");
+                            // 출입 기록은 전체 채팅으로 전송하지 않는다.
                         }
                     }
                     break;
@@ -937,6 +959,10 @@ public sealed class SessionManager
                     }
                     break;
 
+                case PacketType.DirectChat:
+                    var direct = JsonSerializer.Deserialize<DirectChatPacket>(payload);
+                    if (direct is not null) await HandleDirectChatAsync(clientId, direct);
+                    break;
                 case PacketType.Chat:
                     var chatPacket = JsonSerializer.Deserialize<ChatPacket>(payload);
                     if (chatPacket is not null)
@@ -994,7 +1020,7 @@ public sealed class SessionManager
 
         // 참가 중이던 연결이 비정상으로 끊긴 경우에만 재연결 토큰을 쓸 수 있게 연다. 허용 상태는 끊기기 직전 값을 보관한다.
         ArmReconnectGrant(clientId);
-        var displayName = RemoveParticipant(clientId);
+        var displayName = RemoveParticipant(clientId, "연결 끊김");
         if (displayName is null)
             return;
 
@@ -1005,7 +1031,7 @@ public sealed class SessionManager
         _logSink.Write(
             $"[Session] 연결 끊김 이탈: {displayName} " +
             $"(clientId={clientId}, sessionId={CurrentSession?.SessionId}, 사유={reason})");
-        await BroadcastSystemMessageAsync($"{displayName}님의 연결이 끊어졌습니다.");
+        // 비정상 이탈도 교수자 Attendance/로그에만 기록한다.
     }
 
     private async Task HandleChatAsync(string clientId, ChatPacket chatPacket)
@@ -1018,6 +1044,12 @@ public sealed class SessionManager
                 true, chatPacket);
             await _tcpServer.SendToClientAsync(clientId, errorPacket);
             _logSink.Write($"[Chat] 비참가자 차단: clientId={clientId}");
+            return;
+        }
+
+        if (chatPacket.AnnouncementReceipt != AnnouncementReceipt.None)
+        {
+            Announcements.Accept(chatPacket.SessionId, chatPacket.AnnouncementId, clientId, chatPacket.AnnouncementReceipt);
             return;
         }
 
@@ -1039,8 +1071,17 @@ public sealed class SessionManager
             return;
         }
 
-        // 4) 송신자 이름을 서버 매핑 기준으로 강제 보정 (변조 방지)
-        chatPacket.Sender = verifiedName;
+        // 서버 내부의 이름(학번) 식별자는 참가·제어·파일에만 쓴다.
+        var participant = _participantRegistry.TryGetConnection(clientId);
+        if (participant is null) return;
+        chatPacket.Sender = PublicChatName(verifiedName);
+        chatPacket.SenderId = participant.ConnectionId.ToString("D");
+        // 교수자 공지/시스템 안내는 학생 입력으로 만들 수 없다.
+        chatPacket.IsAnnouncement = false;
+        chatPacket.IsImportantAnnouncement = false;
+        chatPacket.AnnouncementId = null;
+        chatPacket.IsAnnouncementHistory = false;
+        chatPacket.IsSystemMessage = false;
 
         // 5) 브로드캐스트
         var targetCount = _participants.Count;
@@ -1048,6 +1089,14 @@ public sealed class SessionManager
 
         ChatReceived?.Invoke(verifiedName, chatPacket.Message);
         _logSink.Write($"[Chat] 브로드캐스트: {verifiedName} → {targetCount}명");
+    }
+
+    private static string PublicChatName(string name)
+    {
+        var start = name.LastIndexOf(" (", StringComparison.Ordinal);
+        if (start <= 0 || !name.EndsWith(')')) return name;
+        var suffix = name[(start + 2)..^1];
+        return suffix.Length is > 0 and <= 32 && suffix.All(char.IsAsciiDigit) ? name[..start] : name;
     }
 
     private BasePacket HandleJoin(string clientId, SessionJoinPacket packet)
@@ -1063,6 +1112,8 @@ public sealed class SessionManager
         }
 
         var secureGate = _secureGate;
+        if (!_rosterAdmission.Allows(packet))
+            return CreateError("ROSTER_MISMATCH", "학생 이름·학번이 수업 명단과 일치하지 않습니다. 입력 정보를 확인해 주세요.", true, packet);
         if (secureGate is null && _roomPassword is not null)
         {
             // 보호 채널 없이 연 세션에는 비밀번호를 받을 경로가 없다.
@@ -1105,6 +1156,9 @@ public sealed class SessionManager
         }
 
         var participant = _participantRegistry.Join(clientId, CurrentSession.SessionId, packet.DisplayName, ParticipantRole.Student);
+        Attendance.Join(clientId, IsRosterAdmissionEnabled ? packet.RosterName : packet.DisplayName,
+            IsRosterAdmissionEnabled ? packet.StudentId : "", restore is not null);
+        if (restore is not null) Announcements.RebindVerifiedReconnect(restore.PreviousClientId, clientId);
         if (restore is not null && (!restore.AllowViewing || !restore.AllowControl))
         {
             // 학생이 끊기기 전에 꺼 둔 허용은 재연결로 다시 켜지지 않게 복원한다(U07).
@@ -1123,12 +1177,20 @@ public sealed class SessionManager
 
         _logSink.Write($"[Session] {(restore is null ? "참여" : "재연결")}: {packet.DisplayName}, 현재 인원={CurrentSession.ParticipantCount}");
 
-        return PacketFactory.CreateAck(
+        if (packet.SupportsDirectChat)
+        {
+            _directChatClients[clientId] = participant.ConnectionId;
+            ParticipantsChanged?.Invoke();
+        }
+        var joinedAck = PacketFactory.CreateAck(
             senderId: "Server",
             ackCode: AckCodes.SessionJoined,
             message: $"{packet.DisplayName}님이 세션에 참여했습니다.",
             sessionId: CurrentSession.SessionId,
             correlationId: packet.CorrelationId);
+        joinedAck.SupportsDirectChat = true;
+        joinedAck.StudentConnectionId = participant.ConnectionId;
+        return joinedAck;
     }
 
     private BasePacket HandleLeave(string clientId, SessionLeavePacket packet)
@@ -1481,12 +1543,14 @@ public sealed class SessionManager
         }
     }
 
-    private string? RemoveParticipant(string clientId)
+    private string? RemoveParticipant(string clientId, string action = "퇴장")
     {
         string? displayName;
         lock (_sessionLock)
         {
             if (!_clientDisplayNames.TryRemove(clientId, out displayName)) return null;
+            Attendance.Leave(clientId, action);
+            _directChatClients.TryRemove(clientId, out _);
             _participants.TryRemove(displayName, out _);
             // 실제 퇴장·연결 끊김 후에는 자동 복귀하지 않는다. 다시 오면 새 참가로 처리한다(U03).
             _screenWaiters.TryRemove(clientId, out _);
@@ -1499,8 +1563,11 @@ public sealed class SessionManager
 
     private void ClearParticipants()
     {
+        Attendance.Close();
+        Announcements.Reset(Guid.Empty);
         _participants.Clear();
         _clientDisplayNames.Clear();
+        _directChatClients.Clear();
         _clientLastSeen.Clear();
         _screenWaiters.Clear();
         UpdateParticipantCount();
@@ -1540,6 +1607,7 @@ public sealed class SessionManager
     private static void ValidateOutboundPacket(BasePacket packet)
     {
         ArgumentNullException.ThrowIfNull(packet);
+        if (packet is DirectChatPacket) throw new InvalidOperationException("개인 채팅은 전체 전송 경로로 보낼 수 없습니다.");
 
         if (packet is FilePacket filePacket)
         {

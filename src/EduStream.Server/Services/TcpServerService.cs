@@ -135,6 +135,19 @@ public sealed class TcpServerService
         }
     }
 
+    /// <summary>개인 메시지처럼 대상 이탈을 성공으로 표시하면 안 되는 단일 전송.</summary>
+    public async Task SendRequiredToClientAsync(string clientId, BasePacket packet)
+    {
+        if (!_clients.TryGetValue(clientId, out var connection))
+            throw new IOException("대상 연결이 종료됐습니다.");
+        try { await connection.SendAsync(BuildFrame(_serializer.Serialize(packet))); }
+        catch
+        {
+            await RemoveClientAsync(clientId, "개인 메시지 송신 실패");
+            throw;
+        }
+    }
+
     /// <summary>
     /// 특정 클라이언트 연결을 강제로 정리합니다.
     /// reason은 제거 로그에 사유로 남깁니다(예: 타임아웃, 참가 거부).

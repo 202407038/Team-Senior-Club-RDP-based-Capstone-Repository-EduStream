@@ -23,12 +23,14 @@ public sealed class SessionClient
 
     public SessionJoinPacket CreateJoinRequest(string hostAddress, int port, string displayName, string? joinTicket = null)
     {
-        return PacketFactory.CreateSessionJoin(
+        var request = PacketFactory.CreateSessionJoin(
             senderId: displayName,
             displayName: displayName,
             targetAddress: hostAddress,
             targetPort: port,
             joinTicket: joinTicket);
+        request.SupportsDirectChat = true;
+        return request;
     }
 
     public Task<SessionInfo> ApplyJoinAckAsync(AckPacket packet, string hostAddress, int port)
