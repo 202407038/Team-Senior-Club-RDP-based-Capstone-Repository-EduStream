@@ -16,5 +16,8 @@ public enum RemoteInputRevokeStatus
     Pending,
 
     /// <summary>입력 엔진의 회수 호출이 실패했습니다. 회수 요청은 대기열에 남아 다음 요청/중지 때 다시 시도됩니다.</summary>
-    Failed
+    Failed,
+
+    /// <summary>교수자 공유와 독립적인 학생 화면/입력 수명을 유지했습니다. 입력 차단 완료를 뜻하지 않습니다.</summary>
+    Independent
 }

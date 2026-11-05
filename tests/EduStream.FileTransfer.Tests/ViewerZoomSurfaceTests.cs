@@ -28,6 +28,9 @@ public sealed class ViewerZoomSurfaceTests
         using var surface = new ViewerZoomSurface();
         using var viewer = new Forms.Panel();
         form.Controls.Add(surface); surface.Attach(viewer); surface.SetSourceSize(1920, 1080); form.Show();
+        // WPF 초기화가 프로세스 DPI 모드를 바꿀 수 있으므로 표시 후 실제 픽셀 크기를 고정한다.
+        form.ClientSize = new Size(800, 600); form.PerformLayout();
+        Assert.Equal(new Size(800, 600), surface.Size);
         surface.SetZoom(2);
         surface.AutoScrollPosition = new Point(200, 150);
         surface.Fit();
@@ -46,6 +49,8 @@ public sealed class ViewerZoomSurfaceTests
         using var surface = new ViewerZoomSurface();
         using var viewer = new Forms.Panel();
         form.Controls.Add(surface); surface.Attach(viewer); surface.SetSourceSize(1920, 1080); form.Show();
+        form.ClientSize = new Size(800, 600); form.PerformLayout();
+        Assert.Equal(new Size(800, 600), surface.Size);
         for (var i = 0; i < 5; i++)
         {
             surface.SetZoom(2);
@@ -60,43 +65,13 @@ public sealed class ViewerZoomSurfaceTests
     });
 
     [Fact]
-    public Task WheelOverViewer_UsesPointerEvenWhenParentHasFocus_AndRespectsControlMode() => OnSta(() =>
+    public Task WheelIsNotInterceptedOrUsedForZoom() => OnSta(() =>
     {
-        using var form = new Forms.Form { ClientSize = new Size(800, 600), ShowInTaskbar = false,
-            StartPosition = Forms.FormStartPosition.Manual, Location = new Point(-30000, -30000) };
         using var surface = new ViewerZoomSurface();
-        using var viewer = new Forms.Panel();
-        form.Controls.Add(surface); surface.Attach(viewer); form.Show();
-        var point = surface.PointToScreen(new Point(200, 100));
-        var message = Forms.Message.Create(form.Handle, 0x020A, new IntPtr(120 << 16),
-            new IntPtr(unchecked((int)((ushort)point.X | ((uint)(ushort)point.Y << 16)))));
-        Assert.True(surface.PreFilterMessage(ref message));
-        Assert.Equal(1.15, surface.Zoom, 4);
-        surface.WheelZoomEnabled = false;
-        Assert.False(surface.PreFilterMessage(ref message));
-        Assert.Equal(1.15, surface.Zoom, 4);
-        surface.WheelZoomEnabled = true;
-        var outside = form.PointToScreen(new Point(-100, -100));
-        message.LParam = new IntPtr(unchecked((int)((ushort)outside.X | ((uint)(ushort)outside.Y << 16))));
-        Assert.False(surface.PreFilterMessage(ref message));
-    });
-
-    [Fact]
-    public Task WpfMessageLoop_RoutesWheelOnce_AndUnhooksOnDispose() => OnSta(() =>
-    {
-        using var form = new Forms.Form { ClientSize = new Size(800, 600), ShowInTaskbar = false,
-            StartPosition = Forms.FormStartPosition.Manual, Location = new Point(-30000, -30000) };
-        using var surface = new ViewerZoomSurface();
-        using var viewer = new Forms.Panel();
-        form.Controls.Add(surface); surface.Attach(viewer); form.Show();
-        var point = surface.PointToScreen(new Point(200, 100));
-        var message = new System.Windows.Interop.MSG { hwnd = form.Handle, message = 0x020A,
-            wParam = new IntPtr(120 << 16),
-            lParam = new IntPtr(unchecked((int)((ushort)point.X | ((uint)(ushort)point.Y << 16)))) };
-        Assert.True(System.Windows.Interop.ComponentDispatcher.RaiseThreadMessage(ref message));
-        Assert.Equal(1.15, surface.Zoom, 4);
-        surface.WheelZoomEnabled = false;
+        Assert.False(typeof(Forms.IMessageFilter).IsAssignableFrom(typeof(ViewerZoomSurface)));
+        var message = new System.Windows.Interop.MSG { message = 0x020A, wParam = new IntPtr(120 << 16) };
         Assert.False(System.Windows.Interop.ComponentDispatcher.RaiseThreadMessage(ref message));
+        Assert.Equal(1, surface.Zoom);
         surface.Dispose();
         Assert.False(System.Windows.Interop.ComponentDispatcher.RaiseThreadMessage(ref message));
     });
