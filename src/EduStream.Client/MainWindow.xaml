@@ -1,16 +1,17 @@
-﻿<Window x:Class="EduStream.Client.MainWindow"
+<Window x:Class="EduStream.Client.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:wfi="clr-namespace:System.Windows.Forms.Integration;assembly=WindowsFormsIntegration"
+        xmlns:behaviors="clr-namespace:EduStream.Client.Behaviors"
         mc:Ignorable="d"
         Title="EduStream Client"
         Height="820"
         Width="1360"
         MinHeight="640"
         MinWidth="960"
-        Background="{StaticResource BrushBgPrimary}"
+        Background="{DynamicResource BrushBgPrimary}"
         WindowStyle="None"
         ResizeMode="CanResize"
         WindowStartupLocation="CenterScreen">
@@ -19,7 +20,7 @@
         <WindowChrome CaptionHeight="36"
                       ResizeBorderThickness="6"
                       GlassFrameThickness="0"
-                      CornerRadius="0"
+                      CornerRadius="8"
                       UseAeroCaptionButtons="False" />
     </WindowChrome.WindowChrome>
 
@@ -29,8 +30,8 @@
             <Setter Property="Height" Value="26" />
             <Setter Property="Cursor" Value="Hand" />
             <Setter Property="Content" Value="OFF" />
-            <Setter Property="Background" Value="#444444" />
-            <Setter Property="Foreground" Value="{StaticResource BrushTextPrimary}" />
+            <Setter Property="Background" Value="{DynamicResource BrushBorder}" />
+            <Setter Property="Foreground" Value="{DynamicResource BrushTextPrimary}" />
             <Setter Property="FontWeight" Value="SemiBold" />
             <Setter Property="Template">
                 <Setter.Value>
@@ -51,7 +52,8 @@
             <Style.Triggers>
                 <DataTrigger Binding="{Binding AllowControl}" Value="True">
                     <Setter Property="Content" Value="ON" />
-                    <Setter Property="Background" Value="{StaticResource BrushAccentPurple}" />
+                    <Setter Property="Foreground" Value="{DynamicResource BrushBgPrimary}" />
+                    <Setter Property="Background" Value="{DynamicResource BrushAccentPurple}" />
                 </DataTrigger>
             </Style.Triggers>
         </Style>
@@ -59,12 +61,13 @@
             <Style.Triggers>
                 <DataTrigger Binding="{Binding AllowViewing}" Value="True">
                     <Setter Property="Content" Value="ON" />
-                    <Setter Property="Background" Value="{StaticResource BrushAccentPurple}" />
+                    <Setter Property="Foreground" Value="{DynamicResource BrushBgPrimary}" />
+                    <Setter Property="Background" Value="{DynamicResource BrushAccentPurple}" />
                 </DataTrigger>
             </Style.Triggers>
         </Style>
         <Style x:Key="FileLinkButton" TargetType="Button">
-            <Setter Property="Foreground" Value="#DDDDDD" />
+            <Setter Property="Foreground" Value="{DynamicResource BrushTextSecondary}" />
             <Setter Property="Cursor" Value="Hand" />
             <Setter Property="HorizontalAlignment" Value="Left" />
             <Setter Property="Template">
@@ -76,7 +79,7 @@
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
                                 <Setter TargetName="Label" Property="TextDecorations" Value="Underline" />
-                                <Setter TargetName="Label" Property="Foreground" Value="{StaticResource BrushAccentPurple}" />
+                                <Setter TargetName="Label" Property="Foreground" Value="{DynamicResource BrushAccentPurple}" />
                             </Trigger>
                             <Trigger Property="IsEnabled" Value="False">
                                 <Setter TargetName="Label" Property="Opacity" Value="0.5" />
@@ -89,7 +92,7 @@
         <Style x:Key="CaptionButton" TargetType="Button">
             <Setter Property="Width" Value="46" />
             <Setter Property="Height" Value="36" />
-            <Setter Property="Foreground" Value="{StaticResource BrushTextSecondary}" />
+            <Setter Property="Foreground" Value="{DynamicResource BrushTextSecondary}" />
             <Setter Property="FontFamily" Value="Segoe MDL2 Assets" />
             <Setter Property="FontSize" Value="10" />
             <Setter Property="Focusable" Value="False" />
@@ -102,11 +105,11 @@
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="Bg" Property="Background" Value="{StaticResource BrushBgElevated}" />
-                                <Setter Property="Foreground" Value="{StaticResource BrushTextPrimary}" />
+                                <Setter TargetName="Bg" Property="Background" Value="{DynamicResource BrushBgElevated}" />
+                                <Setter Property="Foreground" Value="{DynamicResource BrushTextPrimary}" />
                             </Trigger>
                             <Trigger Property="IsPressed" Value="True">
-                                <Setter TargetName="Bg" Property="Background" Value="{StaticResource BrushBgInput}" />
+                                <Setter TargetName="Bg" Property="Background" Value="{DynamicResource BrushBgInput}" />
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
@@ -122,8 +125,8 @@
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="Bg" Property="Background" Value="{StaticResource BrushAccentError}" />
-                                <Setter Property="Foreground" Value="White" />
+                                <Setter TargetName="Bg" Property="Background" Value="{DynamicResource BrushAccentError}" />
+                                <Setter Property="Foreground" Value="{DynamicResource BrushOnStrong}" />
                             </Trigger>
                             <Trigger Property="IsPressed" Value="True">
                                 <Setter TargetName="Bg" Property="Opacity" Value="0.8" />
@@ -143,11 +146,19 @@
 
         <!-- 상단바 -->
         <Border Grid.Row="0"
-                Background="{StaticResource BrushBgSurface}"
-                BorderBrush="{StaticResource BrushBorder}"
+                Background="{DynamicResource BrushBgSurface}"
+                BorderBrush="{DynamicResource BrushBorder}"
                 BorderThickness="0,0,0,1">
             <DockPanel LastChildFill="False">
                 <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                    <Button Content="{DynamicResource ThemeToggleGlyph}" FontFamily="Segoe MDL2 Assets" Click="ToggleTheme_Click"
+                            ToolTip="{DynamicResource ThemeToggleLabel}" AutomationProperties.Name="{DynamicResource ThemeToggleLabel}"
+                            Style="{StaticResource GhostButton}" Margin="0,3,6,3" WindowChrome.IsHitTestVisibleInChrome="True" />
+                    <Button Style="{StaticResource GhostButton}" Margin="0,3,8,3"
+                            WindowChrome.IsHitTestVisibleInChrome="True"
+                            Content="{Binding Announcement.InboxLabel}" Command="{Binding ToggleAnnouncementInboxCommand}"
+                            AutomationProperties.Name="공지함 펼치기 또는 접기"
+                            Visibility="{Binding IsLectureViewActive, Converter={StaticResource BoolToVis}}" />
                     <Button Style="{StaticResource CaptionButton}" Content="&#xE921;" Click="Minimize_Click" ToolTip="최소화" />
                     <Button x:Name="MaximizeButton" Style="{StaticResource CaptionButton}" Content="&#xE922;" Click="Maximize_Click" ToolTip="최대화" />
                     <Button Style="{StaticResource CaptionCloseButton}" Content="&#xE8BB;" Click="Close_Click" ToolTip="닫기" />
@@ -156,14 +167,14 @@
                            Margin="14,0,0,0"
                            VerticalAlignment="Center"
                            Text="EDUSTREAM"
-                           Foreground="{StaticResource BrushAccentPurple}"
+                           Foreground="{DynamicResource BrushAccentPurple}"
                            FontWeight="ExtraBold"
                            FontSize="13" />
                 <TextBlock DockPanel.Dock="Left"
                            Margin="10,0,0,0"
                            VerticalAlignment="Center"
                            Text="수강생 클라이언트"
-                           Foreground="{StaticResource BrushTextMuted}"
+                           Foreground="{DynamicResource BrushTextMuted}"
                            FontSize="12" />
             </DockPanel>
         </Border>
@@ -180,29 +191,41 @@
                         HorizontalAlignment="Stretch">
                     <StackPanel>
                         <TextBlock Text="EDUSTREAM"
-                                   Foreground="{StaticResource BrushAccentPurple}"
+                                   Foreground="{DynamicResource BrushAccentPurple}"
                                    FontSize="24"
                                    FontWeight="ExtraBold" />
                         <TextBlock Margin="0,4,0,20"
-                                   Foreground="{StaticResource BrushTextMuted}"
+                                   Foreground="{DynamicResource BrushTextMuted}"
                                    Text="교수자가 개설한 세션에 참가합니다." />
 
                         <TextBlock Style="{StaticResource FieldLabel}" Text="학생 이름" />
-                        <TextBox Style="{StaticResource DarkTextBox}"
+                        <TextBox Style="{StaticResource DarkTextBox}" behaviors:StudentIdentityInput.Kind="Name" MaxLength="5" ToolTip="한글 5자 이내"
                                  Text="{Binding DisplayName, UpdateSourceTrigger=PropertyChanged}" />
+                        <TextBlock Style="{StaticResource FieldLabel}" Text="학번 (명단 대조 수업에서 필수)" Margin="0,12,0,6" />
+                        <TextBox Style="{StaticResource DarkTextBox}" behaviors:StudentIdentityInput.Kind="StudentId" InputMethod.IsInputMethodEnabled="False" MaxLength="32" Text="{Binding StudentId, UpdateSourceTrigger=PropertyChanged}" />
+
+                        <Button Content="교수자 자동 찾기" Command="{Binding FindTeachersCommand}" Style="{StaticResource GhostButton}" Margin="0,14,0,4" />
+                        <TextBlock Text="{Binding DiscoveryStatus}" TextWrapping="Wrap" FontSize="11" Foreground="{DynamicResource BrushTextSecondary}" />
+                        <ListBox ItemsSource="{Binding DiscoveredTeachers}" SelectedItem="{Binding SelectedTeacher}"
+                                 Style="{StaticResource DarkListBox}" MaxHeight="140" Margin="0,6,0,0"
+                                 AutomationProperties.Name="검색된 교수자 목록">
+                            <ListBox.ItemTemplate><DataTemplate>
+                                <TextBlock Text="{Binding Label}" TextWrapping="Wrap" Margin="0,4" />
+                            </DataTemplate></ListBox.ItemTemplate>
+                        </ListBox>
 
                         <TextBlock Style="{StaticResource FieldLabel}" Margin="0,12,0,6" Text="교수자 IP" />
                         <TextBox Style="{StaticResource DarkTextBox}"
                                  Text="{Binding HostAddress, UpdateSourceTrigger=PropertyChanged}" />
                         <TextBlock Margin="0,6,0,0"
                                    FontSize="11"
-                                   Foreground="{StaticResource BrushTextMuted}"
+                                   Foreground="{DynamicResource BrushTextMuted}"
                                    Text="교수자 화면에 표시된 IP를 입력하세요." />
 
                         <Expander Header="고급 설정 (기본 포트 5000)"
                                   IsExpanded="False"
                                   Margin="0,10,0,0"
-                                  Foreground="{StaticResource BrushTextSecondary}">
+                                  Foreground="{DynamicResource BrushTextSecondary}">
                             <StackPanel Margin="0,8,0,0">
                                 <TextBlock Style="{StaticResource FieldLabel}" Text="포트 (교수자가 바꾼 경우에만)" />
                                 <TextBox Style="{StaticResource DarkTextBox}"
@@ -213,7 +236,7 @@
                         <!-- 방 비밀번호는 비밀번호가 걸린 방일 때만 체크하고 입력한다. 비밀번호 없는 방은 비워 두는 것과 같다. -->
                         <CheckBox x:Name="UseRoomPasswordCheck"
                                   Margin="0,16,0,0"
-                                  Foreground="{StaticResource BrushTextSecondary}"
+                                  Foreground="{DynamicResource BrushTextSecondary}"
                                   Content="비밀번호 입력"
                                   IsChecked="{Binding RoomPasswordRequired, Mode=TwoWay}"
                                   Unchecked="UseRoomPasswordCheck_Unchecked" />
@@ -222,10 +245,14 @@
                             <PasswordBox x:Name="RoomPasswordBox" />
                             <TextBlock Margin="0,6,0,0"
                                        FontSize="11"
-                                       Foreground="{StaticResource BrushTextMuted}"
+                                       Foreground="{DynamicResource BrushTextMuted}"
                                        Text="교수자가 따로 알려 준 방 비밀번호를 입력하세요." />
                         </StackPanel>
 
+                        <CheckBox Margin="0,14,0,0" Foreground="{DynamicResource BrushTextSecondary}"
+                                  Content="다음 실행에 이름·IP 기억" IsChecked="{Binding RememberJoinDetails}" />
+                        <TextBlock Margin="0,6,0,0" FontSize="11" TextWrapping="Wrap"
+                                   Foreground="{DynamicResource BrushTextMuted}" Text="{Binding PreferencesNotice}" />
                         <Button Style="{StaticResource PrimaryButton}"
                                 Margin="0,18,0,0"
                                 Height="40"
@@ -237,7 +264,7 @@
                             <ProgressBar Style="{StaticResource LoadingProgressBar}" />
                             <TextBlock Margin="0,8,0,0"
                                        Text="세션에 연결하는 중..."
-                                       Foreground="{StaticResource BrushAccentPurple}"
+                                       Foreground="{DynamicResource BrushAccentPurple}"
                                        FontWeight="SemiBold"
                                        HorizontalAlignment="Center" />
                         </StackPanel>
@@ -245,18 +272,18 @@
                         <Border Margin="0,14,0,0"
                                 Padding="10"
                                 CornerRadius="8"
-                                Background="{StaticResource BrushBgElevated}">
+                                Background="{DynamicResource BrushBgElevated}">
                             <Border.Style>
                                 <Style TargetType="Border">
-                                    <Setter Property="BorderBrush" Value="{StaticResource BrushAccentTeal}" />
+                                    <Setter Property="BorderBrush" Value="{DynamicResource BrushAccentTeal}" />
                                     <Setter Property="BorderThickness" Value="0,0,0,2" />
                                     <Style.Triggers>
                                         <DataTrigger Binding="{Binding StatusMessage}" Value="">
                                             <Setter Property="Visibility" Value="Collapsed" />
                                         </DataTrigger>
                                         <DataTrigger Binding="{Binding IsStatusError}" Value="True">
-                                            <Setter Property="BorderBrush" Value="{StaticResource BrushAccentError}" />
-                                            <Setter Property="Background" Value="#2A1E22" />
+                                            <Setter Property="BorderBrush" Value="{DynamicResource BrushAccentError}" />
+                                            <Setter Property="Background" Value="{DynamicResource BrushErrorGround}" />
                                         </DataTrigger>
                                     </Style.Triggers>
                                 </Style>
@@ -264,10 +291,10 @@
                             <TextBlock TextWrapping="Wrap" Text="{Binding StatusMessage}">
                                 <TextBlock.Style>
                                     <Style TargetType="TextBlock">
-                                        <Setter Property="Foreground" Value="{StaticResource BrushAccentTeal}" />
+                                        <Setter Property="Foreground" Value="{DynamicResource BrushAccentTeal}" />
                                         <Style.Triggers>
                                             <DataTrigger Binding="{Binding IsStatusError}" Value="True">
-                                                <Setter Property="Foreground" Value="{StaticResource BrushAccentError}" />
+                                                <Setter Property="Foreground" Value="{DynamicResource BrushAccentError}" />
                                                 <Setter Property="FontWeight" Value="SemiBold" />
                                             </DataTrigger>
                                         </Style.Triggers>
@@ -282,17 +309,130 @@
 
         <!-- 03 강의 화면 -->
         <Grid Margin="16" Visibility="{Binding IsLectureViewActive, Converter={StaticResource BoolToVis}}">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+            </Grid.RowDefinitions>
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*" MinWidth="480" />
-                <ColumnDefinition Width="16" />
-                <ColumnDefinition Width="380" MinWidth="320" MaxWidth="440" />
+                <ColumnDefinition>
+                    <ColumnDefinition.Style>
+                        <Style TargetType="ColumnDefinition">
+                            <Setter Property="Width" Value="16" />
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding IsCompanionPanelVisible}" Value="False">
+                                    <Setter Property="Width" Value="32" />
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </ColumnDefinition.Style>
+                </ColumnDefinition>
+                <ColumnDefinition>
+                    <ColumnDefinition.Style>
+                        <Style TargetType="ColumnDefinition">
+                            <Setter Property="Width" Value="380" />
+                            <Setter Property="MinWidth" Value="320" />
+                            <Setter Property="MaxWidth" Value="440" />
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding IsCompanionPanelVisible}" Value="False">
+                                    <Setter Property="MinWidth" Value="0" />
+                                    <Setter Property="Width" Value="0" />
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </ColumnDefinition.Style>
+                </ColumnDefinition>
             </Grid.ColumnDefinitions>
 
-            <Border Grid.Column="0"
+            <!-- native RDP 위에 겹치지 않고 별도 행에 놓아 공지가 가려지지 않도록 한다. -->
+            <ScrollViewer Grid.ColumnSpan="3" MaxHeight="280" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+            <StackPanel>
+            <Border Margin="0,0,0,10" Padding="12" CornerRadius="8"
+                    Background="{DynamicResource BrushBgElevated}"
+                    Visibility="{Binding Announcement.IsVisible, Converter={StaticResource BoolToVis}}">
+                <DockPanel>
+                    <Button DockPanel.Dock="Right" Content="닫기" Style="{StaticResource GhostButton}"
+                            Command="{Binding DismissAnnouncementCommand}" />
+                    <TextBlock DockPanel.Dock="Left" Text="공지  " FontWeight="Bold" VerticalAlignment="Center"
+                               Foreground="{DynamicResource BrushAccentTeal}" />
+                    <TextBlock Text="{Binding Announcement.Text}" TextWrapping="Wrap" MaxHeight="100"
+                               TextTrimming="CharacterEllipsis" Foreground="{DynamicResource BrushTextPrimary}"
+                               ToolTip="3초 후 사라집니다. 전문은 공지함에서 다시 볼 수 있습니다." />
+                </DockPanel>
+            </Border>
+            <StackPanel
+                          Visibility="{Binding Announcement.HasImportant, Converter={StaticResource BoolToVis}}">
+                <ItemsControl ItemsSource="{Binding Announcement.ImportantItems}">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <Border Background="{DynamicResource BrushBgElevated}" Padding="12" Margin="0,0,0,8" CornerRadius="8">
+                                <DockPanel>
+                                    <Button DockPanel.Dock="Right" Content="확인" Style="{StaticResource GhostButton}"
+                                            Command="{Binding ConfirmCommand}" VerticalAlignment="Top"
+                                            ToolTip="확인하고 알림을 닫습니다. 공지함 기록은 남습니다." />
+                                    <StackPanel>
+                                        <TextBlock Text="중요 공지" Foreground="{DynamicResource BrushAccentTeal}" FontWeight="Bold" Margin="0,0,0,4" />
+                                        <TextBlock Text="{Binding Text}" TextWrapping="Wrap" FontWeight="Bold" Foreground="{DynamicResource BrushTextPrimary}" />
+                                    </StackPanel>
+                                </DockPanel>
+                            </Border>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </StackPanel>
+            <Border Background="{DynamicResource BrushBgElevated}" Padding="12" Margin="0,0,0,10" CornerRadius="8"
+                    Visibility="{Binding Announcement.IsOpen, Converter={StaticResource BoolToVis}}">
+                <DockPanel>
+                    <DockPanel DockPanel.Dock="Top" Margin="0,0,0,8">
+                        <Button DockPanel.Dock="Right" Content="접기" Style="{StaticResource GhostButton}" Command="{Binding ToggleAnnouncementInboxCommand}" />
+                        <TextBlock Text="공지함" FontSize="16" FontWeight="SemiBold" Foreground="{DynamicResource BrushTextPrimary}" />
+                    </DockPanel>
+                        <StackPanel>
+                            <TextBlock Text="아직 받은 공지가 없습니다." Foreground="{DynamicResource BrushTextSecondary}"
+                                       Visibility="{Binding Announcement.IsEmpty, Converter={StaticResource BoolToVis}}" />
+                            <ItemsControl ItemsSource="{Binding Announcement.Items}">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <DockPanel Margin="0,4,0,12">
+                                            <Button DockPanel.Dock="Right" Content="확인" Style="{StaticResource GhostButton}"
+                                                    Command="{Binding ConfirmCommand}" Margin="12,0,0,0" VerticalAlignment="Top" />
+                                            <StackPanel>
+                                                <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+                                                    <TextBlock Text="{Binding ReadLabel}" Foreground="{DynamicResource BrushTextSecondary}" Margin="0,0,12,0" />
+                                                    <TextBlock Text="{Binding LocalSentAt, StringFormat={}{0:MM/dd HH:mm}}" Foreground="{DynamicResource BrushTextSecondary}" />
+                                                </StackPanel>
+                                                <TextBlock Text="{Binding Text}" TextWrapping="Wrap" Foreground="{DynamicResource BrushTextPrimary}">
+                                                    <TextBlock.Style>
+                                                        <Style TargetType="TextBlock">
+                                                            <Setter Property="FontWeight" Value="Normal" />
+                                                            <Style.Triggers>
+                                                                <DataTrigger Binding="{Binding IsImportant}" Value="True"><Setter Property="FontWeight" Value="Bold" /></DataTrigger>
+                                                            </Style.Triggers>
+                                                        </Style>
+                                                    </TextBlock.Style>
+                                                </TextBlock>
+                                            </StackPanel>
+                                        </DockPanel>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </StackPanel>
+                </DockPanel>
+            </Border>
+            </StackPanel>
+            </ScrollViewer>
+            <Border Grid.Row="1" Grid.Column="0"
                     Background="#000000"
                     CornerRadius="12"
-                    BorderBrush="#333333"
+                    BorderBrush="{DynamicResource BrushHover}"
                     BorderThickness="1">
+                <Border.Resources>
+                    <!-- 영상 표면의 안내는 테마와 무관하게 검은 배경 위 대비를 유지한다. -->
+                    <SolidColorBrush x:Key="BrushTextSecondary" Color="#B8B8B8" />
+                    <SolidColorBrush x:Key="BrushTextMuted" Color="#A0A0A0" />
+                    <SolidColorBrush x:Key="BrushAccentPurple" Color="#BB86FC" />
+                    <SolidColorBrush x:Key="BrushAccentTeal" Color="#03DAC6" />
+                </Border.Resources>
                 <Grid>
                     <Viewbox Stretch="Uniform">
                         <Image Source="{Binding DisplaySource}" />
@@ -322,14 +462,14 @@
                                        Margin="0,0,0,16"
                                        HorizontalAlignment="Center"/>
                             <TextBlock Text="{Binding PlaceholderTitle}"
-                                       Foreground="{StaticResource BrushTextSecondary}"
+                                       Foreground="{DynamicResource BrushTextSecondary}"
                                        FontSize="20"
                                        FontWeight="Bold"
                                        HorizontalAlignment="Center"
                                        TextAlignment="Center" />
                             <TextBlock Margin="0,12,0,0"
                                        Text="{Binding PlaceholderSubtitle}"
-                                       Foreground="{StaticResource BrushTextMuted}"
+                                       Foreground="{DynamicResource BrushTextMuted}"
                                        FontSize="13"
                                        TextWrapping="Wrap"
                                        TextAlignment="Center" />
@@ -342,7 +482,7 @@
                             <ProgressBar Style="{StaticResource LoadingProgressBar}" />
                             <TextBlock Margin="0,16,0,0"
                                        Text="세션에 연결하는 중..."
-                                       Foreground="{StaticResource BrushAccentPurple}"
+                                       Foreground="{DynamicResource BrushAccentPurple}"
                                        FontWeight="SemiBold"
                                        HorizontalAlignment="Center" />
                         </StackPanel>
@@ -364,7 +504,7 @@
                                 </Style.Triggers>
                             </Style>
                         </Border.Style>
-                        <TextBlock Foreground="{StaticResource BrushAccentTeal}"
+                        <TextBlock Foreground="{DynamicResource BrushAccentTeal}"
                                    FontWeight="SemiBold"
                                    Text="{Binding RenderStatus}" />
                     </Border>
@@ -384,14 +524,29 @@
                                 </Style.Triggers>
                             </Style>
                         </Border.Style>
-                        <TextBlock Foreground="{StaticResource BrushTextMuted}"
+                        <TextBlock Foreground="{DynamicResource BrushTextMuted}"
                                    FontWeight="SemiBold"
                                    Text="{Binding FrameFreshness}" />
                     </Border>
                 </Grid>
             </Border>
 
-            <ScrollViewer Grid.Column="2"
+            <!-- HWND 화면 위에 덮지 않는 우측 가장자리: 마우스 또는 키보드 포커스로 펼치기 표시. -->
+            <Border x:Name="PanelRevealEdge" Grid.Row="1" Grid.Column="1" Background="Transparent"
+                    Visibility="{Binding IsCompanionPanelVisible, Converter={StaticResource BoolToVis}, ConverterParameter=Invert}">
+                <Button Content="&#xE76B;" FontFamily="Segoe MDL2 Assets" Width="32" Height="44" Padding="0" VerticalAlignment="Center"
+                        Command="{Binding ToggleCompanionPanelCommand}" ToolTip="{Binding CompanionPanelToggleText}" AutomationProperties.Name="채팅과 파일 펼치기">
+                    <Button.Style><Style TargetType="Button" BasedOn="{StaticResource GhostButton}">
+                        <Setter Property="Opacity" Value="0" />
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding IsMouseOver, ElementName=PanelRevealEdge}" Value="True"><Setter Property="Opacity" Value="1" /></DataTrigger>
+                            <Trigger Property="IsKeyboardFocused" Value="True"><Setter Property="Opacity" Value="1" /></Trigger>
+                        </Style.Triggers>
+                    </Style></Button.Style>
+                </Button>
+            </Border>
+            <ScrollViewer Grid.Row="1" Grid.Column="2"
+                          Visibility="{Binding IsCompanionPanelVisible, Converter={StaticResource BoolToVis}}"
                           VerticalScrollBarVisibility="Auto"
                           HorizontalScrollBarVisibility="Disabled">
                 <StackPanel>
@@ -408,7 +563,7 @@
                                     <Ellipse Width="8" Height="8" Margin="0,0,10,0" VerticalAlignment="Center"
                                              Fill="{Binding ConnectionState, Converter={StaticResource StateToBrush}}" />
                                     <TextBlock VerticalAlignment="Center"
-                                               Foreground="{StaticResource BrushTextPrimary}"
+                                               Foreground="{DynamicResource BrushTextPrimary}"
                                                FontWeight="SemiBold">
                                         <TextBlock.Text>
                                             <MultiBinding StringFormat="{}{0} · {1}">
@@ -424,17 +579,18 @@
 
                     <!-- 시스템 알림 -->
                     <Border Margin="0,0,0,12"
+                            Visibility="{Binding HasActionStatus, Converter={StaticResource BoolToVis}}"
                             Padding="10"
                             CornerRadius="8"
-                            Background="{StaticResource BrushBgElevated}">
+                            Background="{DynamicResource BrushBgElevated}">
                         <Border.Style>
                             <Style TargetType="Border">
-                                <Setter Property="BorderBrush" Value="{StaticResource BrushAccentTeal}" />
+                                <Setter Property="BorderBrush" Value="{DynamicResource BrushAccentTeal}" />
                                 <Setter Property="BorderThickness" Value="0,0,0,2" />
                                 <Style.Triggers>
                                     <DataTrigger Binding="{Binding IsStatusError}" Value="True">
-                                        <Setter Property="BorderBrush" Value="{StaticResource BrushAccentError}" />
-                                        <Setter Property="Background" Value="#2A1E22" />
+                                        <Setter Property="BorderBrush" Value="{DynamicResource BrushAccentError}" />
+                                        <Setter Property="Background" Value="{DynamicResource BrushErrorGround}" />
                                     </DataTrigger>
                                 </Style.Triggers>
                             </Style>
@@ -442,10 +598,10 @@
                         <TextBlock TextWrapping="Wrap" Text="{Binding StatusMessage}">
                             <TextBlock.Style>
                                 <Style TargetType="TextBlock">
-                                    <Setter Property="Foreground" Value="{StaticResource BrushAccentTeal}" />
+                                    <Setter Property="Foreground" Value="{DynamicResource BrushAccentTeal}" />
                                     <Style.Triggers>
                                         <DataTrigger Binding="{Binding IsStatusError}" Value="True">
-                                            <Setter Property="Foreground" Value="{StaticResource BrushAccentError}" />
+                                            <Setter Property="Foreground" Value="{DynamicResource BrushAccentError}" />
                                             <Setter Property="FontWeight" Value="SemiBold" />
                                         </DataTrigger>
                                     </Style.Triggers>
@@ -454,16 +610,37 @@
                         </TextBlock>
                     </Border>
 
+                    <!-- 실패한 방향만 재시도. 참가 정보/초대 코드 입력이나 정상 연결 재시작은 하지 않는다. -->
+                    <Button Content="강의 화면 다시 연결" Command="{Binding ReconnectRdpCommand}"
+                            Margin="0,0,0,12" Visibility="{Binding NeedsRdpRetry, Converter={StaticResource BoolToVis}}" />
+                    <Border Style="{StaticResource PanelCard}" Margin="0,0,0,12"
+                            Visibility="{Binding HasStudentSharingFailure, Converter={StaticResource BoolToVis}}">
+                        <StackPanel>
+                            <TextBlock Text="{Binding StudentSharingStatus}" TextWrapping="Wrap" />
+                            <Button Content="내 화면 공유 다시 시도" Command="{Binding RetryStudentSharingCommand}" Margin="0,8,0,0" />
+                        </StackPanel>
+                    </Border>
+
                     <!-- 채팅 -->
                     <Border Style="{StaticResource PanelCard}" Margin="0,0,0,12">
                         <StackPanel>
-                            <TextBlock Style="{StaticResource SectionTitle}" Text="채팅" />
+                            <DockPanel>
+                                <Button DockPanel.Dock="Right" Content="&#xE76C;" FontFamily="Segoe MDL2 Assets" Padding="8,4" Style="{StaticResource GhostButton}"
+                                        Command="{Binding ToggleCompanionPanelCommand}" ToolTip="채팅·파일 접기" AutomationProperties.Name="채팅과 파일 접기" />
+                                <TextBlock Style="{StaticResource SectionTitle}" Text="채팅" VerticalAlignment="Center" />
+                            </DockPanel>
+                            <TextBlock Text="{Binding Conversations.Summary}" Foreground="{DynamicResource BrushTextSecondary}" Margin="0,8,0,4" />
+                            <ComboBox Style="{StaticResource ConversationSelector}" ItemsSource="{Binding Conversations.Items}" SelectedItem="{Binding Conversations.Selected}"
+                                      AutomationProperties.Name="채팅 상대" />
                             <ListBox x:Name="ChatListBox"
                                      Margin="0,10,0,0"
                                      Height="200"
                                      Style="{StaticResource DarkListBox}"
-                                     ItemsSource="{Binding ChatMessages}"
+                                     ItemsSource="{Binding Conversations.Selected.Messages}"
                                      ItemTemplate="{StaticResource ChatBubbleTemplate}" />
+                            <Button Style="{StaticResource GhostButton}" Content="{Binding ChatReading.NewMessagesText}"
+                                    Visibility="{Binding ChatReading.HasUnread, Converter={StaticResource BoolToVis}}"
+                                    Click="NewChat_Click" />
                             <DockPanel Margin="0,10,0,0">
                                 <Button DockPanel.Dock="Right"
                                         Width="72"
@@ -484,31 +661,35 @@
                     <!-- 파일은 처음엔 접혀 있으므로, 새 파일이 등록되면 헤더 옆에 NEW!를 띄우고 펼치면 지운다. -->
                     <Expander IsExpanded="{Binding IsFilesPanelExpanded, Mode=TwoWay}"
                               Margin="0,0,0,12"
-                              Foreground="{StaticResource BrushTextSecondary}">
+                              Foreground="{DynamicResource BrushTextSecondary}">
                         <Expander.Header>
                             <StackPanel Orientation="Horizontal">
                                 <TextBlock Text="파일" VerticalAlignment="Center" />
                                 <Border Margin="10,0,0,0" Padding="8,2" CornerRadius="8" VerticalAlignment="Center"
-                                        Background="{StaticResource BrushAccentPurple}"
+                                        Background="{DynamicResource BrushAccentPurple}"
                                         Visibility="{Binding HasNewFiles, Converter={StaticResource BoolToVis}}"
                                         ToolTip="새 파일이 등록되어 있습니다">
                                     <TextBlock Text="NEW!" FontSize="10" FontWeight="Bold"
-                                               Foreground="{StaticResource BrushBgPrimary}" />
+                                               Foreground="{DynamicResource BrushBgPrimary}" />
                                 </Border>
                             </StackPanel>
                         </Expander.Header>
                         <StackPanel Margin="0,8,0,0">
-                            <TextBlock Margin="0,8,0,0"
-                                       Foreground="{StaticResource BrushTextSecondary}"
+                            <TextBlock Style="{StaticResource CompactStatusText}" Margin="0,8,0,0"
+                                       Foreground="{DynamicResource BrushTextSecondary}"
                                        TextWrapping="Wrap"
                                        Text="{Binding DownloadStatus}" />
                             <TextBlock Style="{StaticResource FieldLabel}" Margin="0,10,0,6" Text="강의 파일" />
                             <ListBox Height="130"
+                                     PreviewMouseWheel="FileList_PreviewMouseWheel"
                                      Style="{StaticResource DarkListBox}"
                                      ItemsSource="{Binding SessionFiles}">
                                 <ListBox.ItemTemplate>
                                     <DataTemplate>
                                         <DockPanel Margin="0,4">
+                                            <Button DockPanel.Dock="Right" Style="{StaticResource GhostButton}" Padding="8,0"
+                                                    Content="취소" Command="{Binding CancelCommand}"
+                                                    Visibility="{Binding IsDownloading, Converter={StaticResource BoolToVis}}" />
                                             <Button DockPanel.Dock="Right" Style="{StaticResource GhostButton}" Padding="10,0"
                                                     Content="다운로드" Command="{Binding DownloadCommand}" />
                                             <StackPanel>
@@ -516,17 +697,49 @@
                                                         Content="{Binding DisplayText}"
                                                         Command="{Binding DownloadCommand}"
                                                         ToolTip="클릭하면 다운로드합니다" />
-                                                <TextBlock Text="{Binding Status}" Foreground="#999999" FontSize="11" TextWrapping="Wrap" />
+                                                <TextBlock Style="{StaticResource CompactStatusText}" Text="{Binding Status}" FontSize="12" />
                                             </StackPanel>
                                         </DockPanel>
                                     </DataTemplate>
                                 </ListBox.ItemTemplate>
                             </ListBox>
+                            <Expander Header="제출한 파일" IsExpanded="False" Margin="0,10,0,6" Foreground="{DynamicResource BrushTextSecondary}">
+                                <StackPanel Margin="0,8,0,0">
+                                    <TextBlock Style="{StaticResource CompactStatusText}" Text="{Binding SubmissionStatus}" FontSize="12" Margin="0,0,0,8" />
+                                    <ProgressBar Value="{Binding SubmissionProgress, Mode=OneWay}" Maximum="100" Height="4" Margin="0,0,0,8"
+                                                 Visibility="{Binding IsSubmitting, Converter={StaticResource BoolToVis}}" />
+                                    <WrapPanel>
+                                        <Button Content="파일 제출" Command="{Binding SubmitFileCommand}" Style="{StaticResource GhostButton}" Margin="0,0,6,0" />
+                                        <Button Content="취소" Command="{Binding CancelSubmissionCommand}" Style="{StaticResource GhostButton}" Visibility="{Binding IsSubmitting, Converter={StaticResource BoolToVis}}" />
+                                    </WrapPanel>
+                                    <ListBox Height="110" Margin="0,8,0,0" Style="{StaticResource DarkListBox}" PreviewMouseWheel="FileList_PreviewMouseWheel" ItemsSource="{Binding SubmittedFiles}">
+                                        <ListBox.ItemTemplate><DataTemplate>
+                                            <DockPanel Margin="0,4">
+                                                <Button DockPanel.Dock="Right" Content="파일 위치" Command="{Binding RevealCommand}" Style="{StaticResource GhostButton}" Padding="8,0" />
+                                                <TextBlock Text="{Binding FileName}" ToolTip="{Binding LocalPath}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+                                            </DockPanel>
+                                        </DataTemplate></ListBox.ItemTemplate>
+                                    </ListBox>
+                                </StackPanel>
+                            </Expander>
                             <TextBlock Style="{StaticResource FieldLabel}" Margin="0,10,0,6" Text="받은 파일" />
                             <ListBox Height="110"
+                                     PreviewMouseWheel="FileList_PreviewMouseWheel"
                                      Style="{StaticResource DarkListBox}"
-                                     ItemsSource="{Binding DownloadedFiles}"
-                                     ItemTemplate="{StaticResource FileLineTemplate}" />
+                                     ItemsSource="{Binding ReceivedFiles}">
+                                <ListBox.ItemTemplate>
+                                    <DataTemplate>
+                                        <DockPanel Margin="0,3">
+                                            <Button DockPanel.Dock="Right" Style="{StaticResource GhostButton}"
+                                                    Padding="8,0" Content="파일 위치" Command="{Binding RevealCommand}"
+                                                    ToolTip="파일을 실행하지 않고 탐색기에서 선택합니다" />
+                                            <TextBlock Text="{Binding FileName}" ToolTip="{Binding LocalPath}"
+                                                       TextTrimming="CharacterEllipsis" VerticalAlignment="Center"
+                                                       Foreground="{DynamicResource BrushTextSecondary}" />
+                                        </DockPanel>
+                                    </DataTemplate>
+                                </ListBox.ItemTemplate>
+                            </ListBox>
                         </StackPanel>
                     </Expander>
 

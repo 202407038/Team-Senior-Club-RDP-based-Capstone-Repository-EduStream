@@ -71,6 +71,8 @@ public sealed class AnnotationDesktopWindow : IDisposable
         };
         _overlay.PreviewKeyDown += (_, e) => { if (e.Key == Key.Escape) { SetDrawing(false); e.Handled = true; } };
         _toolbar.PreviewKeyDown += (_, e) => { if (e.Key == Key.Escape) { SetDrawing(false); e.Handled = true; } };
+        _overlay.PreviewKeyDown += OnUndoKey;
+        _toolbar.PreviewKeyDown += OnUndoKey;
         _layer.Canvas.MouseLeftButtonDown += (_, e) =>
         {
             if (!_drawing || !_toolArmed || _busy) return;
@@ -144,14 +146,14 @@ public sealed class AnnotationDesktopWindow : IDisposable
         "<Style xmlns=\"http://schemas.microsoft.com/winfx/2006/xaml/presentation\" xmlns:x=\"http://schemas.microsoft.com/winfx/2006/xaml\" TargetType=\"ToggleButton\">" + xaml + "</Style>");
 
     private static readonly Lazy<Style> ToolToggleStyle = new(() => ParseStyle(
-        "<Setter Property=\"Foreground\" Value=\"#E0E0E0\"/><Setter Property=\"Background\" Value=\"#252525\"/>" +
+        "<Setter Property=\"Foreground\" Value=\"{DynamicResource BrushTextPrimary}\"/><Setter Property=\"Background\" Value=\"{DynamicResource BrushBgElevated}\"/>" +
         "<Setter Property=\"Padding\" Value=\"10,6\"/><Setter Property=\"Margin\" Value=\"2\"/><Setter Property=\"FontSize\" Value=\"12\"/><Setter Property=\"Cursor\" Value=\"Hand\"/>" +
         "<Setter Property=\"Template\"><Setter.Value><ControlTemplate TargetType=\"ToggleButton\">" +
         "<Border x:Name=\"Root\" Background=\"{TemplateBinding Background}\" CornerRadius=\"8\" Padding=\"{TemplateBinding Padding}\">" +
         "<ContentPresenter HorizontalAlignment=\"Center\" VerticalAlignment=\"Center\"/></Border>" +
         "<ControlTemplate.Triggers>" +
-        "<Trigger Property=\"IsMouseOver\" Value=\"True\"><Setter TargetName=\"Root\" Property=\"Background\" Value=\"#333333\"/></Trigger>" +
-        "<Trigger Property=\"IsChecked\" Value=\"True\"><Setter TargetName=\"Root\" Property=\"Background\" Value=\"#BB86FC\"/><Setter Property=\"Foreground\" Value=\"#121212\"/></Trigger>" +
+        "<Trigger Property=\"IsMouseOver\" Value=\"True\"><Setter TargetName=\"Root\" Property=\"Background\" Value=\"{DynamicResource BrushHover}\"/></Trigger>" +
+        "<Trigger Property=\"IsChecked\" Value=\"True\"><Setter TargetName=\"Root\" Property=\"Background\" Value=\"{DynamicResource BrushAccentPurple}\"/><Setter Property=\"Foreground\" Value=\"{DynamicResource BrushBgPrimary}\"/></Trigger>" +
         "</ControlTemplate.Triggers></ControlTemplate></Setter.Value></Setter>"));
 
     private static readonly Lazy<Style> ColorDotStyle = new(() => ParseStyle(
@@ -321,6 +323,14 @@ public sealed class AnnotationDesktopWindow : IDisposable
         try { await action(); }
         catch (Exception ex) { _status.Text = "판서 실패: " + ex.GetType().Name; }
         finally { _busy = false; }
+    }
+    private async void OnUndoKey(object sender, System.Windows.Input.KeyEventArgs e)
+    {
+        if (!AnnotationShortcuts.IsUndo(_drawing, _busy,
+                Keyboard.FocusedElement is System.Windows.Controls.Primitives.TextBoxBase,
+                _layer.Canvas.IsMouseCaptured, e.Key, Keyboard.Modifiers)) return;
+        e.Handled = true;
+        await RunAsync(() => _engine.UndoAsync());
     }
     public void Dispose()
     {

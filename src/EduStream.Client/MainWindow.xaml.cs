@@ -8,12 +8,16 @@ namespace EduStream.Client;
 
 public partial class MainWindow : Window
 {
+    private readonly EduStream.Desktop.ChatScrollFollower _chatScroll;
     private bool _shutdownComplete;
     private bool _shutdownInProgress;
     public MainWindow()
     {
+        EduStream.Desktop.AppTheme.Initialize();
         InitializeComponent();
-        DataContext = new ClientViewModel();
+        DataContext = new ClientViewModel(joinPreferences: new Services.JoinPreferencesStore());
+        _chatScroll = new(ChatListBox, ((ClientViewModel)DataContext).ChatReading);
+        _ = new EduStream.Desktop.ChatAttention(this, ChatListBox, ((ClientViewModel)DataContext).Conversations);
         if (DataContext is ClientViewModel vm)
         {
             vm.AttachRdpHost(RdpHost);
@@ -37,20 +41,6 @@ public partial class MainWindow : Window
             SizeToContent = SizeToContent.Height;
             Loaded += (_, _) => ApplyLayoutMode(vm.IsLectureViewActive);
         }
-        // 새 메시지가 추가되면 채팅 목록을 맨 아래로 내린다.
-        Loaded += (_, _) =>
-        {
-            if (DataContext is not ClientViewModel chatModel) return;
-            ((INotifyCollectionChanged)chatModel.ChatMessages).CollectionChanged += (_, args) =>
-            {
-                if (args.Action != NotifyCollectionChangedAction.Add) return;
-                Dispatcher.BeginInvoke(new Action(() =>
-                {
-                    if (ChatListBox.Items.Count > 0)
-                        ChatListBox.ScrollIntoView(ChatListBox.Items[^1]);
-                }), DispatcherPriority.Background);
-            };
-        };
         Closing += async (_, e) =>
         {
             if (_shutdownComplete) return;
@@ -75,6 +65,13 @@ public partial class MainWindow : Window
     }
 
     private const double JoinWidth = 520;
+    private void FileList_PreviewMouseWheel(object sender, MouseWheelEventArgs e) => Behaviors.NestedScrollHandoff.Handle(sender, e);
+    private void ToggleTheme_Click(object sender, RoutedEventArgs e) => ((System.Windows.Controls.Button)sender).ToolTip = EduStream.Desktop.AppTheme.ToggleAndSave();
+    private void NewChat_Click(object sender, RoutedEventArgs e)
+    {
+        _chatScroll.ShowLatest();
+        ((ClientViewModel)DataContext).Conversations.MarkSelectedRead();
+    }
     private double _lectureWidth = 1360;
     private double _lectureHeight = 820;
     private bool _lectureMaximized;

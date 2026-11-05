@@ -20,7 +20,7 @@ public sealed class ConnectionStateToBrushConverter : IValueConverter
             || text.Contains("Open", StringComparison.OrdinalIgnoreCase)
             || text.Contains("active", StringComparison.OrdinalIgnoreCase))
         {
-            return Connected;
+            return System.Windows.Application.Current?.TryFindResource("BrushAccentTeal") as SolidColorBrush ?? Connected;
         }
 
         if (text.Contains("실패", StringComparison.Ordinal)
@@ -28,10 +28,10 @@ public sealed class ConnectionStateToBrushConverter : IValueConverter
             || text.Contains("closed", StringComparison.OrdinalIgnoreCase)
             || text.Contains("failed", StringComparison.OrdinalIgnoreCase))
         {
-            return Error;
+            return System.Windows.Application.Current?.TryFindResource("BrushAccentError") as SolidColorBrush ?? Error;
         }
 
-        return Waiting;
+        return System.Windows.Application.Current?.TryFindResource("BrushTextMuted") as SolidColorBrush ?? Waiting;
     }
 
     public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture) =>

@@ -19,7 +19,7 @@ namespace EduStream.Server.ViewModels;
 /// 교수자 대시보드의 상태와 명령을 관리합니다.
 /// WDS 화면 공유와 세션 네트워크 흐름을 함께 연결합니다.
 /// </summary>
-public sealed class ServerViewModel : ObservableObject
+public sealed partial class ServerViewModel : ObservableObject
 {
     public AnnotationToolsViewModel AnnotationTools { get; } = new();
     public SessionManager SessionManager => _sessionManager;
@@ -31,24 +31,49 @@ public sealed class ServerViewModel : ObservableObject
         set { if (!IsRdpSharing && !IsRdpBusy) SetProperty(ref _selectedMonitor, value); }
     }
     public bool CanSelectMonitor => !IsRdpSharing && !IsRdpBusy;
+    private string _monitorPreferenceNotice = "선택한 모니터를 다음 실행에도 기억합니다.";
+    public string MonitorPreferenceNotice
+    {
+        get => _monitorPreferenceNotice;
+        set => SetProperty(ref _monitorPreferenceNotice, value);
+    }
     private readonly InMemoryLogSink _logSink = new();
     private readonly SessionManager _sessionManager;
     private readonly TcpServerService _tcpServer;
+    private TeacherDiscoveryResponder? _discoveryResponder;
+    private string _discoveryStatus = "세션을 열면 학생의 자동 찾기에 표시됩니다.";
+    public string DiscoveryStatus { get => _discoveryStatus; private set => SetProperty(ref _discoveryStatus, value); }
     private readonly HeartbeatService _heartbeatService;
     private readonly ScreenShareService _screenShareService;
     private readonly IRdpSharingService _rdpSharing;
     private bool _isRdpSharing;
     private bool _isRdpBusy;
     private bool _shuttingDown;
+    private bool _shutdownComplete;
+    private readonly SemaphoreSlim _shutdownLifecycle = new(1, 1);
     private readonly SemaphoreSlim _rdpLifecycle = new(1, 1);
     private readonly FileDistributor _fileDistributor;
     private string _sessionName = "EduStream 강의";
     private int _port = 5000;
     private string _chatInput = string.Empty;
+    private bool _sendAsAnnouncement;
+    private bool _sendAsImportantAnnouncement;
+    public bool SendAsImportantAnnouncement
+    {
+        get => _sendAsImportantAnnouncement;
+        set { if (SetProperty(ref _sendAsImportantAnnouncement, value) && value) SendAsAnnouncement = true; }
+    }
+    public IReadOnlyList<AnnouncementDeliverySummary> AnnouncementDeliveries => _sessionManager.Announcements.Snapshot();
+    private bool _isSendingChat;
+    public bool SendAsAnnouncement
+    {
+        get => _sendAsAnnouncement;
+        set { if (SetProperty(ref _sendAsAnnouncement, value) && !value) SendAsImportantAnnouncement = false; }
+    }
     private string _latestScreenStatus = "Screen sharing has not started yet.";
     private string _rdpStatus = "WDS 화면 공유 대기 중";
     private string _selectedFilePath = string.Empty;
-    private string _fileShareStatus = "아직 공유한 파일이 없습니다.";
+    private string _fileShareStatus = "";
     private bool _isSessionOpen;
     private bool _isBusy;
     private string _sessionStatus = "세션 대기 중";
@@ -63,10 +88,14 @@ public sealed class ServerViewModel : ObservableObject
     /// <param name="certificateProvider">테스트용. 지정하지 않으면 사용자 인증서 저장소의 교수자 인증서를 씁니다.</param>
     public ServerViewModel(IRdpSharingService? rdpSharing = null, Func<X509Certificate2>? certificateProvider = null)
     {
+        Conversations = new ChatConversations(ChatMessages) { KeepHistoryAcrossSessions = true };
+        PreviewRosterCommand = new RelayCommand(() => _ = ChooseRosterAsync(), () => !IsLoadingRoster);
+        ApplyRosterAdmissionCommand = new RelayCommand(ApplyRosterAdmission, () => !IsLoadingRoster && !IsSessionOpen && !IsBusy && _rosterPreview?.CanUseForAdmission == true);
         _certificateProvider = certificateProvider;
         var serializer = new PacketSerializer();
         _tcpServer = new TcpServerService(_logSink, serializer);
         _sessionManager = new SessionManager(_logSink, _tcpServer);
+        DisableRosterAdmissionCommand = new RelayCommand(DisableRosterAdmission, () => !IsSessionOpen && !IsBusy && _sessionManager.IsRosterAdmissionEnabled);
         _heartbeatService = new HeartbeatService(_sessionManager, _tcpServer, _logSink);
         _screenShareService = new ScreenShareService(_sessionManager, _logSink);
         _rdpSharing = rdpSharing ?? new RdpSharingService(_logSink);
@@ -75,26 +104,61 @@ public sealed class ServerViewModel : ObservableObject
         _fileDistributor = new FileDistributor(serializer, _logSink);
 
         _sessionManager.ParticipantsChanged += OnParticipantsChanged;
+        InitializeAttendance();
+        InitializeSubmissionUi();
+        InitializeAnnouncementComposer();
         _sessionManager.ChatReceived += OnChatReceived;
+        _sessionManager.DirectChatReceived += packet =>
+        {
+            void Receive()
+            {
+                var recipient = _sessionManager.DirectChatRecipients.FirstOrDefault(x => x.ConnectionId == packet.StudentConnectionId);
+                if (recipient is null) return;
+                var conversation = Conversations.GetOrAdd(recipient.HistoryKey, recipient.Name);
+                conversation.ConnectionId = recipient.ConnectionId;
+                conversation.IsAvailable = true;
+                conversation.Messages.Add(ChatLine.User(packet.Sender, packet.Message));
+            }
+            var dispatcher = System.Windows.Application.Current?.Dispatcher;
+            if (dispatcher is null) Receive(); else dispatcher.Invoke(Receive);
+        };
+        _sessionManager.Announcements.Changed += () =>
+        {
+            var dispatcher = System.Windows.Application.Current?.Dispatcher;
+            if (dispatcher is not null) dispatcher.BeginInvoke(new Action(() => OnPropertyChanged(nameof(AnnouncementDeliveries))));
+            else OnPropertyChanged(nameof(AnnouncementDeliveries));
+        };
         _screenShareService.StatusChanged += OnScreenShareStatusChanged;
 
         RefreshHostAddresses();
+        Conversations.VisibleMessagesAdded += count => ChatReading.Receive(count);
         OpenSessionCommand = new RelayCommand(() => _ = OpenSessionAsync(), () => !IsSessionOpen && !IsBusy);
-        CloseSessionCommand = new RelayCommand(() => _ = CloseSessionAsync(), () => IsSessionOpen && !IsBusy && !IsRdpBusy);
+        CloseSessionCommand = new RelayCommand(() =>
+        {
+            if (CanEndSession()) _ = CloseSessionAsync();
+        }, () => IsSessionOpen && !IsBusy && !IsRdpBusy);
         StartScreenShareCommand = new RelayCommand(() => _ = StartScreenShareAsync(), () => IsSessionOpen && !IsRdpSharing && !IsRdpBusy);
         StartAutoShareCommand = new RelayCommand(() => _ = StartAutoShareAsync(), () => IsSessionOpen && !IsScreenSharing && !IsRdpSharing && !IsRdpBusy);
         StopAutoShareCommand = new RelayCommand(() => _ = StopAutoShareAsync(), () => IsScreenSharing);
-        SendSampleFileCommand = new RelayCommand(() => _ = SendSampleFileAsync(), () => IsSessionOpen);
         SelectFileCommand = new RelayCommand(SelectFile);
         SendSelectedFileCommand = new RelayCommand(() => _ = SendSelectedFileAsync(), () => IsSessionOpen && File.Exists(SelectedFilePath));
         RegisterSelectedFileCommand = new RelayCommand(() => _ = RegisterSelectedFileAsync(), () => IsSessionOpen && File.Exists(SelectedFilePath));
-        SendChatCommand = new RelayCommand(() => _ = SendChatAsync(), () => IsSessionOpen && !string.IsNullOrWhiteSpace(ChatInput));
+        SendChatCommand = new RelayCommand(() => _ = SendChatAsync(), () => IsSessionOpen && !_isSendingChat && !string.IsNullOrWhiteSpace(ChatInput));
+        Conversations.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName != nameof(ChatConversations.Selected)) return;
+            SendAsAnnouncement = false;
+            SendChatCommand.RaiseCanExecuteChanged();
+        };
         StartRdpShareCommand = new RelayCommand(() => _ = StartRdpShareAsync(), () => IsSessionOpen && !IsBusy && !IsRdpBusy && !IsRdpSharing);
         StopRdpShareCommand = new RelayCommand(() => _ = StopRdpShareAsync(), () => IsRdpSharing && !IsBusy && !IsRdpBusy);
     }
 
     /// <summary>학생이 입력할 교수자 IP 후보 목록입니다. 어댑터 종류는 추정값이며 인터넷 접속 가능 주소라는 뜻이 아닙니다.</summary>
     public ObservableCollection<HostAddressOption> HostAddressOptions { get; } = [];
+    /// <summary>사용자가 닫기를 누른 경로에서만 확인한다. 내부 종료·오류 정리에는 창을 띄우지 않는다.</summary>
+    public Func<int, bool>? ConfirmSessionEnd { get; set; }
+    public bool CanEndSession() => ParticipantCount == 0 || ConfirmSessionEnd?.Invoke(ParticipantCount) != false;
 
     private HostAddressOption? _selectedHostAddress;
 
@@ -224,11 +288,11 @@ public sealed class ServerViewModel : ObservableObject
                 StartScreenShareCommand.RaiseCanExecuteChanged();
                 StartAutoShareCommand.RaiseCanExecuteChanged();
                 StopAutoShareCommand.RaiseCanExecuteChanged();
-                SendSampleFileCommand.RaiseCanExecuteChanged();
                 SendSelectedFileCommand.RaiseCanExecuteChanged();
                 RegisterSelectedFileCommand.RaiseCanExecuteChanged();
                 SendChatCommand.RaiseCanExecuteChanged();
                 UpdateRdpCommands();
+                RefreshRosterCommands();
             }
         }
     }
@@ -243,6 +307,7 @@ public sealed class ServerViewModel : ObservableObject
                 OpenSessionCommand.RaiseCanExecuteChanged();
                 CloseSessionCommand.RaiseCanExecuteChanged();
                 UpdateRdpCommands();
+                RefreshRosterCommands();
             }
         }
     }
@@ -302,6 +367,8 @@ public sealed class ServerViewModel : ObservableObject
     public RelayCommand RegisterSelectedFileCommand { get; }
 
     public ObservableCollection<ChatLine> ChatMessages { get; } = [];
+    public ChatConversations Conversations { get; }
+    public ChatReadingState ChatReading { get; } = new();
 
     public ObservableCollection<string> Participants { get; } = [];
 
@@ -315,7 +382,6 @@ public sealed class ServerViewModel : ObservableObject
 
     public RelayCommand StopAutoShareCommand { get; }
 
-    public RelayCommand SendSampleFileCommand { get; }
 
     public RelayCommand SelectFileCommand { get; }
 
@@ -365,11 +431,37 @@ public sealed class ServerViewModel : ObservableObject
             var roomPassword = UseRoomPassword ? typedPassword : string.Empty;
             _secureCertificate ??= LoadSecureCertificate();
             await _sessionManager.OpenSessionAsync(SessionName, Port, roomPassword.AsMemory(), _secureCertificate);
+            try
+            {
+                _discoveryResponder = new TeacherDiscoveryResponder(_sessionManager.CurrentSession!.SessionId,
+                    Environment.MachineName, Port, _sessionManager.IsRoomPasswordProtected, ex =>
+                    {
+                        _logSink.Write($"[Discovery] 응답 중단: {ex.GetType().Name}");
+                        System.Windows.Application.Current?.Dispatcher.BeginInvoke(new Action(() =>
+                            DiscoveryStatus = "자동 찾기 응답이 중단됐습니다. IP 직접 접속은 가능합니다."));
+                    });
+                DiscoveryStatus = $"자동 찾기 켜짐 · {Environment.MachineName}";
+            }
+            catch (Exception ex)
+            {
+                DiscoveryStatus = "자동 찾기를 열지 못했습니다. IP 직접 접속은 가능합니다.";
+                _logSink.Write($"[Discovery] 시작 실패: {ex.GetType().Name}");
+            }
             // 보호 채널의 기본 입력 게이트는 SessionManager가 구성한다(#90).
             _heartbeatService.Start();
             IsSessionOpen = true;
             ConnectionCode = _sessionManager.ConnectionCode ?? "-";
-            if (_sessionManager.FileTransfers is { } fileTransfers) fileTransfers.FileStored += OnStudentFileStored;
+            FileDeliveries.Clear();
+            if (_sessionManager.FileTransfers is { } fileTransfers)
+            {
+                fileTransfers.FileStored += OnStudentFileStored;
+                fileTransfers.DeliveryChanged += () => RunOnUi(() =>
+                {
+                    if (!ReferenceEquals(_sessionManager.FileTransfers, fileTransfers)) return;
+                    FileDeliveries.Clear();
+                    foreach (var state in fileTransfers.DeliveryStatus) FileDeliveries.Add(state);
+                });
+            }
             SessionStatus = $"세션 Open · 포트 {Port}";
             StatusMessage = "세션이 시작되었습니다. 학생에게 위 IP를 알려 주세요." +
                             (_sessionManager.IsRoomPasswordProtected
@@ -395,14 +487,21 @@ public sealed class ServerViewModel : ObservableObject
         }
     }
 
-    private async Task CloseSessionAsync()
+    private async Task CloseSessionAsync(bool propagateFailure = false)
     {
+        var closingTransfers = _sessionManager.FileTransfers;
         IsBusy = true;
         SessionStatus = "세션 닫는 중...";
 
         try
         {
             _heartbeatService.Stop();
+            if (_discoveryResponder is { } discovery)
+            {
+                _discoveryResponder = null;
+                await discovery.DisposeAsync();
+            }
+            DiscoveryStatus = "자동 찾기 꺼짐";
             try { await StopRdpShareCoreAsync(); }
             finally
             {
@@ -410,6 +509,11 @@ public sealed class ServerViewModel : ObservableObject
                 finally { await _sessionManager.CloseSessionAsync(); }
             }
             IsSessionOpen = false;
+            if (closingTransfers is not null)
+            {
+                FileDeliveries.Clear();
+                foreach (var state in closingTransfers.DeliveryStatus) FileDeliveries.Add(state);
+            }
             ConnectionCode = "세션을 열면 표시됩니다.";
             RegisteredFiles.Clear();
             IsScreenSharing = false;
@@ -427,6 +531,7 @@ public sealed class ServerViewModel : ObservableObject
             StatusMessage = $"세션 종료 확인 필요: {ex.GetType().Name}";
             IsStatusError = true;
             IsSessionOpen = _sessionManager.CurrentSession is not null;
+            if (propagateFailure) throw;
         }
         finally
         {
@@ -455,16 +560,6 @@ public sealed class ServerViewModel : ObservableObject
         IsScreenSharing = _screenShareService.IsStreaming;
         LatestScreenStatus = _screenShareService.LatestStatus;
         SyncLogs();
-    }
-
-    private async Task SendSampleFileAsync()
-    {
-        var tempFile = Path.Combine(Path.GetTempPath(), "edustream-sample-note.txt");
-        var sampleContent = string.Join(Environment.NewLine, Enumerable.Range(1, 260)
-            .Select(index => $"EduStream sample lecture note line {index:D3}"));
-        await File.WriteAllTextAsync(tempFile, sampleContent);
-
-        await SendFileAsync(tempFile, "샘플 파일");
     }
 
     private void SelectFile()
@@ -548,18 +643,53 @@ public sealed class ServerViewModel : ObservableObject
 
     private async Task SendChatAsync()
     {
-        var packet = new ChatPacket
+        if (!SendChatCommand.CanExecute(null)) return;
+        var original = ChatInput;
+        var message = original.Trim();
+        if (message.Length > 500)
         {
-            Sender = "Professor",
-            Message = ChatInput
-        };
-
-        packet.DataLength = ChatInput.Length;
-        await _sessionManager.BroadcastPacketAsync(packet);
-
-        ChatMessages.Add(ChatLine.User("교수자", ChatInput, isSelf: true));
-        ChatInput = string.Empty;
-        SyncLogs();
+            StatusMessage = "채팅·공지는 500자 이내로 입력해 주세요.";
+            IsStatusError = true;
+            return;
+        }
+        var announcement = SendAsAnnouncement;
+        var important = SendAsImportantAnnouncement;
+        var conversation = Conversations.Selected;
+        if (conversation.Key.Length != 0 && (announcement || !conversation.IsAvailable))
+        {
+            StatusMessage = "공지는 전체 대화에서 보내 주세요. 개인 채팅은 현재 접속한 학생만 선택할 수 있습니다.";
+            IsStatusError = true;
+            return;
+        }
+        _isSendingChat = true;
+        SendChatCommand.RaiseCanExecuteChanged();
+        try
+        {
+            var packet = new ChatPacket
+            {
+                Sender = "Professor", Message = message,
+                IsAnnouncement = announcement, IsImportantAnnouncement = important,
+                DataLength = System.Text.Encoding.UTF8.GetByteCount(message)
+            };
+            if (conversation.Key.Length == 0) await _sessionManager.BroadcastPacketAsync(packet);
+            else await _sessionManager.SendDirectChatAsync(conversation.ConnectionId ?? throw new InvalidOperationException("학생 연결이 종료되었습니다."), message);
+            conversation.Messages.Add(ChatLine.User(announcement ? "교수자 · 공지" : "교수자", message, isSelf: true));
+            // 송신 대기 중 새로 입력한 내용까지 지우지 않는다.
+            if (ChatInput == original) ChatInput = string.Empty;
+            if (SendAsAnnouncement == announcement) SendAsAnnouncement = false;
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = "채팅을 전송하지 못했습니다. 연결 상태를 확인하고 다시 보내 주세요.";
+            IsStatusError = true;
+            _logSink.Write($"[Chat] 송신 실패: {ex.GetType().Name}");
+        }
+        finally
+        {
+            _isSendingChat = false;
+            SendChatCommand.RaiseCanExecuteChanged();
+            SyncLogs();
+        }
     }
 
     public async Task StartRdpShareAsync()
@@ -650,7 +780,7 @@ public sealed class ServerViewModel : ObservableObject
             return;
         }
         SelectedFilePath = files[0];
-        FileShareStatus = $"선택됨: {Path.GetFileName(files[0])}. 등록 버튼을 누르면 학생 목록에 표시됩니다.";
+        FileShareStatus = "";
         IsStatusError = false;
     }
 
@@ -660,8 +790,8 @@ public sealed class ServerViewModel : ObservableObject
         try
         {
             var file = await _sessionManager.RegisterFileAsync(path);
-            RegisteredFiles.Add(new RegisteredFileItem(file, UnregisterFile));
-            FileShareStatus = $"강의 파일 목록에 등록했습니다: {file.FileName}. 학생이 목록에서 골라 받을 수 있습니다.";
+            RegisteredFiles.Add(new RegisteredFileItem(file, UnregisterFile, path, SendRegisteredFileAsync));
+            FileShareStatus = "";
         }
         catch (Exception ex)
         {
@@ -677,7 +807,7 @@ public sealed class ServerViewModel : ObservableObject
         try
         {
             _sessionManager.UnregisterFile(item.File.FileId);
-            FileShareStatus = $"목록에서 내렸습니다: {item.File.FileName}. 이미 받은 학생의 파일은 그대로 남습니다.";
+            FileShareStatus = "";
         }
         catch (InvalidOperationException)
         {
@@ -691,7 +821,7 @@ public sealed class ServerViewModel : ObservableObject
     {
         var name = _sessionManager.Participants.TryResolve(student.ConnectionId)?.DisplayName ?? "학생";
         var file = RegisteredFiles.FirstOrDefault(item => item.File.FileId == notice.FileId)?.File.FileName ?? "파일";
-        FileShareStatus = $"{name}님이 {file} 저장을 완료했습니다.";
+        _logSink.Write($"[File] {name}: {file} 저장 완료");
         SyncLogs();
     });
 
@@ -704,11 +834,23 @@ public sealed class ServerViewModel : ObservableObject
 
     public async Task ShutdownAsync()
     {
-        if (_shuttingDown) return;
-        _shuttingDown = true;
-        _heartbeatService.Stop();
-        try { await CloseSessionAsync(); }
-        finally { await _rdpSharing.DisposeAsync(); }
+        await _shutdownLifecycle.WaitAsync();
+        try
+        {
+            if (_shutdownComplete) return;
+            _shuttingDown = true;
+            _heartbeatService.Stop();
+            await CloseSessionAsync(propagateFailure: true);
+            await _rdpSharing.DisposeAsync();
+            _shutdownComplete = true;
+        }
+        catch
+        {
+            // 실패한 종료를 완료로 취급하지 않는다. 다음 닫기에서 실제 정리를 재시도한다.
+            _shuttingDown = false;
+            throw;
+        }
+        finally { _shutdownLifecycle.Release(); }
     }
 
     /// <summary>
@@ -729,7 +871,7 @@ public sealed class ServerViewModel : ObservableObject
 
     private void OnParticipantsChanged()
     {
-        System.Windows.Application.Current?.Dispatcher.Invoke(() =>
+        RunOnUi(() =>
         {
             ParticipantCount = _sessionManager.ParticipantCount;
             if (IsSessionOpen)
@@ -738,6 +880,19 @@ public sealed class ServerViewModel : ObservableObject
             }
 
             SyncParticipantList(Participants, _sessionManager.ParticipantNames.ToList());
+            if (_sessionManager.CurrentSession is { } session) Conversations.SetSession(session.SessionId);
+            var recipients = _sessionManager.DirectChatRecipients;
+            foreach (var conversation in Conversations.Items.Where(x => x.Key.Length != 0))
+            {
+                conversation.IsAvailable = false;
+                conversation.ConnectionId = null;
+            }
+            foreach (var recipient in recipients)
+            {
+                var conversation = Conversations.GetOrAdd(recipient.HistoryKey, recipient.Name);
+                conversation.ConnectionId = recipient.ConnectionId;
+                conversation.IsAvailable = true;
+            }
 
             SyncLogs();
         });

@@ -1,4 +1,4 @@
-﻿<Application x:Class="EduStream.Client.App"
+<Application x:Class="EduStream.Client.App"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:local="clr-namespace:EduStream.Client"
@@ -8,6 +8,7 @@
         <ResourceDictionary>
             <ResourceDictionary.MergedDictionaries>
                 <ResourceDictionary Source="Themes/EduStreamTheme.xaml" />
+                <ResourceDictionary Source="SharedControls.xaml" />
             </ResourceDictionary.MergedDictionaries>
 
             <conv:BoolToVisibilityConverter x:Key="BoolToVis" />

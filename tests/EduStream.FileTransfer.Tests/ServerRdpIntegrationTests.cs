@@ -243,9 +243,51 @@ public sealed class ServerRdpIntegrationTests
         }
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task ShutdownFailure_IsNotSuccess_AndNextCloseActuallyRetries(bool failStop)
+    {
+        var service = new FakeSharing { FailStop = failStop, FailDispose = !failStop };
+        var vm = CreateViewModel(service);
+        try
+        {
+            await Assert.ThrowsAsync<IOException>(() => vm.ShutdownAsync());
+            Assert.False(service.Disposed);
+            Assert.False((bool)typeof(ServerViewModel).GetField("_shuttingDown", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(vm)!);
+            service.FailStop = service.FailDispose = false;
+            await vm.ShutdownAsync();
+            Assert.True(service.Disposed);
+            Assert.Equal(2, service.StopCalls);
+            var stops = service.StopCalls;
+            await vm.ShutdownAsync();
+            Assert.Equal(stops, service.StopCalls);
+        }
+        finally { service.FailStop = service.FailDispose = false; await vm.ShutdownAsync(); }
+    }
+
+    [Fact]
+    public async Task ConcurrentShutdown_WaitsForActualCleanupInsteadOfReturningEarly()
+    {
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var service = new FakeSharing { BeforeStop = async () => { entered.TrySetResult(); await release.Task; } };
+        var vm = CreateViewModel(service);
+        var first = vm.ShutdownAsync();
+        await entered.Task.WaitAsync(Wait);
+        var second = vm.ShutdownAsync();
+        try { Assert.False(first.IsCompleted); Assert.False(second.IsCompleted); }
+        finally { release.TrySetResult(); await Task.WhenAll(first, second).WaitAsync(Wait); }
+        Assert.Equal(1, service.StopCalls);
+        Assert.True(service.Disposed);
+    }
+
     private sealed class FakeSharing : IRdpSharingService
     {
         public bool FailStart, Disposed;
+        public bool FailStop, FailDispose;
+        public int StopCalls;
+        public Func<Task>? BeforeStop;
         public Func<Task>? BeforeStart;
         public async Task<Guid> StartAsync(Guid sessionId, CancellationToken token = default)
         {
@@ -255,7 +297,16 @@ public sealed class ServerRdpIntegrationTests
         }
         public Task<RdpInvitationPacket> CreateInvitationAsync(Guid s, Guid h, string p, Guid c, string password, DateTimeOffset expiry, CancellationToken token = default) => throw new NotImplementedException();
         public Task RevokeInvitationAsync(Guid id, CancellationToken token = default) => Task.CompletedTask;
-        public Task StopAsync(CancellationToken token = default) => Task.CompletedTask;
-        public ValueTask DisposeAsync() { Disposed = true; return ValueTask.CompletedTask; }
+        public async Task StopAsync(CancellationToken token = default)
+        {
+            StopCalls++;
+            if (BeforeStop is not null) await BeforeStop();
+            if (FailStop) throw new IOException("controlled stop failure");
+        }
+        public ValueTask DisposeAsync()
+        {
+            if (FailDispose) throw new IOException("controlled dispose failure");
+            Disposed = true; return ValueTask.CompletedTask;
+        }
     }
 }

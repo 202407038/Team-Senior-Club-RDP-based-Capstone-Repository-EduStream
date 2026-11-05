@@ -3,6 +3,7 @@ using System.IO.Compression;
 using System.Text;
 using System.Xml.Linq;
 using EduStream.Core.Models;
+using EduStream.Server.ViewModels;
 
 namespace EduStream.FileTransfer.Tests;
 
@@ -39,6 +40,24 @@ public sealed class RosterWorkbookTests
         Assert.Throws<InvalidDataException>(() => new RosterWorkbookReader().Read(missing));
         using var formula = Workbook([("학생 A", "001", "학생")], formulaId: true);
         Assert.False(new RosterWorkbookReader().Read(formula).CanUseForAdmission);
+    }
+
+    [Fact]
+    public async Task InvalidNewFileDoesNotErasePreviousPreview()
+    {
+        var vm = new ServerViewModel();
+        var path = Path.Combine(Path.GetTempPath(), $"edustream-roster-test-{Guid.NewGuid():N}.xlsx");
+        try
+        {
+            using var workbook = Workbook([("합성 학생", "001", "학생")]);
+            await File.WriteAllBytesAsync(path, workbook.ToArray());
+            await vm.PreviewRosterAsync(path);
+            Assert.Single(vm.RosterPreviewRows);
+            await vm.PreviewRosterAsync(path + ".missing");
+            Assert.Single(vm.RosterPreviewRows);
+            Assert.Contains("기존 미리보기는 유지", vm.RosterImportStatus);
+        }
+        finally { File.Delete(path); await vm.ShutdownAsync(); }
     }
 
     private static MemoryStream Workbook((string Name, string Id, string Role)[] rows, string sheetName = "학생명단", bool formulaId = false)

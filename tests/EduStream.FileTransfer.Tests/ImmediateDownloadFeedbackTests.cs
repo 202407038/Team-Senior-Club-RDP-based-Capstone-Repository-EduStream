@@ -30,7 +30,9 @@ public sealed class ImmediateDownloadFeedbackTests
             Assert.Equal("original", await File.ReadAllTextAsync(existing));
             Assert.Equal(bytes, await File.ReadAllBytesAsync(Path.Combine(files.Downloads, "강의 (1).txt")));
             Assert.Equal("강의 (1).txt", Assert.Single(vm.DownloadedFiles));
-            Assert.Contains("다운로드 폴더", vm.DownloadStatus);
+            Assert.Equal(Path.Combine(files.Downloads, "강의 (1).txt"), Assert.Single(vm.ReceivedFiles).LocalPath);
+            Assert.Empty(vm.DownloadStatus); // 받은 파일 목록으로 확인하며 완료 알림은 반복하지 않는다.
+            Assert.False(vm.HasActionStatus);
             Assert.False(vm.IsStatusError);
             files.AssertNoPartials();
         }
@@ -48,6 +50,7 @@ public sealed class ImmediateDownloadFeedbackTests
         {
             await Receive(vm, packets[0]);
             Assert.Empty(vm.DownloadedFiles);
+            Assert.Empty(vm.ReceivedFiles);
             Assert.False(File.Exists(Path.Combine(files.Downloads, "강의.txt")));
             await Receive(vm, packets[1]);
             Assert.Equal(bytes, await File.ReadAllBytesAsync(Path.Combine(files.Downloads, "강의.txt")));

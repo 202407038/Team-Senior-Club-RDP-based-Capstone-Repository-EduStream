@@ -1,6 +1,10 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
+    <Compile Include="..\DesktopShared\ChatScrollFollower.cs" Link="ChatScrollFollower.cs" />
+    <Compile Include="..\DesktopShared\ChatAttention.cs" Link="ChatAttention.cs" />
+    <Compile Include="..\DesktopShared\AppTheme.cs" Link="AppTheme.cs" />
+    <Page Include="..\DesktopShared\SharedControls.xaml" Link="SharedControls.xaml" />
     <ProjectReference Include="..\EduStream.Core\EduStream.Core.csproj" />
     <ProjectReference Include="..\EduStream.ShareHost\EduStream.ShareHost.csproj" />
     <ProjectReference Include="..\EduStream.ShareViewer\EduStream.ShareViewer.csproj" />

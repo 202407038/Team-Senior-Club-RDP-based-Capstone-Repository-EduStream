@@ -10,14 +10,19 @@ namespace EduStream.Server;
 public partial class MainWindow : Window
 {
     private readonly ServerViewModel _viewModel;
+    private readonly EduStream.Desktop.ChatScrollFollower _chatScroll;
+    private readonly Services.MonitorSelectionStore _monitorPreferences = new();
     private AnnotationDesktopWindow? _annotation;
     private readonly HashSet<StudentScreenView> _studentViews = new();
     internal void RegisterStudentView(StudentScreenView view) => _studentViews.Add(view);
 
     public MainWindow()
     {
+        EduStream.Desktop.AppTheme.Initialize();
         InitializeComponent();
         _viewModel = new ServerViewModel();
+        _chatScroll = new(ChatListBox, _viewModel.ChatReading);
+        _ = new EduStream.Desktop.ChatAttention(this, ChatListBox, _viewModel.Conversations);
         SourceInitialized += (_, _) =>
         {
             if (!CaptureExclusion.TryApply(this, out var error)) _viewModel.ReportCaptureExclusionFailure(error);
@@ -41,8 +46,34 @@ public partial class MainWindow : Window
             return password;
         };
         DataContext = _viewModel;
+        _viewModel.ConfirmSessionEnd = count => MessageBox.Show(this,
+            $"학생 {count}명이 접속해 있습니다. 종료하면 화면 공유·채팅·진행 중인 파일 전송이 끊깁니다.\n세션을 종료할까요?",
+            "세션 종료 확인", MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.No) == MessageBoxResult.Yes;
+        try
+        {
+            if (_monitorPreferences.Load() is { } saved)
+            {
+                var monitor = Services.MonitorSelectionStore.Restore(saved, _viewModel.Monitors);
+                if (monitor is not null) _viewModel.SelectedMonitor = monitor;
+                else _viewModel.MonitorPreferenceNotice = "모니터 구성이 바뀌었습니다. 공유 전에 모니터를 다시 확인해 주세요.";
+            }
+        }
+        catch (Exception)
+        { _viewModel.MonitorPreferenceNotice = "이전 모니터 선택을 읽지 못했습니다. 공유 전에 모니터를 확인해 주세요."; }
         _viewModel.PropertyChanged += (_, e) =>
         {
+            if (e.PropertyName == nameof(ServerViewModel.IsAnnouncementComposerOpen) && _viewModel.IsAnnouncementComposerOpen && IsLoaded)
+                Dispatcher.BeginInvoke(new Action(() => AnnouncementInputBox.Focus()));
+            if (e.PropertyName == nameof(ServerViewModel.SelectedMonitor) && _viewModel.SelectedMonitor is { } selected)
+            {
+                try
+                {
+                    _monitorPreferences.Save(selected, _viewModel.Monitors);
+                    _viewModel.MonitorPreferenceNotice = "이 모니터 선택을 다음 실행에도 사용합니다.";
+                }
+                catch (Exception)
+                { _viewModel.MonitorPreferenceNotice = "이번 선택은 적용했지만 다음 실행용 저장은 하지 못했습니다."; }
+            }
             if (e.PropertyName == nameof(ServerViewModel.IsRdpSharing) && !_viewModel.IsRdpSharing)
             { _annotation?.Dispose(); _annotation = null; DrawingToggle.IsChecked = false; }
             // 세션이 열리면 세션 관리를 접고, 닫히거나 오류가 나면 펼쳐 상태를 바로 볼 수 있게 한다.
@@ -53,19 +84,14 @@ public partial class MainWindow : Window
         };
        
         Closing += OnClosing;
-        Loaded += (_, _) =>
-        {
-            ((System.Collections.Specialized.INotifyCollectionChanged)_viewModel.ChatMessages).CollectionChanged += (s, e) =>
-            {
-                if (e.Action != System.Collections.Specialized.NotifyCollectionChangedAction.Add) return;
-                Dispatcher.BeginInvoke(new Action(() =>
-                {
-                    if (ChatListBox.Items.Count > 0)
-                        ChatListBox.ScrollIntoView(ChatListBox.Items[^1]);
-                }), DispatcherPriority.Background);
-            };
-        };
     }
+
+    private void NewChat_Click(object sender, RoutedEventArgs e)
+    {
+        _chatScroll.ShowLatest();
+        _viewModel.Conversations.MarkSelectedRead();
+    }
+    private void ToggleTheme_Click(object sender, RoutedEventArgs e) => ((System.Windows.Controls.Button)sender).ToolTip = EduStream.Desktop.AppTheme.ToggleAndSave();
 
     private bool _closed;
     private bool _closing;
@@ -75,6 +101,7 @@ public partial class MainWindow : Window
         if (_closed) return;
         e.Cancel = true;
         if (_closing) return;
+        if (!_viewModel.CanEndSession()) return;
         _closing = true;
         IsEnabled = false;
         try
@@ -135,6 +162,35 @@ public partial class MainWindow : Window
 
 private void ExpandAllStudents_Click(object sender, RoutedEventArgs e) => SetAllStudentsExpanded(true);
 private void CollapseAllStudents_Click(object sender, RoutedEventArgs e) => SetAllStudentsExpanded(false);
+
+    private int _lastStudentMatch = -1;
+    private string _lastStudentQuery = "";
+    private void FindStudent_Click(object sender, RoutedEventArgs e)
+    {
+        var query = StudentSearchBox.Text.Trim();
+        if (query != _lastStudentQuery) _lastStudentMatch = -1;
+        _lastStudentQuery = query;
+        var index = Services.StudentNameSearch.FindNext(_viewModel.Participants, query, _lastStudentMatch);
+        if (index < 0)
+        {
+            StudentSearchResult.Text = query.Length == 0 ? "찾을 학생 이름을 입력해 주세요." : "일치하는 학생이 없습니다.";
+            _lastStudentMatch = -1;
+            return;
+        }
+        _lastStudentMatch = index;
+        StudentSearchResult.Text = $"{_viewModel.Participants[index]} · 다시 누르면 다음 일치 학생";
+        StudentListItems.UpdateLayout();
+        if (StudentListItems.ItemContainerGenerator.ContainerFromIndex(index) is FrameworkElement container)
+            (FindVisualChild<Expander>(container, "StudentExpander") ?? container).BringIntoView();
+        // 찾기는 펼침/연결/제어 상태와 목록 순서를 바꾸지 않는다.
+    }
+
+    private void StudentSearch_PreviewKeyDown(object sender, System.Windows.Input.KeyEventArgs e)
+    {
+        if (e.Key != System.Windows.Input.Key.Return) return;
+        FindStudent_Click(sender, e);
+        e.Handled = true;
+    }
 
 private void SetAllStudentsExpanded(bool expanded)
 {
