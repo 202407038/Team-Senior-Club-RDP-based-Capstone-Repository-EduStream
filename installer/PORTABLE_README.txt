@@ -1,9 +1,10 @@
 ﻿EduStream v1.0.0 · Windows x64 정식 실행용 ZIP
 
 1. ZIP을 마우스 오른쪽 버튼으로 눌러 '모두 압축 풀기'를 선택합니다.
-2. 압축을 푼 EduStream 폴더에서 사용할 역할을 더블클릭합니다.
-   교수자: EduStream 교수자.exe
-   학생:   EduStream 학생.exe
+2. 역할에 맞는 ZIP을 받고, 압축을 푼 EduStream 폴더에서 실행합니다.
+   교수자 ZIP (EduStream-Server-win-x64.zip): EduStream 교수자.exe
+   학생 ZIP (EduStream-Client-win-x64.zip): EduStream 학생.exe
+   각 ZIP에는 해당 역할의 앱만 있습니다. 학생에게는 학생용 ZIP만 전달하세요.
 
 설치, PowerShell 명령, 별도 .NET 설치는 필요하지 않습니다.
 ZIP 안에서 바로 실행하지 말고 반드시 전체 압축을 풀어주세요.

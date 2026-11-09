@@ -4,7 +4,12 @@
 
 ## 정식 버전 다운로드
 
-### [EduStream v1.0.0 실행용 ZIP 받기](https://github.com/202407038/Team-Senior-Club-RDP-based-Capstone-Repository-EduStream/releases/download/v1.0.0/EduStream-Portable-win-x64.zip)
+### EduStream v1.0.0 — 역할별 다운로드
+
+- **[교수자용 ZIP 받기](https://github.com/202407038/Team-Senior-Club-RDP-based-Capstone-Repository-EduStream/releases/download/v1.0.0/EduStream-Server-win-x64.zip)**
+- **[학생용 ZIP 받기](https://github.com/202407038/Team-Senior-Club-RDP-based-Capstone-Repository-EduStream/releases/download/v1.0.0/EduStream-Client-win-x64.zip)**
+
+각 ZIP에는 해당 역할의 앱만 들어 있습니다. 학생에게는 **학생용 ZIP만** 전달하세요. 기능·버전은 기존 v1.0.0과 같습니다.
 
 **다운로드 → 모두 압축 풀기 → EduStream 폴더 → 역할에 맞는 EXE 더블클릭**
 
