@@ -77,7 +77,7 @@ public sealed partial class ServerViewModel : ObservableObject
     private bool _isSessionOpen;
     private bool _isBusy;
     private string _sessionStatus = "세션 대기 중";
-    private string _statusMessage = "방 비밀번호 사용 여부를 정한 뒤 세션을 열어 주세요.";
+    private string _statusMessage = "세션 대기 중";
     private bool _isStatusError;
     private int _participantCount;
     private bool _isScreenSharing;
@@ -463,10 +463,8 @@ public sealed partial class ServerViewModel : ObservableObject
                 });
             }
             SessionStatus = $"세션 Open · 포트 {Port}";
-            StatusMessage = "세션이 시작되었습니다. 학생에게 위 IP를 알려 주세요." +
-                            (_sessionManager.IsRoomPasswordProtected
-                                ? " 방 비밀번호도 함께 알려 주세요. 열린 세션의 비밀번호는 바꿀 수 없으니, 바꾸려면 세션을 닫고 다시 여세요."
-                                : " 비밀번호 없는 방입니다.");
+            StatusMessage = _sessionManager.IsRoomPasswordProtected
+                ? "세션 열림 · 비밀번호 사용" : "세션 열림 · 비밀번호 없음";
             IsStatusError = false;
             RdpStatus = "공유 시작을 누르면 참가한 학생 화면에 자동으로 연결됩니다.";
             ChatMessages.Insert(0, ChatLine.System("세션이 열렸습니다."));
@@ -880,6 +878,7 @@ public sealed partial class ServerViewModel : ObservableObject
             }
 
             SyncParticipantList(Participants, _sessionManager.ParticipantNames.ToList());
+            RefreshStudentRows();
             if (_sessionManager.CurrentSession is { } session) Conversations.SetSession(session.SessionId);
             var recipients = _sessionManager.DirectChatRecipients;
             foreach (var conversation in Conversations.Items.Where(x => x.Key.Length != 0))

@@ -52,6 +52,10 @@ public sealed class SessionAttendance
         Changed?.Invoke();
     }
     public IReadOnlyList<AttendanceEntry> Entries { get { lock (_gate) return _entries.ToArray(); } }
+    public IReadOnlyList<RosterPresence> ConnectedStudents
+    {
+        get { lock (_gate) return _connections.Values.Distinct().Select(x => new RosterPresence(x.Name, x.StudentId, true)).ToArray(); }
+    }
     public IReadOnlyList<RosterPresence> Presence
     {
         get

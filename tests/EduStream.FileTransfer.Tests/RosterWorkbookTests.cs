@@ -10,6 +10,19 @@ namespace EduStream.FileTransfer.Tests;
 public sealed class RosterWorkbookTests
 {
     [Fact]
+    public async Task InitialSessionAndRosterShowOnlyCompactState()
+    {
+        var vm = new ServerViewModel();
+        try
+        {
+            Assert.Equal("세션 대기 중", vm.StatusMessage);
+            Assert.Empty(vm.RosterImportStatus);
+            Assert.Equal("명단 대조 꺼짐", vm.RosterAdmissionStatus);
+        }
+        finally { await vm.ShutdownAsync(); }
+    }
+
+    [Fact]
     public void ReadsOnlyStudentSheetPreservesTextIdsAndAllowsSameNameWithDistinctIds()
     {
         using var workbook = Workbook([("학생 A", "00123", "학생"), ("학생 A", "00456", "학생")]);
@@ -53,6 +66,10 @@ public sealed class RosterWorkbookTests
             await File.WriteAllBytesAsync(path, workbook.ToArray());
             await vm.PreviewRosterAsync(path);
             Assert.Single(vm.RosterPreviewRows);
+            Assert.Contains("적용 가능", vm.RosterImportStatus);
+            vm.ApplyRosterAdmission();
+            Assert.Equal("명단 적용 완료", vm.RosterImportStatus);
+            Assert.Equal("명단 대조 켜짐 · 1명", vm.RosterAdmissionStatus);
             await vm.PreviewRosterAsync(path + ".missing");
             Assert.Single(vm.RosterPreviewRows);
             Assert.Contains("기존 미리보기는 유지", vm.RosterImportStatus);
