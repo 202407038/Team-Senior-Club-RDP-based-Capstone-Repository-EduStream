@@ -1,6 +1,8 @@
 ﻿[CmdletBinding()]
 param(
-    [Parameter(Mandatory = $true)][string]$ZipPath
+    [Parameter(Mandatory = $true)][string]$ZipPath,
+    [ValidateSet('Combined', 'Server', 'Client')][string]$Role = 'Combined',
+    [string]$PayloadDirectory
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
@@ -13,7 +15,34 @@ $package = Join-Path $root 'EduStream'
 foreach ($file in @('coreclr.dll', 'hostfxr.dll', 'AxRDPCOMAPILib.dll', 'RDPCOMAPILib.dll', '먼저 읽어주세요.txt')) {
     if (-not (Test-Path -LiteralPath (Join-Path $package $file))) { throw "Missing: $file" }
 }
-foreach ($role in @('Server', 'Client')) {
+$roles = if ($Role -eq 'Combined') { @('Server', 'Client') } else { @($Role) }
+if ($Role -ne 'Combined') {
+    $other = if ($Role -eq 'Server') { 'Client' } else { 'Server' }
+    $otherExe = if ($Role -eq 'Server') { 'EduStream 학생.exe' } else { 'EduStream 교수자.exe' }
+    if ((Test-Path -LiteralPath (Join-Path $package $otherExe)) -or
+        (Get-ChildItem -LiteralPath $package -Recurse -File -Filter "EduStream.$other.*")) {
+        throw 'Other role app included.'
+    }
+    if ($PayloadDirectory) {
+        $source = Join-Path (Resolve-Path -LiteralPath $PayloadDirectory).Path $Role
+        $sourceFiles = @(Get-ChildItem -LiteralPath $source -Recurse -File)
+        if (@(Get-ChildItem -LiteralPath $package -Recurse -File).Count -ne $sourceFiles.Count + 1) {
+            throw 'Unexpected packaged file count.'
+        }
+        foreach ($file in $sourceFiles) {
+            $relative = $file.FullName.Substring($source.Length + 1)
+            if ($relative -eq "EduStream.$Role.exe") {
+                $relative = if ($Role -eq 'Server') { 'EduStream 교수자.exe' } else { 'EduStream 학생.exe' }
+            }
+            $target = Join-Path $package $relative
+            if ((Get-FileHash -LiteralPath $target).Hash -ne (Get-FileHash -LiteralPath $file.FullName).Hash) {
+                throw "Published file mismatch: $relative"
+            }
+        }
+        Write-Host "PUBLISH_FILE_HASHES=PASS $Role ($($sourceFiles.Count) files)"
+    }
+}
+foreach ($role in $roles) {
     $config = Get-Content -LiteralPath (Join-Path $package "EduStream.$role.runtimeconfig.json") -Raw | ConvertFrom-Json
     if (-not $config.runtimeOptions.PSObject.Properties['includedFrameworks']) { throw "Not self-contained: $role" }
     $exe = if ($role -eq 'Server') { 'EduStream 교수자.exe' } else { 'EduStream 학생.exe' }
