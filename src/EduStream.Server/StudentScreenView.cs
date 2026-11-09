@@ -1,7 +1,6 @@
 ﻿using System.ComponentModel;
 using System.Windows;
 using System.Windows.Controls;
-using System.Windows.Forms.Integration;
 using System.Windows.Media;
 using AxRDPCOMAPILib;
 using EduStream.Server.Services;
@@ -21,7 +20,7 @@ public sealed class StudentScreenView : System.Windows.Controls.UserControl
     // 창 상단에 원격 제어 · 다시 연결 · 화면 맞춤이 있다. 두 번째 연결은 만들지 않는다.
     private readonly TextBlock _cardStatus = new() { Foreground = Brushes.LightGray, TextWrapping = TextWrapping.Wrap };
     private readonly TextBlock _status = new() { Foreground = Brushes.LightGray, TextWrapping = TextWrapping.Wrap, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(8, 0, 0, 0) };
-    private readonly WindowsFormsHost _host = new() { Height = 180 };
+    private readonly ClippedWindowsFormsHost _host = new() { Height = 180 };
     private readonly DockPanel _windowLayout = new();
     private readonly StackPanel _root = new();
     private readonly ProfessorReception _reception = new();
@@ -35,6 +34,7 @@ public sealed class StudentScreenView : System.Windows.Controls.UserControl
     private Window? _large;
     private bool _loaded;
     private bool _subscribed;
+    private ServerViewModel? _subscribedModel;
     private bool _stopped;
     private string? _viewerKey;
     private Guid? _viewerInvitationId;
@@ -98,6 +98,7 @@ public sealed class StudentScreenView : System.Windows.Controls.UserControl
             {
                 Model.PropertyChanged += ModelChanged;
                 Model.SessionManager.ControlStateChanged += ControlChanged;
+                _subscribedModel = Model;
                 _subscribed = true;
             }
             AttachRouter();
@@ -108,7 +109,10 @@ public sealed class StudentScreenView : System.Windows.Controls.UserControl
             _loaded = false;
             Dispatcher.BeginInvoke(new Action(async () =>
             {
-                if (!IsLoaded && Model is not null && !Model.Participants.Contains(StudentName)) await StopAsync();
+                // 같은 학생이 재입장했더라도 창에서 제거된 이전 템플릿은 정리한다.
+                // 단순히 접힌 뷰는 창에 남아 있으므로 연결을 유지한다.
+                if (Window.GetWindow(this) is null ||
+                    (!IsLoaded && Model is { } model && !model.Participants.Contains(StudentName))) await StopAsync();
             }));
         };
     }
@@ -327,7 +331,13 @@ public sealed class StudentScreenView : System.Windows.Controls.UserControl
     {
         _stopped = true;
         if (_router is not null) { _router.InvitationReady -= Ready; _router.InvitationWithdrawn -= Withdrawn; }
-        if (_subscribed) { Model.PropertyChanged -= ModelChanged; Model.SessionManager.ControlStateChanged -= ControlChanged; _subscribed = false; }
+        if (_subscribedModel is { } subscribedModel)
+        {
+            subscribedModel.PropertyChanged -= ModelChanged;
+            subscribedModel.SessionManager.ControlStateChanged -= ControlChanged;
+            _subscribedModel = null;
+            _subscribed = false;
+        }
         await _lifecycle.WaitAsync();
         try { await ReleaseAsync(); _delivery = null; _large?.Close(); }
         finally { _lifecycle.Release(); }
