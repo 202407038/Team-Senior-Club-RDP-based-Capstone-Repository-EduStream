@@ -16,10 +16,6 @@ using EduStream.Core.Utils;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using Application = System.Windows.Application;
-using Color = System.Windows.Media.Color;
-using Point = System.Windows.Point;
-using Brushes = System.Windows.Media.Brushes;
-using FlowDirection = System.Windows.FlowDirection;
 
 
 namespace EduStream.Client.ViewModels;
@@ -107,7 +103,7 @@ public sealed partial class ClientViewModel : ObservableObject
     private string _placeholderSubtitle = "세션에 참여하면 화면이 표시됩니다.";
     private int _lastProgressPercent = -1;
     private int _port = 5000;
-    private string _displayName = "StudentDemo";
+    private string _displayName = string.Empty;
     private string _connectionState = "연결 전";
     private string _sessionSummary = "아직 참가한 세션이 없습니다.";
     private string _lastServerMessage = "서버 응답을 기다리는 중입니다.";
@@ -152,8 +148,6 @@ public sealed partial class ClientViewModel : ObservableObject
         // 참가 승인 대기·자동 재연결 중에도 사용자가 중단할 수 있어야 한다.
         DisconnectCommand = new RelayCommand(() => _ = DisconnectAsync(), () => IsConnected || IsConnecting);
         SendChatCommand = new RelayCommand(() => _ = SendChatAsync(), () => IsConnected && !string.IsNullOrWhiteSpace(ChatInput));
-        SimulateScreenRenderCommand = new RelayCommand(() => _ = SimulateScreenRenderAsync());
-        SimulateFileReceiveCommand = new RelayCommand(() => _ = SimulateFileReceiveAsync());
         ReconnectRdpCommand = new RelayCommand(() => _ = RetryRdpAsync(), () => IsConnected && NeedsRdpRetry && !_retryingRdp && !_disposing);
         RetryStudentSharingCommand = new RelayCommand(() => _ = RetryStudentSharingAsync(),
             () => IsConnected && _canRetryStudentSharing && !_retryingStudentSharing && !_disposing);
@@ -548,10 +542,6 @@ public sealed partial class ClientViewModel : ObservableObject
 
     public RelayCommand SendChatCommand { get; }
 
-    public RelayCommand SimulateScreenRenderCommand { get; }
-
-    public RelayCommand SimulateFileReceiveCommand { get; }
-
     public RelayCommand ReconnectRdpCommand { get; }
     public RelayCommand RetryStudentSharingCommand { get; }
 
@@ -687,67 +677,6 @@ public sealed partial class ClientViewModel : ObservableObject
             // 💡 서버가 닫혀있을 때 명확하게 에러 메시지 주입
             ApplyJoinError(_sessionClient.CreateJoinError(HostAddress, Port, "서버를 찾을 수 없습니다. 호스트 주소와 포트 혹은 서버 구동 상태를 확인해 주세요."));
         }
-    }
-
-    private async Task SimulateScreenRenderAsync()
-    {
-
-        // 즉석에서 400x300 단색 PNG 생성
-        var visual = new DrawingVisual();
-        using (var dc = visual.RenderOpen())
-        {
-            dc.DrawRectangle(new SolidColorBrush(Color.FromRgb(60, 40, 120)), null, new Rect(0, 0, 400, 300));
-            var text = new FormattedText(
-                "테스트 프레임",
-                System.Globalization.CultureInfo.CurrentCulture,
-                FlowDirection.LeftToRight,
-                new Typeface("Segoe UI"),
-                28,
-                Brushes.White,
-                1.0);
-            dc.DrawText(text, new Point(20, 20));
-        }
-
-        var bitmap = new RenderTargetBitmap(400, 300, 96, 96, PixelFormats.Pbgra32);
-        bitmap.Render(visual);
-
-        var encoder = new PngBitmapEncoder();
-        encoder.Frames.Add(BitmapFrame.Create(bitmap));
-
-        using var ms = new MemoryStream();
-        encoder.Save(ms);
-        var pngBytes = ms.ToArray();
-        var fakePacket = new ScreenPacket
-        {
-            FrameIndex = new Random().Next(1, 9999),
-            Width = 400,
-            Height = 300,
-            Encoding = ScreenEncodings.Png,
-            Content = pngBytes,
-            CapturedAt = DateTimeOffset.UtcNow
-        };
-
-        await HandleScreenAsync(fakePacket);
-    }
-
-    private async Task SimulateFileReceiveAsync()
-    {
-        var content = System.Text.Encoding.UTF8.GetBytes("테스트 파일 내용입니다.");
-        var checksum = ChecksumUtility.ComputeSha256(content);
-
-        var fakePacket = new FilePacket
-        {
-            FileName = $"테스트파일_{DateTime.Now:HHmmss}.txt",
-            FileSize = content.Length,
-            Content = content,
-            Checksum = checksum,
-            TransferId = Guid.NewGuid(),
-            ChunkIndex = 0,
-            TotalChunks = 1,
-            DataLength = content.Length
-        };
-
-        await HandleFileAsync(fakePacket);
     }
 
     private async Task DisconnectAsync()
