@@ -1,81 +1,65 @@
 # EduStream
 
-## 2026-11-06 추가 수업 기능
+교수자와 학생이 같은 로컬 네트워크에서 화면 공유·판서·원격 제어·채팅·파일 배포를 함께 사용하는 Windows 강의 지원 프로그램입니다.
 
-이번 실행용 ZIP에는 교수자 자동 찾기, 개인 채팅, 공지함, 엑셀 명단 대조·출입 기록, 학생 파일 제출, 라이트·다크 테마가 포함됩니다. 사용법과 검증 범위는 [추가 기능 안내](docs/work/ADDITIONAL_FEATURES_GUIDE.md), [현재 상태](docs/work/STATUS_AND_ROADMAP.md)를 확인하세요.
+## 정식 버전 다운로드
 
-## ZIP을 풀고 바로 실행하기
+### [EduStream v1.0.0 실행용 ZIP 받기](https://github.com/202407038/Team-Senior-Club-RDP-based-Capstone-Repository-EduStream/releases/download/v1.0.0/EduStream-Portable-win-x64.zip)
 
-### [실행용 ZIP 다운로드 · EduStream-Portable-win-x64.zip](https://github.com/202407038/Team-Senior-Club-RDP-based-Capstone-Repository-EduStream/releases/download/v0.1.0-preview.8/EduStream-Portable-win-x64.zip)
+**다운로드 → 모두 압축 풀기 → EduStream 폴더 → 역할에 맞는 EXE 더블클릭**
 
-**다운로드 → 모두 압축 풀기 → EduStream 폴더 → `EduStream 교수자.exe` 또는 `EduStream 학생.exe` 더블클릭**
+- 교수자 PC: `EduStream 교수자.exe`
+- 학생 PC: `EduStream 학생.exe`
 
-설치나 명령어 입력 없이 실행할 수 있으며 .NET 실행 환경이 포함되어 있습니다. ZIP 안에서 바로 실행하지 말고 전체 압축을 풀어주세요. EXE 옆의 DLL과 하위 폴더도 필요하므로, 이동할 때는 폴더 전체를 옮깁니다. [실행 안내](docs/work/DESKTOP_LAUNCH.md)
+Windows x64용이며 .NET 실행 환경을 포함합니다. 설치 프로그램이나 명령어 입력은 필요하지 않습니다. ZIP 안에서 바로 실행하지 말고 전체 압축을 풀어주세요. EXE 옆의 DLL과 하위 폴더도 함께 유지해야 합니다.
 
-배포는 **실행용 ZIP만** 제공합니다. 현재 버전은 **v0.1.0-preview.8 (2026-11-06 배포)**이며 실행 코드는 main `0a8f03a` (#101~#106 포함) 기준입니다. 코드 서명은 적용하지 않았습니다. [배포 정보와 SHA-256](https://github.com/202407038/Team-Senior-Club-RDP-based-Capstone-Repository-EduStream/releases/tag/v0.1.0-preview.8)
+[배포 정보·SHA-256](https://github.com/202407038/Team-Senior-Club-RDP-based-Capstone-Repository-EduStream/releases/tag/v1.0.0) · [자세한 실행 안내](docs/work/DESKTOP_LAUNCH.md) · [변경 이력](CHANGELOG.md)
 
-학생은 첫 화면에서 교수자 자동 찾기 또는 IP 입력으로 참가합니다. 명단 대조를 켠 경우 이름·학번을, 방 비밀번호를 설정한 경우 비밀번호를 입력합니다. 기본 포트는 5000이며 변경 시에만 고급 설정을 사용합니다. **접속 코드·별도 RDP 초대 비밀번호 입력은 없습니다.**
+GitHub의 **Code → Download ZIP**과 **Source code (zip)**은 개발용 소스입니다. 프로그램 실행만 필요하면 위 **실행용 ZIP**을 받으세요. 설치형은 배포하지 않습니다.
 
-**이번 반영:** 교수자 공유를 중지해도 유지 중인 학생 화면·제어를 실패로 표시하지 않습니다. 전체 채팅은 다른 학생에게 발신자 학번을 전송하지 않으며, 교수자 창과 학생 보기의 캡처 제외를 유지합니다.
+## 처음 사용하기
 
-**검증 범위:** 비화면 선별 회귀 968개 통과, ZIP 압축 해제와 양 앱 시작, 교수자 창의 캡처 제외 값 확인. 양방향 공유·원격 제어·동시 접속은 사용자 현장 확인과 자동 검증을 구분합니다. **휠 확대·축소는 요청에 따라 제외**했습니다. 자세한 결과와 동일 Windows 로그인 환경의 WDS 제약은 [현재 상태](docs/work/STATUS_AND_ROADMAP.md)를 확인하세요.
+1. 교수자는 방 비밀번호 사용 여부를 정한 뒤 **세션 열기**를 누릅니다. 필요하면 세션을 열기 전에 엑셀 학생 명단을 적용합니다.
+2. 학생은 **교수자 자동 찾기**에서 원하는 교수자를 선택하거나 교수자 화면에 표시된 IP를 입력합니다. 이름, 명단 대조 수업의 학번, 설정된 방 비밀번호를 입력하고 **세션 참여**를 누릅니다.
+3. 교수자는 모니터를 선택하고 **공유 시작**을 누릅니다. 학생은 별도의 접속 코드나 RDP 초대 비밀번호를 입력하지 않습니다.
 
-**위 실행용 ZIP과 `Code → Download ZIP`은 다릅니다.** `Code → Download ZIP`은 개발용 소스입니다. 소스 ZIP을 받은 경우 루트의 `Download-EduStream.url`에서도 실행용 ZIP을 받을 수 있습니다.
+기본 포트는 5000이며 바꿀 때만 고급 설정을 사용합니다. 다른 PC에 접속할 때 `127.0.0.1`이 아닌 교수자 PC의 IP를 입력하세요. 교수자와 학생은 같은 버전을 사용합니다.
 
----
+## 주요 기능
 
-EduStream은 교수자 화면 공유, 파일 전송, 텍스트 채팅을 하나의 흐름으로 제공하는 WPF 기반 데스크톱 강의 보조 시스템입니다.
+- **화면 공유·판서:** WDS(RDP) 실시간 공유, 모니터 선택, 선·도형·색·굵기·지우개·실행 취소, 그림 유지/OFF와 숨김 구분.
+- **학생 화면·원격 제어:** 학생별 화면 펼치기·큰 보기와 교수자의 제어 대상 선택. 학생 보기를 열어도 교수자 공유를 자동 중지하지 않습니다.
+- **채팅·공지:** 전체/교수자–학생 개인 대화, 복사, 미읽음 표시. 일반 공지는 약 3초 표시하고, 중요 공지는 확인할 때까지 유지하며 공지함에서 다시 확인합니다.
+- **파일:** 교수자 세션 파일 등록·다운로드·등록 해제, 학생별 저장 현황, 학생 제출 열기/닫기·취소·재제출. 강의 파일은 Windows 다운로드 폴더에 저장합니다.
+- **참가·명단:** 교수자 자동 검색·여러 결과 선택, 선택적 방 비밀번호와 엑셀 이름/학번 대조, 출입 기록 CSV.
+- **사용 편의:** 참가 정보 기억, 라이트/다크 테마, 접이식 패널, 연결 실패 안내와 재시도.
 
-현재 저장소는 졸작 중간발표 PPT의 로드맵을 기준으로 기능 구현과 시연 준비를 진행합니다.
+[기능별 사용법](docs/work/ADDITIONAL_FEATURES_GUIDE.md)
 
-## 프로젝트 구성
+## 사용 조건과 알려진 제한
 
-- `EduStream.Server`: 교수자용 서버 앱
-- `EduStream.Client`: 수강생용 클라이언트 앱
-- `EduStream.Core`: 공통 패킷, 모델, 직렬화, 검증 규칙
-- `EduStream.FileTransfer.Tests`: 파일 전송 및 패킷 흐름 테스트
+- 같은 **신뢰할 수 있는 LAN**에서 사용합니다. 자동 찾기는 방 비밀번호·명단 대조를 생략하지 않으며 엑셀 대조는 학교 계정 본인 인증이 아닙니다.
+- 학생은 참가 시 화면 보기·원격 제어 허용이 기본 ON입니다. 수업 전에 이를 안내하고, 학생은 **세션 나가기**로 연결을 종료할 수 있습니다.
+- 한 PC의 동일 Windows 로그인에서 교수자·학생이 동시에 WDS 송신을 열면 인증 오류가 발생하는 조건이 있습니다. 양방향 수업은 **서로 다른 PC**에서 사용하세요. Windows WDS/COM 지원도 필요합니다.
+- 교수자 창과 학생 보기 창은 **캡처 차단을 유지**합니다. 실패 안내가 나오면 해당 창을 공유하지 않는 모니터로 옮기세요. 모든 캡처 도구·OS에서의 차단을 보장하지는 않습니다.
+- 휠 확대·축소는 제공하지 않습니다. 최대 동시 접속 인원은 실측 확정하지 않았으며 내부 초대 한도 50을 수용 인원으로 해석하지 않습니다.
+- 코드 서명과 자동 업데이트는 제공하지 않습니다. 공식 릴리스의 파일/해시를 확인하고, 조직의 보안 정책을 우회하거나 백신·방화벽을 전체 해제하지 마세요.
 
-## 실행 및 검증
+정식 버전 표시는 배포 채널을 뜻하며 모든 PC 환경에 대한 무결함 보장은 아닙니다. [검증 범위와 현재 상태](docs/work/STATUS_AND_ROADMAP.md), [문제 보고 방법](docs/work/DESKTOP_LAUNCH.md#문제가-생기면)을 확인하세요.
 
-자세한 실행 순서와 기본 설정은 [실행 및 설정 가이드](docs/work/RUN_GUIDE.md)를 확인합니다.
+## 개발 및 문서
 
-WDS 기반 RDP가 메인 화면 공유 경로입니다. [현재 검증 범위](docs/work/FINAL_ACCEPTANCE_CHECKLIST.md)를 우선하며, [9월 통합 검증](docs/work/SEPTEMBER_RDP_INTEGRATION.md)은 당시 이력입니다. 자동 테스트 통과를 실제 다중 PC 화면·입력 검증으로 대체하지 않습니다.
+소스를 확인하려면 `Code → Download ZIP`을 풀고 `EduStream.sln`을 Visual Studio에서 엽니다. 빌드는 .NET 8 SDK가 필요합니다.
 
-### 빌드
-
-```bash
-dotnet build EduStream.sln
+```powershell
+dotnet build EduStream.sln -c Release
+dotnet test EduStream.sln -c Release --no-build
 ```
 
-### 테스트
+일부 테스트는 실제 창·WDS·입력을 사용합니다. 사용자 화면을 건드리지 않아야 하는 환경에서는 무조건 전체 실행하지 말고 [검증 범위](docs/work/FINAL_ACCEPTANCE_CHECKLIST.md)를 먼저 확인하세요.
 
-```bash
-dotnet test EduStream.sln --no-build
-```
+`src`에는 교수자(Server)·학생(Client)·공통(Core)·화면 엔진(ShareHost/ShareViewer), `tests`에는 회귀 검사가 있습니다. 테스트 코드와 과거 검증 이력은 유지하며, 실제 학생 명단·출입 기록·개인 제출 자료는 공개 저장소에 넣지 않습니다.
 
-## 작업자용 문서
-
-작업자는 아래 문서를 우선 확인합니다.
-
-- [실행 및 설정 가이드](docs/work/RUN_GUIDE.md)
-- [현재 상태와 로드맵](docs/work/STATUS_AND_ROADMAP.md)
-- [#51 반영 후 공통 기반·통합 인계](docs/work/POST_PR51_CORE_FILE_HANDOFF.md) — #77 공통 보완·#80 로그 경합 수정·#78 파일 회귀의 main 반영과 담당별 남은 연결 작업을 구분합니다. 배포 ZIP과 소스 기준은 다릅니다.
-- [#63까지의 세션 기반·3번 RDP 상세 인계](docs/work/SESSION_RDP_HANDOFF_PR57.md) — 보호 인증·파일 앱 연결·초대 비밀 자동 전달과 남은 실제 엔진/UI 인수를 구분합니다.
-- [1·4번 후속 검증](docs/work/CORE_FILE_INTEGRATION_READINESS.md) — #62·#63 main 반영 및 검증, 루프백 TLS/TCP와 실제 WDS 인수 범위를 구분합니다.
-- [1·4번 선행 구현 인계](docs/work/FINAL_CORE_FILE_HANDOFF.md) · [최종 통합·QA 체크리스트](docs/work/FINAL_ACCEPTANCE_CHECKLIST.md) — #48·#49 코드 준비와 실제 연동/최종 인수를 구분합니다.
-- [확정 UI 시안·피드백](docs/work/UI_FEEDBACK_SPEC.md) · [역할 배분·제출 일정](docs/work/UI_RDP_WORK_ALLOCATION.md) — 후속 구현 계획이며 현재 배포 기능과 구분합니다.
-- [개발 작업 방식](docs/work/DEVELOPMENT_GUIDE.md)
-
-## 참고 문서
-
-- [아키텍처 가이드](docs/reference/ARCHITECTURE_GUIDE.md)
-- [사용자 워크플로우](docs/reference/USER_WORKFLOW_SCENARIOS.md)
-- [작업 기록](docs/reference/PROJECT_HISTORY_TIMELINE.md)
-- [졸작 중간발표 자료](docs/reference/presentations/졸작중간발표.pptx)
-
-## 문서 기준
-
-- 현재 작업 방향은 졸작 중간발표 PPT의 월간 로드맵을 기준으로 합니다.
-- 로드맵은 현재 달과 다음 달까지만 유지합니다.
-- 완료된 작업은 로드맵 문서에서 `내용 ----- %완료%` 형식으로 표시합니다.
-- 오래된 계획 문서는 `docs/archive`에 보관합니다.
+- [문서 목록](docs/README.md) · [개발·커밋·PR 규칙](docs/work/DEVELOPMENT_GUIDE.md)
+- [현재 상태와 로드맵](docs/work/STATUS_AND_ROADMAP.md) · [주차별 기록](docs/work/FULL_WEEKLY_ROADMAP.md)
+- [아키텍처](docs/reference/ARCHITECTURE_GUIDE.md) · [작업 기록](docs/reference/PROJECT_HISTORY_TIMELINE.md)
