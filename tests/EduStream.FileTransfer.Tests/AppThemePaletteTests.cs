@@ -4,20 +4,22 @@ namespace EduStream.FileTransfer.Tests;
 
 public sealed class AppThemePaletteTests
 {
-    [Fact]
-    public void LightSurfacesUseSubtleWarmOffWhiteWithoutStrongBeige()
+    [Theory]
+    [InlineData("BrushBgPrimary", "#FAFAFA")]
+    [InlineData("BrushBgSurface", "#FFFFFF")]
+    [InlineData("BrushBgElevated", "#F3F3F3")]
+    [InlineData("BrushBgInput", "#F8F8F8")]
+    [InlineData("BrushBorder", "#D8D8D8")]
+    [InlineData("BrushHover", "#ECECEC")]
+    [InlineData("BrushChatOther", "#F5F5F5")]
+    [InlineData("BrushListGround", "#FBFBFB")]
+    [InlineData("BrushStudentCard", "#FBFBFB")]
+    public void LightSurfacesUseBrighterNeutralWhites(string key, string expected)
     {
         var palette = AppThemePalette.Colors(true);
-        foreach (var key in new[] { "BrushBgPrimary", "BrushBgSurface", "BrushBgElevated", "BrushBgInput", "BrushListGround", "BrushStudentCard" })
-        {
-            var hex = palette[key];
-            var red = Convert.ToInt32(hex.Substring(1, 2), 16);
-            var green = Convert.ToInt32(hex.Substring(3, 2), 16);
-            var blue = Convert.ToInt32(hex.Substring(5, 2), 16);
-            Assert.True(red >= green && green > blue, key);
-            Assert.InRange(red, 239, 252);
-            Assert.InRange(red - blue, 1, 3);
-        }
+        Assert.Equal(expected, palette[key]);
+        Assert.Equal(palette[key].Substring(1, 2), palette[key].Substring(3, 2));
+        Assert.Equal(palette[key].Substring(3, 2), palette[key].Substring(5, 2));
     }
 
     [Theory]
@@ -27,7 +29,7 @@ public sealed class AppThemePaletteTests
     {
         var palette = AppThemePalette.Colors(light);
         foreach (var text in new[] { "BrushTextPrimary", "BrushTextSecondary", "BrushTextMuted", "BrushAccentPurple", "BrushAccentTeal" })
-        foreach (var background in new[] { "BrushBgPrimary", "BrushBgSurface", "BrushBgInput", "BrushChatSelf", "BrushChatOther", "BrushChatSystem" })
+        foreach (var background in new[] { "BrushBgPrimary", "BrushBgSurface", "BrushBgInput", "BrushBgElevated", "BrushHover", "BrushListGround", "BrushStudentCard", "BrushChatSelf", "BrushChatOther", "BrushChatSystem" })
             Assert.True(Contrast(palette[text], palette[background]) >= 4.5, $"{light}: {text}/{background}");
         Assert.True(Contrast(palette["BrushBgPrimary"], palette["BrushAccentPurple"]) >= 4.5);
         Assert.True(Contrast(palette["BrushOnStrong"], palette["BrushDrawingButton"]) >= 4.5);
