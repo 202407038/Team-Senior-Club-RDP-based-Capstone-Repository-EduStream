@@ -4,13 +4,13 @@
 
 ## 다운로드와 실행
 
-1. **[실행용 ZIP 다운로드](https://github.com/202407038/Team-Senior-Club-RDP-based-Capstone-Repository-EduStream/releases/download/v1.0.0/EduStream-Portable-win-x64.zip)**를 누릅니다.
+1. 역할에 맞게 **[교수자용 ZIP](https://github.com/202407038/Team-Senior-Club-RDP-based-Capstone-Repository-EduStream/releases/download/v1.0.0/EduStream-Server-win-x64.zip)** 또는 **[학생용 ZIP](https://github.com/202407038/Team-Senior-Club-RDP-based-Capstone-Repository-EduStream/releases/download/v1.0.0/EduStream-Client-win-x64.zip)**을 받습니다. 학생에게는 학생용만 전달합니다.
 2. 받은 ZIP을 우클릭 → **모두 압축 풀기 → 압축 풀기**.
 3. `EduStream` 폴더의 **EduStream 교수자.exe / EduStream 학생.exe**를 더블클릭합니다.
 
 Windows x64용 .NET 실행 환경이 포함돼 설치·PowerShell·별도 .NET 설치가 필요하지 않습니다. ZIP 안에서 직접 실행하지 마세요. DLL과 하위 폴더를 지우거나 EXE만 옮기지 말고 폴더 전체를 옮기세요. 바탕화면에는 EXE의 바로가기를 만들 수 있습니다.
 
-GitHub **Code → Download ZIP** 및 Releases의 **Source code (zip)**은 개발용 소스입니다. 실행용 파일명은 `EduStream-Portable-win-x64.zip`입니다. 소스 루트의 `Download-EduStream.url`도 실행용 ZIP으로 연결합니다.
+GitHub **Code → Download ZIP** 및 Releases의 **Source code (zip)**은 개발용 소스입니다. 교수자용은 `EduStream-Server-win-x64.zip`, 학생용은 `EduStream-Client-win-x64.zip`이며 각 ZIP에는 해당 역할의 앱만 있습니다. 소스 루트의 `Download-EduStream-Professor.url` / `Download-EduStream-Student.url`은 각각 바로 다운로드하며 `Download-EduStream.url`은 역할을 선택할 수 있는 릴리스 안내로 연결합니다.
 
 ## 앱 실행 후
 
@@ -35,7 +35,7 @@ GitHub **Code → Download ZIP** 및 Releases의 **Source code (zip)**은 개발
 ## 검증 범위와 주의
 
 - 비화면 선별 회귀 973개 통과·실패 0. 교수자 공유 중지 안내와 전체 채팅에서의 학번 비전달을 포함합니다. native/창/입력 클래스는 제외합니다.
-- ZIP의 SHA-256은 [정식 릴리스에 첨부한 해시 파일](https://github.com/202407038/Team-Senior-Club-RDP-based-Capstone-Repository-EduStream/releases/download/v1.0.0/EduStream-Portable-win-x64.zip.sha256)과 대조합니다. 양 앱 .NET 8.0.31 self-contained 구성과 RDP interop를 포함합니다.
+- ZIP의 SHA-256은 [정식 릴리스](https://github.com/202407038/Team-Senior-Club-RDP-based-Capstone-Repository-EduStream/releases/tag/v1.0.0)의 같은 파일명에 `.sha256`이 붙은 파일과 대조합니다. 각 ZIP에 .NET 8.0.31 self-contained 구성과 RDP interop를 포함합니다.
 - 압축 해제본의 양 앱 시작과 교수자 창 캡처 제외 값 `0x11`을 확인했습니다. 이 시작 검사는 화면 전송이나 실제 원격 제어 검사가 아닙니다.
 - 사용자의 양방향 공유·원격 제어·동시 접속 현장 확인은 별도입니다. 동일 Windows 로그인에서 동시 WDS 송신 제약이 있으며, 최대 동시 접속 인원은 보장하지 않습니다. [현재 검증 근거](./STATUS_AND_ROADMAP.md)를 확인하세요.
 - Windows WDS/COM 지원은 별도 OS 조건이며 .NET 포함만으로 보장되지 않습니다.
@@ -49,10 +49,11 @@ GitHub **Code → Download ZIP** 및 Releases의 **Source code (zip)**은 개발
 
 ```powershell
 ./scripts/Build-EduStreamPortable.ps1 -OutputDirectory "$PWD/artifacts/portable/new-build"
-./scripts/Test-EduStreamPortable.ps1 -ZipPath "$PWD/artifacts/portable/new-build/EduStream-Portable-win-x64.zip"
+./scripts/Test-EduStreamPortable.ps1 -ZipPath "$PWD/artifacts/portable/new-build/EduStream-Server-win-x64.zip" -Role Server -PayloadDirectory "$PWD/artifacts/portable/new-build/payload"
+./scripts/Test-EduStreamPortable.ps1 -ZipPath "$PWD/artifacts/portable/new-build/EduStream-Client-win-x64.zip" -Role Client -PayloadDirectory "$PWD/artifacts/portable/new-build/payload"
 ```
 
-빌드 PC만 .NET SDK가 필요합니다. 두 self-contained 게시 결과에서 같은 경로의 내용이 다르면 중단하며 덮어쓰지 않습니다. ZIP과 `.zip.sha256`만 Releases에 배포하고 중간 payload/바이너리는 Git에 커밋하지 않습니다. 과거 설치형 제작 스크립트는 이력 보존용이며 신규 배포 대상이 아닙니다.
+빌드 PC만 .NET SDK가 필요합니다. 각 self-contained 게시 폴더 전체를 역할별로 포장하고 다른 역할의 앱이 섞이면 중단합니다. 학생용 ShareHost/ShareViewer는 역방향 공유에 필요하므로 제거하지 않습니다. 이미 검증한 publish 결과는 빌드 스크립트의 `-PayloadDirectory`로 재사용할 수 있으며 원본 해시를 검사합니다. 역할별 ZIP 두 개와 각각의 `.zip.sha256`을 Releases에 배포하고 중간 payload/바이너리는 Git에 커밋하지 않습니다. 기존 통합 ZIP 링크는 호환용으로 보존하지만 신규 안내는 역할별 ZIP만 사용합니다. 과거 설치형 제작 스크립트는 이력 보존용입니다.
 
 ## 문제가 생기면
 
