@@ -14,6 +14,10 @@
         WindowStartupLocation="CenterScreen">
 
     <Window.Resources>
+        <DataTemplate x:Key="StudentScreenTemplate">
+            <local:StudentScreenView Margin="0,10,0,0"
+                Model="{Binding DataContext, RelativeSource={RelativeSource AncestorType=Window}}" />
+        </DataTemplate>
         <!-- 모니터 선택 콤보박스: 앱 테마에 맞춘 다크 스타일 -->
         <Style x:Key="DarkComboBox" TargetType="ComboBox">
             <Setter Property="Background" Value="{DynamicResource BrushBgElevated}" />
@@ -183,24 +187,17 @@
                         <Button DockPanel.Dock="Right" Style="{StaticResource GhostButton}" Margin="6,0,0,0"
                                 Padding="10,0" Content="복사" Click="CopyHostAddress_Click" />
                         <Button DockPanel.Dock="Right" Style="{StaticResource GhostButton}" Margin="6,0,0,0"
-                                Padding="10,0" Content="새로고침" Click="RefreshHostAddresses_Click" />
+                                Padding="10,0" Content="새로고침" Click="RefreshHostAddresses_Click" ToolTip="{Binding DiscoveryStatus}" />
                         <ComboBox x:Name="HostAddressSelector" Style="{StaticResource DarkComboBox}" Height="32"
                                   ItemsSource="{Binding HostAddressOptions}"
                                   SelectedItem="{Binding SelectedHostAddress}"
                                   DisplayMemberPath="Display" />
                     </DockPanel>
-                    <TextBlock Margin="0,6,0,0" FontSize="11" TextWrapping="Wrap"
-                               Foreground="{DynamicResource BrushTextMuted}" Text="{Binding HostGuideText}" />
-                    <TextBlock Margin="0,4,0,0" FontSize="11" TextWrapping="Wrap"
-                               Foreground="{DynamicResource BrushTextSecondary}" Text="{Binding DiscoveryStatus}" />
-                    <TextBlock Margin="0,2,0,0" FontSize="10" TextWrapping="Wrap"
-                               Foreground="{DynamicResource BrushTextMuted}"
-                               Text="같은 네트워크의 학생만 접속할 수 있습니다. 인터넷에서 접속 가능한 주소라는 뜻은 아닙니다." />
 
                     <Expander Header="고급 설정 (기본 포트 5000)" IsExpanded="False" Margin="0,10,0,0"
                               Foreground="{DynamicResource BrushTextSecondary}">
                         <StackPanel Margin="0,8,0,0">
-                            <TextBlock Style="{StaticResource FieldLabel}" Text="포트 (바꾸면 학생에게도 알려 주세요)" />
+                            <TextBlock Style="{StaticResource FieldLabel}" Text="포트" />
                             <TextBox Style="{StaticResource DarkTextBox}"
                                      IsEnabled="{Binding IsSessionOpen, Converter={StaticResource InverseBool}}"
                                      Text="{Binding Port, UpdateSourceTrigger=PropertyChanged}" />
@@ -214,17 +211,13 @@
                             <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
                         <StackPanel Grid.Column="0">
-                            <CheckBox Content="방 비밀번호 사용 (체크 해제 시 비밀번호 없는 방)"
+                            <CheckBox Content="방 비밀번호 사용"
                                       Foreground="{DynamicResource BrushTextSecondary}"
                                       IsEnabled="{Binding IsSessionOpen, Converter={StaticResource InverseBool}}"
                                       IsChecked="{Binding UseRoomPassword}" />
                             <PasswordBox x:Name="RoomPasswordBox" Style="{StaticResource DarkPasswordBox}" Margin="0,8,0,0"
                                          Visibility="{Binding UseRoomPassword, Converter={StaticResource BoolToVis}}"
                                          IsEnabled="{Binding IsSessionOpen, Converter={StaticResource InverseBool}}" />
-                            <TextBlock Margin="0,6,0,0" FontSize="11" TextWrapping="Wrap"
-                                       Foreground="{DynamicResource BrushTextMuted}"
-                                       Visibility="{Binding IsSessionOpen, Converter={StaticResource BoolToVis}}"
-                                       Text="열린 세션의 방 비밀번호는 바꿀 수 없습니다. 바꾸려면 세션을 닫고 다시 여세요." />
                         </StackPanel>
                         <Border Grid.Column="2" Padding="14,4" Background="{DynamicResource BrushSuccessGround}" CornerRadius="8"
                                 BorderBrush="{DynamicResource BrushSuccess}" BorderThickness="1" VerticalAlignment="Bottom">
@@ -574,71 +567,99 @@
                 </DockPanel>
                 <TextBlock x:Name="StudentSearchResult" Margin="0,4,0,0" TextWrapping="Wrap"
                            FontSize="11" Foreground="{DynamicResource BrushTextMuted}" />
-                <Expander Header="엑셀 명단 미리보기" IsExpanded="False" Margin="0,10,0,0"
+                <TextBlock Text="{Binding AttendanceSummary}" Margin="0,6,0,0" Foreground="{DynamicResource BrushTextSecondary}" />
+                </StackPanel>
+
+                <ScrollViewer x:Name="StudentListScroll" Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                <StackPanel>
+                <Expander Header="명단 관리" IsExpanded="False" Margin="0,0,0,10"
                           Foreground="{DynamicResource BrushTextSecondary}">
                     <StackPanel Margin="0,8,0,0">
                         <Button Content="학생명단 가져오기 (.xlsx)" Command="{Binding PreviewRosterCommand}" Style="{StaticResource GhostButton}" />
-                        <TextBlock Text="{Binding RosterImportStatus}" TextWrapping="Wrap" FontSize="11" Margin="0,8,0,8" />
+                        <TextBlock Text="{Binding RosterImportStatus}" Style="{StaticResource CompactStatusText}" Margin="0,8,0,8" />
                         <WrapPanel>
-                            <Button Content="이 명단으로 입장 대조 켜기" Command="{Binding ApplyRosterAdmissionCommand}" Style="{StaticResource GhostButton}" Margin="0,0,6,6" />
+                            <Button Content="명단 대조 켜기" Command="{Binding ApplyRosterAdmissionCommand}" Style="{StaticResource GhostButton}" Margin="0,0,6,6" />
                             <Button Content="명단 대조 끄기" Command="{Binding DisableRosterAdmissionCommand}" Style="{StaticResource GhostButton}" Margin="0,0,0,6" />
                         </WrapPanel>
                         <TextBlock Text="{Binding RosterAdmissionStatus}" TextWrapping="Wrap" FontSize="11" Margin="0,0,0,8" />
-                        <TextBlock Text="학교 본인 인증이 아닌 명단 대조입니다. 설정 변경은 세션을 닫은 상태에서만 가능합니다." TextWrapping="Wrap" FontSize="11" Margin="0,0,0,8" />
-                        <ScrollViewer MaxHeight="180" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
-                            <ItemsControl ItemsSource="{Binding RosterPreviewRows}">
-                                <ItemsControl.ItemTemplate><DataTemplate>
-                                    <StackPanel Margin="0,0,0,10">
-                                        <TextBlock Text="{Binding Summary}" Foreground="{DynamicResource BrushTextPrimary}" TextWrapping="Wrap" />
-                                        <TextBlock Text="{Binding Issue}" Foreground="{DynamicResource BrushAccentError}" TextWrapping="Wrap" FontSize="11" />
-                                    </StackPanel>
-                                </DataTemplate></ItemsControl.ItemTemplate>
-                            </ItemsControl>
-                        </ScrollViewer>
-                    </StackPanel>
-                </Expander>
-                <Expander Header="출입 기록" IsExpanded="False" Margin="0,8,0,0" Foreground="{DynamicResource BrushTextSecondary}">
-                    <StackPanel Margin="0,8,0,0">
-                        <TextBlock Text="{Binding AttendanceSummary}" TextWrapping="Wrap" />
                         <Button Content="접속 기록 CSV 저장" Command="{Binding ExportAttendanceCommand}" Style="{StaticResource GhostButton}" />
-                        <ScrollViewer MaxHeight="140" VerticalScrollBarVisibility="Auto">
-                            <ItemsControl ItemsSource="{Binding RosterPresenceRows}"><ItemsControl.ItemTemplate><DataTemplate>
-                                <TextBlock Text="{Binding Summary}" TextWrapping="Wrap" Margin="0,5" />
-                            </DataTemplate></ItemsControl.ItemTemplate></ItemsControl>
-                        </ScrollViewer>
-                        <ScrollViewer MaxHeight="140" VerticalScrollBarVisibility="Auto">
-                            <ItemsControl ItemsSource="{Binding AttendanceRows}"><ItemsControl.ItemTemplate><DataTemplate>
-                                <StackPanel Margin="0,5"><TextBlock Text="{Binding Name}" /><TextBlock FontSize="11"><Run Text="{Binding At, StringFormat=HH:mm:ss}" /><Run Text=" · " /><Run Text="{Binding Action}" /></TextBlock></StackPanel>
-                            </DataTemplate></ItemsControl.ItemTemplate></ItemsControl>
-                        </ScrollViewer>
                     </StackPanel>
                 </Expander>
-                </StackPanel>
-
-                <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
-                    <ItemsControl x:Name="StudentListItems" ItemsSource="{Binding Participants}">
+                    <ItemsControl x:Name="StudentListItems" ItemsSource="{Binding StudentRows}">
                         <ItemsControl.ItemTemplate>
                             <DataTemplate>
                                 <Border Margin="0,0,0,10" Background="{DynamicResource BrushStudentCard}" CornerRadius="8"
                                         BorderBrush="{DynamicResource BrushBorder}" BorderThickness="1">
-                                    <Expander x:Name="StudentExpander" IsExpanded="False" BorderThickness="0" Padding="10">
+                                    <StackPanel Margin="10">
+                                    <DockPanel>
+                                        <ToggleButton DockPanel.Dock="Right" VerticalAlignment="Top" Margin="6,0,0,0" Padding="6,4"
+                                                      IsChecked="{Binding IsHistoryExpanded, Mode=TwoWay}" AutomationProperties.Name="입퇴장 기록 펼치기/접기">
+                                            <ToggleButton.Style>
+                                                <Style TargetType="ToggleButton">
+                                                    <Setter Property="Content" Value="기록 ▾" />
+                                                    <Setter Property="Foreground" Value="{DynamicResource BrushTextPrimary}" />
+                                                    <Setter Property="Background" Value="{DynamicResource BrushBgElevated}" />
+                                                    <Setter Property="BorderThickness" Value="0" />
+                                                    <Setter Property="Template"><Setter.Value>
+                                                        <ControlTemplate TargetType="ToggleButton">
+                                                            <Border Background="{TemplateBinding Background}" CornerRadius="4" Padding="{TemplateBinding Padding}">
+                                                                <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                                            </Border>
+                                                        </ControlTemplate>
+                                                    </Setter.Value></Setter>
+                                                    <Style.Triggers><Trigger Property="IsChecked" Value="True"><Setter Property="Content" Value="기록 ▴" /></Trigger></Style.Triggers>
+                                                </Style>
+                                            </ToggleButton.Style>
+                                        </ToggleButton>
+                                    <Expander x:Name="StudentExpander" IsExpanded="{Binding IsScreenExpanded, Mode=TwoWay}"
+                                              IsEnabled="{Binding IsConnected}" BorderThickness="0" Padding="0">
                                         <Expander.Resources>
                                             <Style TargetType="ToggleButton">
                                                 <Setter Property="Foreground" Value="{DynamicResource BrushTextPrimary}" />
                                             </Style>
                                         </Expander.Resources>
                                         <Expander.Header>
-                                            <StackPanel Orientation="Horizontal">
-                                                <Ellipse Width="8" Height="8" Fill="{DynamicResource BrushSuccess}" Margin="0,0,6,0" VerticalAlignment="Center" />
-                                                <TextBlock Text="{Binding}" Foreground="{DynamicResource BrushTextPrimary}" FontWeight="Bold" FontSize="13" />
+                                            <StackPanel>
+                                                <TextBlock Text="{Binding Name}" Foreground="{DynamicResource BrushTextPrimary}" FontWeight="Bold" FontSize="13" TextWrapping="Wrap" />
+                                                <TextBlock Text="{Binding StudentId}" Style="{StaticResource CompactStatusText}" Foreground="{DynamicResource BrushTextSecondary}" />
+                                                <TextBlock Text="{Binding Status}" FontSize="11">
+                                                    <TextBlock.Style><Style TargetType="TextBlock">
+                                                        <Setter Property="Foreground" Value="{DynamicResource BrushTextMuted}" />
+                                                        <Style.Triggers><DataTrigger Binding="{Binding IsConnected}" Value="True"><Setter Property="Foreground" Value="{DynamicResource BrushSuccess}" /></DataTrigger></Style.Triggers>
+                                                    </Style></TextBlock.Style>
+                                                </TextBlock>
                                             </StackPanel>
                                         </Expander.Header>
-                                        <local:StudentScreenView Margin="0,10,0,0" Model="{Binding DataContext, RelativeSource={RelativeSource AncestorType=Window}}" />
+                                        <ContentControl Content="{Binding ParticipantName}" HorizontalContentAlignment="Stretch">
+                                            <ContentControl.Style><Style TargetType="ContentControl">
+                                                <Setter Property="ContentTemplate"><Setter.Value><DataTemplate /></Setter.Value></Setter>
+                                                <Style.Triggers><DataTrigger Binding="{Binding IsConnected}" Value="True">
+                                                    <Setter Property="ContentTemplate" Value="{StaticResource StudentScreenTemplate}" />
+                                                </DataTrigger></Style.Triggers>
+                                            </Style></ContentControl.Style>
+                                        </ContentControl>
                                     </Expander>
+                                    </DockPanel>
+                                    <TextBlock Text="{Binding Issue}" Style="{StaticResource CompactStatusText}" Foreground="{DynamicResource BrushAccentError}" />
+                                    <StackPanel Visibility="{Binding IsHistoryExpanded, Converter={StaticResource BoolToVis}}" Margin="0,8,0,0">
+                                        <TextBlock Text="입퇴장 기록 없음" Foreground="{DynamicResource BrushTextMuted}">
+                                            <TextBlock.Style><Style TargetType="TextBlock">
+                                                <Setter Property="Visibility" Value="Collapsed" />
+                                                <Style.Triggers><DataTrigger Binding="{Binding History.Count}" Value="0"><Setter Property="Visibility" Value="Visible" /></DataTrigger></Style.Triggers>
+                                            </Style></TextBlock.Style>
+                                        </TextBlock>
+                                        <ItemsControl ItemsSource="{Binding History}"><ItemsControl.ItemTemplate><DataTemplate>
+                                            <TextBlock Margin="0,3" Foreground="{DynamicResource BrushTextSecondary}" TextWrapping="Wrap">
+                                                <Run Text="{Binding At, StringFormat=MM/dd HH:mm:ss}" /><Run Text=" · " /><Run Text="{Binding Action}" />
+                                            </TextBlock>
+                                        </DataTemplate></ItemsControl.ItemTemplate></ItemsControl>
+                                    </StackPanel>
+                                    </StackPanel>
                                 </Border>
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>
+                </StackPanel>
                 </ScrollViewer>
             </Grid>
         </Border>

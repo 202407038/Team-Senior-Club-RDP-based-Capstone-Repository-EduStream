@@ -4,6 +4,8 @@ using EduStream.Core.Models;
 using EduStream.Server.Services;
 using System.IO;
 using System.Text;
+using System.Globalization;
+using System.Numerics;
 
 namespace EduStream.Server.ViewModels;
 
@@ -13,8 +15,9 @@ public sealed partial class ServerViewModel
     public ObservableCollection<FileDeliveryStatus> FileDeliveries { get; } = [];
     public ObservableCollection<RosterPresence> RosterPresenceRows { get; } = [];
     public ObservableCollection<AttendanceEntry> AttendanceRows { get; } = [];
+    public ObservableCollection<StudentListRow> StudentRows { get; } = [];
     public RelayCommand ExportAttendanceCommand { get; private set; } = null!;
-    public string AttendanceSummary => $"명단 {RosterPresenceRows.Count}명 · 접속 {RosterPresenceRows.Count(x => x.Connected)}명 · 기록 {AttendanceRows.Count}건";
+    public string AttendanceSummary => $"학생 {StudentRows.Count}명 · 접속 {StudentRows.Count(x => x.IsConnected)}명";
     private void InitializeAttendance()
     {
         ExportAttendanceCommand = new RelayCommand(ExportAttendance, () => AttendanceRows.Count > 0);
@@ -26,13 +29,64 @@ public sealed partial class ServerViewModel
         foreach (var row in _sessionManager.Attendance.Presence) RosterPresenceRows.Add(row);
         AttendanceRows.Clear();
         foreach (var row in _sessionManager.Attendance.Entries.Reverse()) AttendanceRows.Add(row);
-        OnPropertyChanged(nameof(AttendanceSummary)); ExportAttendanceCommand.RaiseCanExecuteChanged();
+        RefreshStudentRows();
+        ExportAttendanceCommand.RaiseCanExecuteChanged();
+    }
+    private void RefreshStudentRows()
+    {
+        var attendance = _sessionManager.Attendance;
+        var entries = attendance.Entries;
+        var connected = attendance.ConnectedStudents.Select(x => (x.Name, x.StudentId)).ToHashSet();
+        // 새로 가져온 미리보기로 진행 중인 세션의 입장 대조 명단을 바꾸지 않는다.
+        var roster = _sessionManager.CurrentSession is not null && _sessionManager.IsRosterAdmissionEnabled
+            ? attendance.Presence.Select(x => new RosterRow(0, x.Name, x.StudentId, "", "")).ToArray()
+            : RosterPreviewRows.ToArray();
+        var desired = new Dictionary<(string Name, string Id, int InvalidRow), string>();
+        foreach (var row in roster)
+            desired.TryAdd((row.Name, row.StudentId, row.IsValid ? 0 : row.SourceRow), row.Issue);
+        foreach (var entry in entries)
+            desired.TryAdd((entry.Name, entry.StudentId, 0), "");
+        foreach (var student in connected)
+            desired.TryAdd((student.Name, student.StudentId, 0), "");
+
+        for (var i = StudentRows.Count - 1; i >= 0; i--)
+        {
+            var row = StudentRows[i];
+            if (!desired.ContainsKey((row.Name, row.StudentId, row.InvalidSourceRow))) StudentRows.RemoveAt(i);
+        }
+        foreach (var (key, issue) in desired)
+        {
+            var row = StudentRows.FirstOrDefault(x => x.Name == key.Name && x.StudentId == key.Id && x.InvalidSourceRow == key.InvalidRow);
+            if (row is null) { row = new StudentListRow(key.Name, key.Id, key.InvalidRow); StudentRows.Add(row); }
+            row.Update(key.InvalidRow == 0 && connected.Contains((key.Name, key.Id)), issue,
+                key.InvalidRow == 0 ? entries.Where(x => x.Name == key.Name && x.StudentId == key.Id).Reverse() : []);
+        }
+        var sorted = StudentRows.Select(row => new
+            {
+                Row = row,
+                Number = BigInteger.TryParse(row.StudentId, NumberStyles.None, CultureInfo.InvariantCulture, out var number)
+                    ? (BigInteger?)number : null
+            })
+            .OrderByDescending(x => x.Row.IsConnected)
+            .ThenBy(x => x.Number is null)
+            .ThenBy(x => x.Number)
+            .ThenBy(x => x.Row.StudentId, StringComparer.Ordinal)
+            .ThenBy(x => x.Row.Name, StringComparer.Ordinal)
+            .ThenBy(x => x.Row.InvalidSourceRow)
+            .Select(x => x.Row).ToArray();
+        // 목록을 초기화하지 않고 기존 행을 이동해 기록 펼침과 화면 뷰를 유지한다.
+        for (var i = 0; i < sorted.Length; i++)
+        {
+            var current = StudentRows.IndexOf(sorted[i]);
+            if (current != i) StudentRows.Move(current, i);
+        }
+        OnPropertyChanged(nameof(AttendanceSummary));
     }
     private void ExportAttendance()
     {
         var dialog = new Microsoft.Win32.SaveFileDialog { Filter = "CSV 접속 기록 (*.csv)|*.csv", FileName = $"EduStream-접속기록-{DateTime.Now:yyyyMMdd-HHmmss}.csv" };
         if (dialog.ShowDialog() != true) return;
-        try { File.WriteAllText(dialog.FileName, _sessionManager.Attendance.ToCsv(), new UTF8Encoding(true)); RosterImportStatus = "접속 기록을 저장했습니다. 출석 인정은 별도로 확인해 주세요."; }
+        try { File.WriteAllText(dialog.FileName, _sessionManager.Attendance.ToCsv(), new UTF8Encoding(true)); RosterImportStatus = "접속 기록 저장 완료"; }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { RosterImportStatus = "접속 기록 저장 실패. 경로와 파일 사용 여부를 확인해 주세요."; }
     }
     public RelayCommand PreviewRosterCommand { get; }
@@ -40,8 +94,8 @@ public sealed partial class ServerViewModel
     public RelayCommand DisableRosterAdmissionCommand { get; }
     private RosterImportPreview? _rosterPreview;
     public string RosterAdmissionStatus => _sessionManager.IsRosterAdmissionEnabled
-        ? $"명단 대조 켜짐 · {_sessionManager.RosterCount}명 · 이름·학번 불일치 시 입장 거부"
-        : "명단 대조 꺼짐 · 기존 이름 입력 방식으로 참가 가능";
+        ? $"명단 대조 켜짐 · {_sessionManager.RosterCount}명"
+        : "명단 대조 꺼짐";
     private void RefreshRosterCommands()
     {
         ApplyRosterAdmissionCommand?.RaiseCanExecuteChanged();
@@ -52,7 +106,7 @@ public sealed partial class ServerViewModel
     {
         if (!ApplyRosterAdmissionCommand.CanExecute(null)) return;
         _sessionManager.ConfigureRosterAdmission(_rosterPreview!.Rows, true);
-        RosterImportStatus = "미리보기 명단을 적용했습니다. 다음에 여는 세션부터 이름·학번이 일치해야 참가할 수 있습니다.";
+        RosterImportStatus = "명단 적용 완료";
         RefreshRosterCommands();
     }
     public void DisableRosterAdmission()
@@ -67,7 +121,7 @@ public sealed partial class ServerViewModel
         get => _isLoadingRoster;
         private set { SetProperty(ref _isLoadingRoster, value); PreviewRosterCommand.RaiseCanExecuteChanged(); RefreshRosterCommands(); }
     }
-    private string _rosterImportStatus = "엑셀의 '학생명단' 시트를 확인합니다. 현재는 미리보기이며 입장 제한을 적용하지 않습니다.";
+    private string _rosterImportStatus = string.Empty;
     public string RosterImportStatus { get => _rosterImportStatus; private set => SetProperty(ref _rosterImportStatus, value); }
     private async Task ChooseRosterAsync()
     {
@@ -85,9 +139,10 @@ public sealed partial class ServerViewModel
             _rosterPreview = preview;
             RosterPreviewRows.Clear();
             foreach (var row in preview.Rows) RosterPreviewRows.Add(row);
+            RefreshStudentRows();
             RosterImportStatus = preview.Summary + (preview.CanUseForAdmission
-                ? ". 형식 확인 완료. 아래 적용 버튼으로 입장 대조에 사용할 수 있습니다."
-                : ". 확인 필요 행을 엑셀에서 수정한 뒤 다시 가져오세요. 입장 대조에는 사용할 수 없습니다.");
+                ? " · 적용 가능"
+                : " · 오류 행 수정 필요 · 적용 불가");
             if (_sessionManager.IsRosterAdmissionEnabled) RosterImportStatus += " 기존에 적용한 명단은 그대로 유지됩니다.";
         }
         catch (Exception ex)

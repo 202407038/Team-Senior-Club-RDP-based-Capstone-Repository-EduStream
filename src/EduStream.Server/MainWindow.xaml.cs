@@ -170,7 +170,7 @@ private void CollapseAllStudents_Click(object sender, RoutedEventArgs e) => SetA
         var query = StudentSearchBox.Text.Trim();
         if (query != _lastStudentQuery) _lastStudentMatch = -1;
         _lastStudentQuery = query;
-        var index = Services.StudentNameSearch.FindNext(_viewModel.Participants, query, _lastStudentMatch);
+        var index = Services.StudentNameSearch.FindNext(_viewModel.StudentRows.Select(x => x.ParticipantName).ToList(), query, _lastStudentMatch);
         if (index < 0)
         {
             StudentSearchResult.Text = query.Length == 0 ? "찾을 학생 이름을 입력해 주세요." : "일치하는 학생이 없습니다.";
@@ -178,7 +178,7 @@ private void CollapseAllStudents_Click(object sender, RoutedEventArgs e) => SetA
             return;
         }
         _lastStudentMatch = index;
-        StudentSearchResult.Text = $"{_viewModel.Participants[index]} · 다시 누르면 다음 일치 학생";
+        StudentSearchResult.Text = _viewModel.StudentRows[index].ParticipantName;
         StudentListItems.UpdateLayout();
         if (StudentListItems.ItemContainerGenerator.ContainerFromIndex(index) is FrameworkElement container)
             (FindVisualChild<Expander>(container, "StudentExpander") ?? container).BringIntoView();
@@ -194,17 +194,7 @@ private void CollapseAllStudents_Click(object sender, RoutedEventArgs e) => SetA
 
 private void SetAllStudentsExpanded(bool expanded)
 {
-    for (int i = 0; i < StudentListItems.Items.Count; i++)
-    {
-        if (StudentListItems.ItemContainerGenerator.ContainerFromIndex(i) is not FrameworkElement container)
-            continue;
-
-        var expander = FindVisualChild<Expander>(container, "StudentExpander");
-        if (expander is not null)
-        {
-            expander.IsExpanded = expanded;
-        }
-    }
+    foreach (var student in _viewModel.StudentRows) student.IsScreenExpanded = expanded;
 }
 
     private static ScrollViewer? GetScrollViewer(DependencyObject depObj)
