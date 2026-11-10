@@ -1,10 +1,10 @@
 # EduStream 실행용 ZIP 안내
 
-현재 사용자 배포는 **v1.1.1 정식 실행용 ZIP만** 제공합니다(2026-11-10). 소스 기준은 `v1.1.1` 태그입니다. 기존 v1.1.0·v1.0.0과 preview 릴리스는 복구·과거 이력으로 보존합니다.
+현재 사용자 배포는 **v1.1.2 정식 실행용 ZIP만** 제공합니다(2026-11-10). 소스 기준은 `v1.1.2` 태그입니다. 기존 v1.1.1·v1.1.0·v1.0.0과 preview 릴리스는 복구·과거 이력으로 보존합니다.
 
 ## 다운로드와 실행
 
-1. 역할에 맞게 **[교수자용 ZIP](https://github.com/202407038/Team-Senior-Club-RDP-based-Capstone-Repository-EduStream/releases/download/v1.1.1/EduStream-Server-win-x64.zip)** 또는 **[학생용 ZIP](https://github.com/202407038/Team-Senior-Club-RDP-based-Capstone-Repository-EduStream/releases/download/v1.1.1/EduStream-Client-win-x64.zip)**을 받습니다. 학생에게는 학생용만 전달합니다.
+1. 역할에 맞게 **[교수자용 ZIP](https://github.com/202407038/Team-Senior-Club-RDP-based-Capstone-Repository-EduStream/releases/download/v1.1.2/EduStream-Server-win-x64.zip)** 또는 **[학생용 ZIP](https://github.com/202407038/Team-Senior-Club-RDP-based-Capstone-Repository-EduStream/releases/download/v1.1.2/EduStream-Client-win-x64.zip)**을 받습니다. 학생에게는 학생용만 전달합니다.
 2. 받은 ZIP을 우클릭 → **모두 압축 풀기 → 압축 풀기**.
 3. `EduStream` 폴더의 **EduStream 교수자.exe / EduStream 학생.exe**를 더블클릭합니다.
 
@@ -34,8 +34,8 @@ GitHub **Code → Download ZIP** 및 Releases의 **Source code (zip)**은 개발
 
 ## 검증 범위와 주의
 
-- v1.1.1 전체 자동 테스트 1111개 중 1059개 통과·실패 0·건너뜀 52(실제 WDS·두 PC 환경이 필요한 검사). 새 다중 PC 인수 결과는 아닙니다.
-- ZIP의 SHA-256은 [정식 릴리스](https://github.com/202407038/Team-Senior-Club-RDP-based-Capstone-Repository-EduStream/releases/tag/v1.1.1)의 같은 파일명에 `.sha256`이 붙은 파일과 대조합니다. 각 ZIP에 .NET 8.0.31 self-contained 구성과 RDP interop를 포함합니다.
+- v1.1.2 전체 자동 테스트 1116개 중 1064개 통과·실패 0·건너뜀 52(실제 WDS·두 PC 환경이 필요한 검사). 새 다중 PC 인수 결과는 아닙니다.
+- ZIP의 SHA-256은 [정식 릴리스](https://github.com/202407038/Team-Senior-Club-RDP-based-Capstone-Repository-EduStream/releases/tag/v1.1.2)의 같은 파일명에 `.sha256`이 붙은 파일과 대조합니다. 각 ZIP에 .NET 8.0.31 self-contained 구성과 RDP interop를 포함합니다.
 - 압축 해제본의 파일 해시·역할 분리·self-contained 구성과 양 앱 시작, 교수자 창 캡처 제외 값 `0x11`을 확인했습니다. 이 시작 검사는 화면 전송이나 실제 원격 제어 검사가 아니며, 실제 사용은 다른 환경에서 확인합니다.
 - 사용자의 양방향 공유·원격 제어·동시 접속 현장 확인은 별도입니다. 동일 Windows 로그인에서 동시 WDS 송신 제약이 있으며, 최대 동시 접속 인원은 보장하지 않습니다. [현재 검증 근거](./STATUS_AND_ROADMAP.md)를 확인하세요.
 - Windows WDS/COM 지원은 별도 OS 조건이며 .NET 포함만으로 보장되지 않습니다.
@@ -43,7 +43,7 @@ GitHub **Code → Download ZIP** 및 Releases의 **Source code (zip)**은 개발
 
 ## 개발자: 배포 순서
 
-정식 버전의 앱 버전은 `src/Directory.Build.props`에서 관리합니다. Git 태그 `v1.1.1`과 실행 파일의 제품 버전 `1.1.1`을 대조하고, 릴리스는 사전 릴리스가 아닌 Latest로 지정합니다. 과거 preview 태그·릴리스를 덮어쓰거나 삭제하지 않습니다.
+정식 버전의 앱 버전은 `src/Directory.Build.props`에서 관리합니다. Git 태그 `v1.1.2`와 실행 파일의 제품 버전 `1.1.2`를 대조하고, 릴리스는 사전 릴리스가 아닌 Latest로 지정합니다. 과거 preview 태그·릴리스를 덮어쓰거나 삭제하지 않습니다.
 
 **담당 작업 반영 → 보완·통합 → 빌드/테스트 → ZIP 생성·실행 검증·GitHub 배포 → README/바로가기/실행 안내와 로드맵·진척 최종 갱신** 순서를 따릅니다. 문서 오타 수정마다 앱을 재배포하라는 뜻은 아닙니다. 실행 코드 SHA, 배포 버전, 검증 범위를 기록하고 ZIP 배포 전에는 전체 업데이트 완료로 표시하지 않습니다.
 
@@ -57,7 +57,7 @@ GitHub **Code → Download ZIP** 및 Releases의 **Source code (zip)**은 개발
 
 ## 문제가 생기면
 
-- 버전(실행용 ZIP v1.1.1), 교수자/학생 PC 구분, Windows 버전, 참가 인원, 공유·참가 순서, 오류 시각을 남깁니다.
+- 버전(실행용 ZIP v1.1.2), 교수자/학생 PC 구분, Windows 버전, 참가 인원, 공유·참가 순서, 오류 시각을 남깁니다.
 - 기대 동작과 실제 결과, 오류 메시지를 함께 [GitHub Issues](https://github.com/202407038/Team-Senior-Club-RDP-based-Capstone-Repository-EduStream/issues)에 알려주세요. 비밀번호·초대 비밀·학번·사적인 화면은 가립니다.
 - 캡처 차단 창을 찍기 위해 보호 설정을 해제하지 않습니다. 오류 문구와 재현 순서만으로도 보고할 수 있습니다.
-- 업데이트 직후 반복되는 새 결함이면 수업/앱을 정상 종료하고 받은 자료를 보존합니다. 필요하면 보관된 직전 v1.1.0을 별도 폴더에서 양쪽 같은 버전으로 사용하고, v1.1.1 파일을 섞거나 사용자 자료를 덮어쓰지 않습니다. 이전 버전에서도 동일한 WDS 환경 제약은 존재합니다.
+- 업데이트 직후 반복되는 새 결함이면 수업/앱을 정상 종료하고 받은 자료를 보존합니다. 필요하면 보관된 직전 v1.1.1을 별도 폴더에서 양쪽 같은 버전으로 사용하고, v1.1.2 파일을 섞거나 사용자 자료를 덮어쓰지 않습니다. 이전 버전에서도 동일한 WDS 환경 제약은 존재합니다.

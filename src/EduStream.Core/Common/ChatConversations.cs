@@ -110,4 +110,6 @@ public sealed class ChatConversation(string key, string name, ObservableCollecti
     }
     public string Label => Name + (Key.Length == 0 ? "" : " · 1:1") +
         (IsAvailable ? "" : " · 연결 종료/미지원") + (UnreadCount == 0 ? "" : $" · 새 메시지 {UnreadCount}");
+    /// <summary>화면 낭독기가 대화 선택 목록을 클래스 이름 대신 대화 이름으로 읽도록 한다.</summary>
+    public override string ToString() => Label;
 }

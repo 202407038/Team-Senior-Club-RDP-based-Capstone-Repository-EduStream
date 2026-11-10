@@ -57,8 +57,9 @@ public partial class MainWindow : Window
             }
             catch (Exception ex)
             {
+                System.Diagnostics.Debug.WriteLine(ex);
                 System.Windows.MessageBox.Show(this,
-                    "화면 공유 연결을 완전히 종료하지 못했습니다. 다시 닫기를 눌러 재시도해 주세요.\n" + ex.Message,
+                    "강의 화면 연결을 완전히 끝내지 못했습니다. 닫기를 다시 눌러 주세요.",
                     "EduStream 종료 확인", MessageBoxButton.OK, MessageBoxImage.Warning);
             }
             finally { _shutdownInProgress = false; if (!_shutdownComplete) IsEnabled = true; }
@@ -66,6 +67,30 @@ public partial class MainWindow : Window
     }
 
     private const double JoinWidth = 520;
+    /// <summary>참가 화면 입력칸에서 Enter를 누르면 '세션 참여'와 같다. 체크박스·버튼에 포커스가 있을 때는 그대로 둔다.</summary>
+    private void JoinForm_PreviewKeyDown(object sender, System.Windows.Input.KeyEventArgs e)
+    {
+        if (e.Key != Key.Return || e.OriginalSource is not (System.Windows.Controls.TextBox or System.Windows.Controls.PasswordBox)) return;
+        if (DataContext is ClientViewModel model && model.JoinSessionCommand.CanExecute(null)) model.JoinSessionCommand.Execute(null);
+        e.Handled = true;
+    }
+
+    private void SubmissionDropZone_DragOver(object sender, System.Windows.DragEventArgs e)
+    {
+        e.Effects = e.Data.GetDataPresent(System.Windows.DataFormats.FileDrop) && DataContext is ClientViewModel { IsSubmitting: false }
+            ? System.Windows.DragDropEffects.Copy
+            : System.Windows.DragDropEffects.None;
+        e.Handled = true;
+    }
+
+    private void SubmissionDropZone_Drop(object sender, System.Windows.DragEventArgs e)
+    {
+        // 끌어 놓으면 제출 대기 파일로만 정한다. 전송은 '제출하기'를 눌러야 한다.
+        if (e.Data.GetData(System.Windows.DataFormats.FileDrop) is string[] paths)
+            (DataContext as ClientViewModel)?.PrepareSubmissionFile(paths);
+        e.Handled = true;
+    }
+
     private void FileList_PreviewMouseWheel(object sender, MouseWheelEventArgs e) => Behaviors.NestedScrollHandoff.Handle(sender, e);
     private void ToggleTheme_Click(object sender, RoutedEventArgs e) => ((System.Windows.Controls.Button)sender).ToolTip = EduStream.Desktop.AppTheme.ToggleAndSave();
     private void NewChat_Click(object sender, RoutedEventArgs e)
@@ -156,14 +181,30 @@ public partial class MainWindow : Window
 
     private void Close_Click(object sender, RoutedEventArgs e) => Close();
 
+    private bool _systemBorder;
+
+    protected override void OnSourceInitialized(EventArgs e)
+    {
+        base.OnSourceInitialized(e);
+        // 앱이 그린 사각 테두리는 Windows 11의 둥근 모서리에 잘려 계단처럼 보인다.
+        // 교수자 창처럼 시스템이 둥근 모서리와 테두리를 함께 그리게 한다. Windows 10에서는 실패하므로 기존 테두리를 유지한다.
+        var handle = new System.Windows.Interop.WindowInteropHelper(this).Handle;
+        int round = 2; // DWMWCP_ROUND
+        _systemBorder = DwmSetWindowAttribute(handle, 33 /* DWMWA_WINDOW_CORNER_PREFERENCE */, ref round, sizeof(int)) == 0;
+        if (_systemBorder) BorderThickness = new Thickness(0);
+    }
+
+    [System.Runtime.InteropServices.DllImport("dwmapi.dll")]
+    private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attribute, ref int value, int size);
+
     protected override void OnStateChanged(EventArgs e)
     {
         base.OnStateChanged(e);
         var maximized = WindowState == WindowState.Maximized;
         // 사용자 정의 상단바는 최대화 때 화면 밖으로 넘치므로 테두리 두께만큼 안쪽으로 당긴다.
         WindowRoot.Margin = maximized ? SystemParameters.WindowResizeBorderThickness : new Thickness(0);
-        // 교수자 앱의 기본 창 테두리처럼 일반 크기에서만 바깥 테두리를 그린다.
-        BorderThickness = maximized ? new Thickness(0) : new Thickness(1);
+        // Windows 11은 창 테두리를 직접 그린다. 그 외에는 일반 크기에서만 1px 테두리를 그린다.
+        BorderThickness = maximized || _systemBorder ? new Thickness(0) : new Thickness(1);
         MaximizeButton.Content = maximized ? "" : "";
         MaximizeButton.ToolTip = maximized ? "이전 크기로" : "최대화";
     }

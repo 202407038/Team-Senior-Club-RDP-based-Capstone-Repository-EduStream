@@ -393,6 +393,8 @@ public sealed partial class ServerViewModel : ObservableObject
 
     public RelayCommand StopRdpShareCommand { get; }
 
+    /// <summary>끌어 놓기 칸에 보일 파일 이름. 긴 경로 때문에 이름이 잘리지 않게 경로는 툴팁으로만 보인다.</summary>
+    public string SelectedFileName => Path.GetFileName(_selectedFilePath);
     public string SelectedFilePath
     {
         get => _selectedFilePath;
@@ -400,6 +402,7 @@ public sealed partial class ServerViewModel : ObservableObject
         {
             if (SetProperty(ref _selectedFilePath, value))
             {
+                OnPropertyChanged(nameof(SelectedFileName));
                 SendSelectedFileCommand.RaiseCanExecuteChanged();
                 RegisterSelectedFileCommand.RaiseCanExecuteChanged();
             }
@@ -462,7 +465,7 @@ public sealed partial class ServerViewModel : ObservableObject
                     foreach (var state in fileTransfers.DeliveryStatus) FileDeliveries.Add(state);
                 });
             }
-            SessionStatus = $"세션 Open · 포트 {Port}";
+            SessionStatus = $"세션 열림 · 포트 {Port}";
             StatusMessage = _sessionManager.IsRoomPasswordProtected
                 ? "세션 열림 · 비밀번호 사용" : "세션 열림 · 비밀번호 없음";
             IsStatusError = false;
@@ -472,7 +475,7 @@ public sealed partial class ServerViewModel : ObservableObject
         }
         catch (Exception ex)
         {
-            SessionStatus = "세션 Open 실패";
+            SessionStatus = "세션 열기 실패";
             StatusMessage = ex is System.Net.Sockets.SocketException { SocketErrorCode: System.Net.Sockets.SocketError.AddressAlreadyInUse }
                 ? $"포트 {Port} 또는 보조 통신 포트 {Port + 1}을 다른 프로그램이 사용 중입니다. 고급 설정에서 포트를 바꾸고 학생에게 같은 포트를 알려 주세요."
                 : ex.Message;
@@ -518,7 +521,7 @@ public sealed partial class ServerViewModel : ObservableObject
             ParticipantCount = 0;
             SessionStatus = "세션 닫힘";
             LatestScreenStatus = "화면 공유가 중지되었습니다.";
-            RdpStatus = "WDS 화면 공유가 중지되었습니다.";
+            RdpStatus = "화면 공유가 중지되었습니다.";
             StatusMessage = "세션이 종료되었습니다.";
             IsStatusError = false;
             ChatMessages.Insert(0, ChatLine.System("세션이 닫혔습니다."));
@@ -526,7 +529,8 @@ public sealed partial class ServerViewModel : ObservableObject
         }
         catch (Exception ex)
         {
-            StatusMessage = $"세션 종료 확인 필요: {ex.GetType().Name}";
+            _logSink.Write($"[Session] 세션 종료 확인 실패: {ex.GetType().Name}");
+            StatusMessage = "세션이 완전히 닫혔는지 확인하지 못했습니다. '세션 닫기'를 다시 눌러 주세요.";
             IsStatusError = true;
             IsSessionOpen = _sessionManager.CurrentSession is not null;
             if (propagateFailure) throw;
@@ -606,7 +610,7 @@ public sealed partial class ServerViewModel : ObservableObject
             var sessionId = _sessionManager.CurrentSession?.SessionId;
             FilePacket? firstPacket = null;
             var sentChunks = 0;
-            FileShareStatus = $"{label} 전송 준비 중: {Path.GetFileName(filePath)}";
+            FileShareStatus = $"{label} 준비 중: {Path.GetFileName(filePath)}";
             IsStatusError = false;
             SyncLogs();
 
@@ -618,12 +622,12 @@ public sealed partial class ServerViewModel : ObservableObject
                 firstPacket ??= packet;
                 await _sessionManager.BroadcastPacketAsync(packet);
                 sentChunks++;
-                FileShareStatus = $"{label} 전송 중: {packet.FileName} / {sentChunks}/{packet.TotalChunks} chunks";
+                FileShareStatus = $"{label} 중: {packet.FileName} ({sentChunks * 100 / Math.Max(1, packet.TotalChunks)}%)";
             }
 
             if (firstPacket is null)
                 throw new InvalidOperationException("파일 패킷이 생성되지 않았습니다.");
-            FileShareStatus = $"{label} 전송 완료: {firstPacket.FileName} / {sentChunks} chunks / {firstPacket.FileSize} byte";
+            FileShareStatus = $"{label} 완료: {firstPacket.FileName}";
             StatusMessage = FileShareStatus;
             SharedFiles.Insert(0, $"{firstPacket.FileName} ({firstPacket.FileSize} byte, {sentChunks} chunks)");
             _logSink.Write($"파일 전송 완료: {firstPacket.FileName}, chunks={sentChunks}, checksum={firstPacket.Checksum[..Math.Min(12, firstPacket.Checksum.Length)]}...");
@@ -631,7 +635,8 @@ public sealed partial class ServerViewModel : ObservableObject
         }
         catch (Exception ex)
         {
-            FileShareStatus = $"{label} 전송 실패: {ex.Message}";
+            _logSink.Write($"[File] {label} 실패: {ex.GetType().Name}");
+            FileShareStatus = $"{label} 실패 · 세션과 파일이 그대로인지 확인하고 다시 보내 주세요.";
             StatusMessage = FileShareStatus;
             IsStatusError = true;
             _logSink.Write(FileShareStatus);
@@ -704,11 +709,12 @@ public sealed partial class ServerViewModel : ObservableObject
             var sharingId = await _rdpSharing.StartAsync(sessionId);
             _sessionManager.AttachRdpSharing(_rdpSharing, sharingId);
             IsRdpSharing = true;
-            RdpStatus = $"WDS 공유 중 · 선택한 모니터를 학생에게 자동 공유합니다. (최대 {RdpSharingService.MaxInvitations}명 · 2명 초과는 검증 전)";
+            RdpStatus = $"화면 공유 중 · 선택한 모니터를 참가 학생에게 자동으로 보여 줍니다. (최대 {RdpSharingService.MaxInvitations}명)";
         }
         catch (Exception ex)
         {
-            RdpStatus = $"WDS 시작 실패: {ex.GetType().Name}. Windows WDS 지원 환경을 확인해 주세요.";
+            _logSink.Write($"[RDP] 공유 시작 실패: {ex.GetType().Name}");
+            RdpStatus = "화면 공유 시작 실패 · '공유 시작'을 다시 눌러 보고, 계속되면 앱을 다시 실행해 주세요.";
         }
         finally { _rdpLifecycle.Release(); IsRdpBusy = false; SyncLogs(); }
     }
@@ -718,7 +724,7 @@ public sealed partial class ServerViewModel : ObservableObject
         if (IsRdpBusy || IsBusy) return;
         IsRdpBusy = true;
         try { await StopRdpShareCoreAsync(); }
-        catch (Exception ex) { RdpStatus = $"WDS 종료 확인 필요: {ex.GetType().Name}"; }
+        catch (Exception ex) { _logSink.Write($"[RDP] 공유 종료 확인 실패: {ex.GetType().Name}"); RdpStatus = "화면 공유가 멈췄는지 확인하지 못했습니다. '공유 멈춤'을 다시 눌러 주세요."; }
         finally { IsRdpBusy = false; SyncLogs(); }
     }
 
@@ -738,10 +744,10 @@ public sealed partial class ServerViewModel : ObservableObject
                 // 승인 회수와 실제 입력 차단 확인은 별개이므로, 확인되지 않았으면 완료로 표시하지 않는다.
                 RdpStatus = inputRevoke switch
                 {
-                    RemoteInputRevokeStatus.Confirmed => "WDS 화면 공유 중지됨",
-                    RemoteInputRevokeStatus.Independent => "WDS 화면 공유 중지됨 · 학생 화면/제어는 유지",
-                    RemoteInputRevokeStatus.Pending => "WDS 화면 공유 중지됨 · 원격 입력 차단 확인 대기 중",
-                    _ => "WDS 화면 공유 중지됨 · 원격 입력 차단 확인 실패(재시도 대기)"
+                    RemoteInputRevokeStatus.Confirmed => "화면 공유 멈춤",
+                    RemoteInputRevokeStatus.Independent => "화면 공유 멈춤 · 학생 화면 보기와 원격 제어는 계속 쓸 수 있습니다",
+                    RemoteInputRevokeStatus.Pending => "화면 공유 멈춤 · 학생 입력이 차단됐는지 확인하는 중",
+                    _ => "화면 공유 멈춤 · 학생 입력 차단을 확인하지 못해 다시 시도합니다"
                 };
             }
         }
@@ -874,7 +880,7 @@ public sealed partial class ServerViewModel : ObservableObject
             ParticipantCount = _sessionManager.ParticipantCount;
             if (IsSessionOpen)
             {
-                SessionStatus = $"세션 Open · 참가자 {ParticipantCount}명";
+                SessionStatus = $"세션 열림 · 참가 학생 {ParticipantCount}명";
             }
 
             SyncParticipantList(Participants, _sessionManager.ParticipantNames.ToList());

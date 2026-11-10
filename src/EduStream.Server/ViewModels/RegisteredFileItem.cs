@@ -36,7 +36,7 @@ public sealed class RegisteredFileItem : ObservableObject
         get => _isSending;
         private set { if (SetProperty(ref _isSending, value)) { UnregisterCommand.RaiseCanExecuteChanged(); SendAllCommand.RaiseCanExecuteChanged(); OnPropertyChanged(nameof(SendLabel)); } }
     }
-    public string SendLabel => IsSending ? "전송 중" : "전체전송";
+    public string SendLabel => IsSending ? "전송 중" : "전체 전송";
 
     internal static string FormatSize(long bytes) => bytes switch
     {

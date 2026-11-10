@@ -153,7 +153,7 @@ public sealed class RdpInvitationSecretDeliveryTests
             await WaitUntilAsync(() => vm.NeedsRdpRetry);
             Assert.True(vm.IsConnected);
             Assert.True(vm.ReconnectRdpCommand.CanExecute(null));
-            Assert.Contains("실패", vm.StatusMessage);
+            Assert.Contains("연결하지 못했습니다", vm.StatusMessage);
             Assert.False(viewer.Connects.Reader.TryRead(out _));
 
             viewer.FailConnect = false;

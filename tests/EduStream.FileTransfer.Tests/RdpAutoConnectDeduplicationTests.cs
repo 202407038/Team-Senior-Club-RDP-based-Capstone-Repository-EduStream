@@ -104,6 +104,10 @@ public sealed class RdpAutoConnectDeduplicationTests
         rig.DeliverSecret(first.Secret);
         Assert.Single(rig.Viewer.Calls);
         Assert.Contains("RDP 연결 실패", rig.ViewModel.RdpStatusText);
+        // 학생에게 보이는 안내에는 개발 용어와 영문 예외를 쓰지 않는다.
+        Assert.DoesNotContain("RDP", rig.ViewModel.StatusMessage);
+        Assert.DoesNotContain("controlled viewer failure", rig.ViewModel.StatusMessage);
+        Assert.Contains("강의 화면 다시 연결", rig.ViewModel.StatusMessage);
         Assert.True(rig.ViewModel.NeedsRdpRetry);
         Assert.True(rig.ViewModel.ReconnectRdpCommand.CanExecute(null));
 

@@ -220,7 +220,7 @@ public sealed class StudentScreenView : System.Windows.Controls.UserControl
                 _connectedInvitations.Add(delivery.Invitation.InvitationId);
                 SetStatus(""); _control.IsEnabled = true;
             };
-            viewer.OnConnectionFailed += (_, _) => { SetStatus("학생 화면 연결 실패 · 새로고침을 눌러 주세요."); _control.IsEnabled = false; };
+            viewer.OnConnectionFailed += (_, _) => { SetStatus("학생 화면 연결 실패 · '다시 연결'을 눌러 주세요."); _control.IsEnabled = false; };
             viewer.OnConnectionTerminated += (_, _) => { SetStatus("학생 화면 연결 종료"); _control.IsEnabled = false; };
             ((ISupportInitialize)viewer).BeginInit();
             _surface = new ViewerZoomSurface();
@@ -240,7 +240,7 @@ public sealed class StudentScreenView : System.Windows.Controls.UserControl
             _connection = _reception.Watch(delivery.Invitation.StudentId, viewer,
                 delivery.Invitation.ConnectionString, delivery.Invitation.ProfessorId, delivery.Secret.Password);
         }
-        catch (Exception ex) { SetStatus("학생 화면 오류: " + ex.GetType().Name); _control.IsEnabled = false; }
+        catch (Exception ex) { System.Diagnostics.Debug.WriteLine(ex); SetStatus("학생 화면을 열지 못했습니다 · '다시 연결'을 눌러 주세요."); _control.IsEnabled = false; }
         finally { _lifecycle.Release(); }
     }
 
@@ -258,7 +258,7 @@ public sealed class StudentScreenView : System.Windows.Controls.UserControl
             ShowControlButton(active);
             SetStatus(active ? "원격 제어 중" : "");
         }
-        catch (Exception ex) { SetStatus("제어 확인 실패: " + ex.GetType().Name); }
+        catch (Exception ex) { System.Diagnostics.Debug.WriteLine(ex); SetStatus("원격 제어 상태를 바꾸지 못했습니다. 다시 눌러 주세요."); }
         finally { _control.IsEnabled = _connection?.IsConnectionLive == true; }
     }
 
@@ -275,7 +275,7 @@ public sealed class StudentScreenView : System.Windows.Controls.UserControl
             ShowControlButton(active: false);
             SetStatus("창을 닫아 원격 제어를 끝냈습니다.");
         }
-        catch (Exception ex) { SetStatus("원격 제어 종료 실패: " + ex.GetType().Name); }
+        catch (Exception ex) { System.Diagnostics.Debug.WriteLine(ex); SetStatus("원격 제어가 끝났는지 확인하지 못했습니다. 학생 카드에서 다시 확인해 주세요."); }
     }
 
     private void ShowControlButton(bool active)
@@ -356,7 +356,7 @@ public sealed class StudentScreenView : System.Windows.Controls.UserControl
     {
         await _lifecycle.WaitAsync();
         try { await ReleaseAsync(); _delivery = null; SetStatus("학생 화면 공유 종료"); _large?.Close(); }
-        catch (Exception ex) { SetStatus("화면 종료 확인 실패: " + ex.GetType().Name); }
+        catch (Exception ex) { System.Diagnostics.Debug.WriteLine(ex); SetStatus("학생 화면이 닫혔는지 확인하지 못했습니다."); }
         finally { _lifecycle.Release(); }
     }
     private async Task ReleaseAsync()
@@ -389,7 +389,7 @@ public sealed class StudentScreenView : System.Windows.Controls.UserControl
         {
             if (_releasedConnections.Contains(student)) return true;
             if (_viewerStudent != student) return false;
-            await ReleaseAsync(); SetStatus("입력 회수를 위해 학생 화면 연결 종료");
+            await ReleaseAsync(); SetStatus("원격 제어를 끝내려고 학생 화면 연결을 닫았습니다.");
             return true;
         }
         finally { _lifecycle.Release(); }

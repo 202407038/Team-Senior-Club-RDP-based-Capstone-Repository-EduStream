@@ -53,7 +53,7 @@ public sealed class SessionClient
         return PacketFactory.CreateError(
             senderId: "Client",
             errorCode: ErrorCodes.JoinRejected,
-            message: $"{hostAddress}:{port} 연결 실패 - {message}",
+            message: $"{hostAddress}:{port} 연결 실패 · {message}",
             isRecoverable: true);
     }
 

@@ -110,12 +110,12 @@ public sealed partial class ClientViewModel : ObservableObject
     private string _lastSuccessMessage = "아직 성공한 작업이 없습니다.";
     private string _lastErrorMessage = "오류 없음";
     private string _chatStatus = "채팅 대기 중";
-    private string _renderStatus = "화면 프레임을 아직 받지 않았습니다.";
+    private string _renderStatus = "";
     private string _screenDetail = "프레임 메타데이터를 아직 받지 않았습니다.";
     private string _downloadStatus = "";
     private string _fileTransferDetail = "파일 수신 이벤트가 없습니다.";
     private DateTimeOffset? _lastFrameReceivedAt;
-    private string _frameFreshness = "프레임 없음";
+    private string _frameFreshness = "";
     private string _chatInput = string.Empty;
     private bool _isConnected;
     private int? _lastFrameIndex;
@@ -273,7 +273,7 @@ public sealed partial class ClientViewModel : ObservableObject
     {
         if (_lastFrameReceivedAt is null)
         {
-            FrameFreshness = "프레임 없음";
+            FrameFreshness = "";
             return;
         }
 
@@ -609,7 +609,7 @@ public sealed partial class ClientViewModel : ObservableObject
             // 💡 연결 시도 시 에러 상태 초기화 및 로딩 가동
             IsConnecting = true;
             IsStatusError = false;
-            StatusMessage = "서버에 연결을 시도하는 중입니다...";
+            StatusMessage = "교수자 PC에 연결하는 중입니다...";
 
             ConnectionState = "연결 중...";
             _logSink.Write($"서버 연결 시도: {HostAddress}:{Port}");
@@ -655,7 +655,7 @@ public sealed partial class ClientViewModel : ObservableObject
             // 교수자는 TCP 참가 직후 보호 채널로 상태를 보내므로, 참가 요청 전에 수신 처리기를 붙인다.
             AttachStudentStatus(secure);
 
-            StatusMessage = "서버의 세션 참여 승인을 대기하고 있습니다.";
+            StatusMessage = "교수자 앱의 참가 승인을 기다리는 중입니다...";
             // TCP 연결 (만약 서버가 꺼져있으면 여기서 catch 블록으로 튕깁니다)
             var result = await SendJoinAndAwaitAckAsync(target.Host, target.Port, target.DisplayName, secure.JoinTicket, CancellationToken.None);
             SyncLogs();
@@ -666,8 +666,8 @@ public sealed partial class ClientViewModel : ObservableObject
             if (result != JoinAckResult.Rejected)
             {
                 ApplyJoinError(_sessionClient.CreateJoinError(HostAddress, Port, result == JoinAckResult.TimedOut
-                    ? "서버가 참가 요청에 응답하지 않습니다. 잠시 뒤 다시 참가해 주세요."
-                    : "참가 승인 전에 서버와의 연결이 끊어졌습니다. 다시 참가해 주세요."));
+                    ? "교수자 앱이 참가 요청에 응답하지 않습니다. 잠시 뒤 다시 참가해 주세요."
+                    : "참가 승인 전에 교수자와의 연결이 끊어졌습니다. 다시 참가해 주세요."));
             }
         }
         catch (Exception)
@@ -675,7 +675,7 @@ public sealed partial class ClientViewModel : ObservableObject
             await AbandonJoinAsync();
             if (_userLeaving || _disposing) return;
             // 💡 서버가 닫혀있을 때 명확하게 에러 메시지 주입
-            ApplyJoinError(_sessionClient.CreateJoinError(HostAddress, Port, "서버를 찾을 수 없습니다. 호스트 주소와 포트 혹은 서버 구동 상태를 확인해 주세요."));
+            ApplyJoinError(_sessionClient.CreateJoinError(HostAddress, Port, "교수자 PC를 찾을 수 없습니다. 교수자 IP와 포트, 교수자가 세션을 열었는지 확인해 주세요."));
         }
     }
 
@@ -712,7 +712,7 @@ public sealed partial class ClientViewModel : ObservableObject
             LastSuccessMessage = "세션 종료 요청을 정상적으로 보냈습니다.";
             LastErrorMessage = "오류 없음";
             ChatStatus = "채팅 대기 중";
-            RenderStatus = "화면 프레임을 아직 받지 않았습니다.";
+            RenderStatus = "";
             HasRemoteFrame = false;
             DisplaySource = null;
             ScreenDetail = "프레임 메타데이터를 아직 받지 않았습니다.";
@@ -735,9 +735,14 @@ public sealed partial class ClientViewModel : ObservableObject
         {
             return;
         }
-        if (trimmedMessage.Length > 500 || (conversation.Key.Length != 0 && (!_supportsDirectChat || !conversation.IsAvailable)))
+        if (trimmedMessage.Length > 500)
         {
-            ChatStatus = "500자 이내로 입력해 주세요. 개인 채팅은 양쪽 앱이 지원해야 합니다.";
+            ChatStatus = "500자 이내로 입력해 주세요.";
+            return;
+        }
+        if (conversation.Key.Length != 0 && (!_supportsDirectChat || !conversation.IsAvailable))
+        {
+            ChatStatus = "지금은 이 대화로 보낼 수 없습니다. '전체' 대화를 선택해 주세요.";
             return;
         }
 
@@ -894,7 +899,9 @@ public sealed partial class ClientViewModel : ObservableObject
         RdpStatusText = message;
         NeedsRdpRetry = true;
         ResetStatusPriority();
-        UpdateStatus(message, StatusPriority.Error, isError: true);
+        _logSink.Write("[RDP] " + message);
+        // 학생 화면에는 개발 용어(RDP·영문 예외) 대신 할 일만 보여 준다.
+        UpdateStatus("강의 화면에 연결하지 못했습니다. 아래 '강의 화면 다시 연결'을 눌러 주세요.", StatusPriority.Error, isError: true);
     });
 
     private async Task SendRdpInvitationRequestAsync()
@@ -1071,7 +1078,8 @@ public sealed partial class ClientViewModel : ObservableObject
             {
                 NeedsRdpRetry = true;
                 ResetStatusPriority();
-                UpdateStatus($"교수자 화면에 연결하지 못했습니다. ({status.Failure})", StatusPriority.Error, isError: true);
+                _logSink.Write($"[RDP] 연결 실패 원인: {status.Failure}");
+                UpdateStatus("강의 화면에 연결하지 못했습니다. 아래 '강의 화면 다시 연결'을 눌러 주세요.", StatusPriority.Error, isError: true);
             }
             _logSink.Write($"[RDP] 상태 변경: {status.State}");
             SyncLogs();
@@ -1106,7 +1114,7 @@ public sealed partial class ClientViewModel : ObservableObject
 
                 IsConnecting = false;
                 // 💡 변경: Success 우선순위 적용
-                UpdateStatus("강의 세션 연결에 성공했습니다. 실시간 스트리밍 및 채팅이 가능합니다.", StatusPriority.Success);
+                UpdateStatus("세션에 참가했습니다. 강의 화면과 채팅을 사용할 수 있습니다.", StatusPriority.Success);
 
                 ConnectionState = "연결됨";
                
@@ -1168,7 +1176,7 @@ public sealed partial class ClientViewModel : ObservableObject
             else if (IsConnected && packet.ErrorCode == ErrorCodes.RdpInvitationFailed)
                 ReportRdpFailure($"화면 연결 정보를 받지 못했습니다. {packet.Message}");
             else
-                UpdateStatus($"[서버 에러] {packet.Message}", StatusPriority.Error, isError: true);
+                UpdateStatus(packet.Message, StatusPriority.Error, isError: true);
 
             if (!IsConnected)
             {
@@ -1262,10 +1270,10 @@ public sealed partial class ClientViewModel : ObservableObject
         {
             RunOnUiThread(() =>
             {
-                RenderStatus = $"화면 수신 실패: {ex.Message}";
+                RenderStatus = "강의 화면을 표시하지 못했습니다.";
                 ScreenDetail = "프레임 메타데이터 검증 실패";
                 LastErrorMessage = $"SCREEN_RENDER_FAILED: {ex.Message}";
-                UpdateStatus($"화면 수신 실패: {ex.Message}", StatusPriority.Error, isError: true);
+                UpdateStatus("강의 화면을 표시하지 못했습니다. 다음 화면을 기다리는 중입니다.", StatusPriority.Error, isError: true);
                 _logSink.Write($"화면 수신 실패: {ex.Message}");
                 SyncLogs();
             });
@@ -1308,10 +1316,10 @@ public sealed partial class ClientViewModel : ObservableObject
 
             if (decodeError is not null)
             {
-                RenderStatus = $"프레임 #{packet.FrameIndex} 디코딩 실패: {decodeError}";
+                RenderStatus = "강의 화면을 표시하지 못했습니다.";
                 ScreenDetail = $"{packet.Width}x{packet.Height} / {packet.Encoding} / {packet.ContentLength} bytes — 디코딩 실패";
                 LastErrorMessage = $"SCREEN_DECODE_FAILED: {decodeError}";
-                UpdateStatus($"화면 프레임 디코딩 실패 (#{packet.FrameIndex})", StatusPriority.Error, isError: true);
+                UpdateStatus("강의 화면을 표시하지 못했습니다. 다음 화면을 기다리는 중입니다.", StatusPriority.Error, isError: true);
                 _logSink.Write($"[Screen] 프레임 디코딩 실패: #{packet.FrameIndex}, {decodeError}");
                 SyncLogs();
                 return;
@@ -1320,11 +1328,12 @@ public sealed partial class ClientViewModel : ObservableObject
             DisplaySource = bitmap;
             HasRemoteFrame = true;
 
-            RenderStatus = renderStatus;
+            RenderStatus = "강의 화면 수신 중";
+            _logSink.Write("[Screen] " + renderStatus);
             LastServerMessage = "화면 프레임을 수신했습니다.";
             LastSuccessMessage = $"화면 프레임 #{packet.FrameIndex} 수신 성공";
             ScreenDetail = $"{packet.Width}x{packet.Height} / {packet.Encoding} / {packet.ContentLength} bytes / {packet.CapturedAt:HH:mm:ss}";
-            UpdateStatus("화면 프레임 수신 중", StatusPriority.Info);
+            UpdateStatus("강의 화면 수신 중", StatusPriority.Info);
 
             _logSink.Write($"[Screen] 화면 프레임 수신: #{packet.FrameIndex}, {packet.Width}x{packet.Height}, {packet.Encoding}");
             SyncLogs();
@@ -1404,11 +1413,11 @@ public sealed partial class ClientViewModel : ObservableObject
 
             RunOnUiThread(() =>
             {
-                DownloadStatus = $"파일 저장 실패: {ex.Message}";
+                DownloadStatus = "파일 저장 실패 · 저장 공간과 다운로드 폴더 권한을 확인해 주세요.";
                 FileTransferDetail = $"{packet.FileName} 저장 실패";
                 LastErrorMessage = $"FILE_RECEIVE_FAILED: {ex.Message}";
 
-                UpdateStatus($"파일 저장 실패: {ex.Message}", StatusPriority.Error, isError: true, source: "file");
+                UpdateStatus("파일 저장 실패 · 저장 공간과 다운로드 폴더 권한을 확인해 주세요.", StatusPriority.Error, isError: true, source: "file");
 
                 _logSink.Write($"파일 저장 실패: {ex.Message}");
                 SyncLogs();
@@ -1445,12 +1454,13 @@ public sealed partial class ClientViewModel : ObservableObject
                 IsConnecting = false;
                 HasRemoteFrame = false;
                 DisplaySource = null;
-                UpdateStatus($"서버와의 연결이 차단되었습니다: {reason}", StatusPriority.Error, isError: true);
+                _logSink.Write($"[Session] 연결 끊김: {reason}");
+                UpdateStatus("교수자와의 연결이 끊어졌습니다.", StatusPriority.Error, isError: true);
 
                 ConnectionState = "연결 끊김";
                 LastServerMessage = reason;
                 ChatStatus = "채팅 대기 중";
-                ChatMessages.Add(ChatLine.System("서버와의 연결이 끊어졌습니다."));
+                ChatMessages.Add(ChatLine.System("교수자와의 연결이 끊어졌습니다."));
                 _logSink.Write($"서버 연결 끊김: {reason}");
                 SyncLogs();
 
@@ -1668,7 +1678,20 @@ public sealed partial class ClientViewModel : ObservableObject
         submissionClient.Changed += () => RunOnUiThread(() =>
         {
             if (!ReferenceEquals(_submissionClient, submissionClient)) return;
-            if (_submissionCancellation is null) SubmissionStatus = submissionClient.IsOpen ? "제출 열림" : "제출 닫힘";
+            var opened = submissionClient.IsOpen && !IsSubmissionOpen;
+            IsSubmissionOpen = submissionClient.IsOpen;
+            if (opened)
+            {
+                // 제출 칸이 접혀 있어도 학생이 바로 알 수 있도록 펼치고 안내한다.
+                IsCompanionPanelVisible = true;
+                IsFilesPanelExpanded = true;
+                IsSubmissionPanelExpanded = true;
+                UpdateStatus("교수자가 파일 제출을 열었습니다. 파일 › 파일 제출에서 보낼 수 있습니다.", StatusPriority.Success);
+            }
+            if (_submissionCancellation is null)
+                SubmissionStatus = submissionClient.IsOpen
+                    ? (HasSelectedSubmission ? "제출 열림 · '제출하기'를 누르면 보냅니다." : "제출 열림")
+                    : "제출 닫힘";
             RefreshSubmissionCommands();
         });
         var statusClient = new StudentStatusClient(secure.SessionId, secure.Connection, _logSink);
@@ -1746,7 +1769,7 @@ public sealed partial class ClientViewModel : ObservableObject
     {
         Interlocked.Exchange(ref _submissionClient, null)?.ConnectionClosed();
         _submissionCancellation?.Cancel();
-        RunOnUiThread(() => { SubmissionStatus = "연결 종료 · 새 연결에서 제출 상태를 확인해 주세요."; RefreshSubmissionCommands(); });
+        RunOnUiThread(() => { IsSubmissionOpen = false; SubmissionStatus = "연결 종료 · 새 연결에서 제출 상태를 확인해 주세요."; RefreshSubmissionCommands(); });
         _statusClient = null;
         _reverseClient = null;
         // 진행 중인 다운로드는 임시 파일을 지우고 실패로 끝난다.
@@ -1769,7 +1792,7 @@ public sealed partial class ClientViewModel : ObservableObject
         catch (Exception ex)
         {
             _logSink.Write("[Reverse] 학생 공유 상태 적용 실패: " + ex.GetType().Name);
-            RunOnUiThread(() => StudentSharingStatus = "공유/입력 차단 확인이 필요합니다.");
+            RunOnUiThread(() => StudentSharingStatus = "내 화면 공유 상태를 적용하지 못했습니다. '내 화면 공유 다시 시도'를 눌러 주세요.");
         }
         finally { RefreshStudentSharingFailure(sharing); }
     }
@@ -1877,11 +1900,11 @@ public sealed partial class ClientViewModel : ObservableObject
     private static string DescribeSecureJoinFailure(SecureJoinFailure failure) => failure switch
     {
         SecureJoinFailure.InvalidAddress => "교수자 IP 형식이 올바르지 않습니다. 교수자 화면에 표시된 IP와 고급 설정의 포트(기본 5000)를 확인해 주세요.",
-        SecureJoinFailure.InvalidCertificate => "교수자 앱의 TLS 인증서가 유효하지 않습니다. 교수자 PC의 시간과 인증서를 확인해 주세요.",
+        SecureJoinFailure.InvalidCertificate => "교수자 앱의 보안 인증서를 확인하지 못했습니다. 두 PC의 날짜·시간이 맞는지 확인해 주세요.",
         SecureJoinFailure.PasswordRejected => "방 비밀번호가 올바르지 않습니다.",
         SecureJoinFailure.LockedOut => "비밀번호를 여러 번 틀려 잠시 참가할 수 없습니다. 1분 뒤 다시 시도해 주세요.",
         SecureJoinFailure.VersionMismatch => "교수자 앱과 버전이 맞지 않습니다. 같은 버전의 앱을 사용해 주세요.",
-        _ => "교수자 PC에 연결하지 못했습니다. 호스트 주소와 포트, 교수자 세션 상태를 확인해 주세요."
+        _ => "교수자 PC에 연결하지 못했습니다. 교수자 IP와 포트, 교수자가 세션을 열었는지 확인해 주세요."
     };
 
     private void ApplyJoinError(ErrorPacket error)

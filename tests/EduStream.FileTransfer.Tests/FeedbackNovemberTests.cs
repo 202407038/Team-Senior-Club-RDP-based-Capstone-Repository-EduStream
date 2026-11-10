@@ -129,6 +129,71 @@ public sealed class FeedbackNovemberTests
     [InlineData("동명이인 (001)", "001")]
     public void SubmissionFolderIsStudentNumber(string name, string expected) => Assert.Equal(expected, SubmissionStore.StudentFolder(name));
 
+    [Theory]
+    [InlineData(@"\.\DISPLAY1", true, "모니터 1 (주 모니터) · 1920×1080")]
+    [InlineData(@"\.\DISPLAY12", false, "모니터 12 · 1920×1080")]
+    public void MonitorChoiceShowsFriendlyName(string device, bool primary, string expected) =>
+        Assert.Equal(expected, new EduStream.ShareHost.MonitorInfo { DeviceName = device, IsPrimary = primary, Width = 1920, Height = 1080 }.Label);
+
+    [Fact]
+    public async Task ProfessorDropZoneShowsFileNameNotWholePath()
+    {
+        var vm = new ServerViewModel();
+        var file = Path.Combine(Path.GetTempPath(), "EduStream-긴 폴더 이름-" + Guid.NewGuid().ToString("N"), "3주차 실습.pdf");
+        Directory.CreateDirectory(Path.GetDirectoryName(file)!); File.WriteAllText(file, "x");
+        try
+        {
+            vm.PrepareDroppedFile([file]);
+            Assert.Equal("3주차 실습.pdf", vm.SelectedFileName);
+            Assert.Equal("학생 파일 제출", vm.SubmissionHeader);
+        }
+        finally { Directory.Delete(Path.GetDirectoryName(file)!, true); await vm.ShutdownAsync(); }
+    }
+
+    [Fact]
+    public void SubmissionKeepsOriginalNameAndNumbersDuplicates()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "EduStream-SubmitName-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        try
+        {
+            string Store(string text)
+            {
+                var partial = Path.Combine(dir, Guid.NewGuid().ToString("N") + ".partial");
+                File.WriteAllText(partial, text);
+                return Path.GetFileName(SubmissionStore.MoveKeepingName(partial, dir, "1주차 과제.hwp"));
+            }
+            Assert.Equal("1주차 과제.hwp", Store("a"));
+            Assert.Equal("1주차 과제 (2).hwp", Store("b"));
+            Assert.Equal("1주차 과제 (3).hwp", Store("c"));
+            Assert.Equal("a", File.ReadAllText(Path.Combine(dir, "1주차 과제.hwp"))); // 먼저 낸 파일은 덮어쓰지 않음
+            Assert.Empty(Directory.GetFiles(dir, "*.partial"));
+        }
+        finally { Directory.Delete(dir, true); }
+    }
+
+    [Fact]
+    public async Task StudentSubmissionIsPreparedFirstAndSentOnlyByButton()
+    {
+        var vm = new EduStream.Client.ViewModels.ClientViewModel();
+        var file = Path.Combine(Path.GetTempPath(), "EduStream-Prepare-" + Guid.NewGuid().ToString("N") + ".txt");
+        File.WriteAllText(file, "x");
+        try
+        {
+            Assert.False(vm.HasSelectedSubmission);
+            vm.PrepareSubmissionFile([file, Path.GetTempPath()]);
+            Assert.False(vm.HasSelectedSubmission); // 여러 개·폴더는 받지 않음
+            vm.PrepareSubmissionFile([file]);
+            Assert.Equal(Path.GetFileName(file), vm.SelectedSubmissionName);
+            Assert.Empty(vm.SubmittedFiles); // 끌어 놓기만으로는 보내지 않음
+            Assert.False(vm.SendSelectedSubmissionCommand.CanExecute(null)); // 제출이 열리지 않으면 보낼 수 없음
+            Assert.True(vm.ClearSelectedSubmissionCommand.CanExecute(null));
+            vm.ClearSelectedSubmissionCommand.Execute(null);
+            Assert.False(vm.HasSelectedSubmission);
+        }
+        finally { File.Delete(file); await vm.ShutdownAsync(); }
+    }
+
     [Fact]
     public void SubmissionFolderFallbackCannotEscapeRoot()
     {

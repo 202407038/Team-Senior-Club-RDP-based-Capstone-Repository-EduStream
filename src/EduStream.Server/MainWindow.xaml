@@ -5,7 +5,7 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:local="clr-namespace:EduStream.Server"
         mc:Ignorable="d"
-        Title="EduStream Server"
+        Title="EduStream 교수자"
         Height="840"
         Width="1460"
         MinHeight="760"
@@ -172,7 +172,7 @@
                                     Visibility="{Binding IsSessionOpen, Converter={StaticResource BoolToVis}}" />
                             <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
                                 <TextBlock Style="{StaticResource SectionTitle}" Text="⚙ 세션 관리" VerticalAlignment="Center" />
-                                <Border Margin="8,0,0,0" Height="34" Padding="8,0" VerticalAlignment="Center" CornerRadius="8" ToolTip="참가 학생 수"
+                                <Border Margin="8,0,0,0" Height="34" Padding="8,0" VerticalAlignment="Center" CornerRadius="8" ToolTip="지금 참가 중인 학생 수"
                                         Background="{DynamicResource BrushSuccessGround}" BorderBrush="{DynamicResource BrushSuccess}" BorderThickness="1"
                                         Visibility="{Binding IsSessionOpen, Converter={StaticResource BoolToVis}}">
                                     <TextBlock Text="{Binding ParticipantCount, StringFormat={}{0}명}" VerticalAlignment="Center"
@@ -219,14 +219,6 @@
                                          Visibility="{Binding UseRoomPassword, Converter={StaticResource BoolToVis}}"
                                          IsEnabled="{Binding IsSessionOpen, Converter={StaticResource InverseBool}}" />
                         </StackPanel>
-                        <Border Grid.Column="2" Padding="14,4" Background="{DynamicResource BrushSuccessGround}" CornerRadius="8"
-                                BorderBrush="{DynamicResource BrushSuccess}" BorderThickness="1" VerticalAlignment="Bottom">
-                            <StackPanel HorizontalAlignment="Center">
-                                <TextBlock Text="참가 학생" Foreground="{DynamicResource BrushTextMuted}" FontSize="10" HorizontalAlignment="Center" />
-                                <TextBlock Text="{Binding ParticipantCount, StringFormat={}{0}명}" Foreground="{DynamicResource BrushSuccess}"
-                                           FontSize="18" FontWeight="Bold" HorizontalAlignment="Center" />
-                            </StackPanel>
-                        </Border>
                     </Grid>
 
                     <Border Margin="0,14,0,0" Padding="10" CornerRadius="8" Background="{DynamicResource BrushBgElevated}">
@@ -331,7 +323,7 @@
                                      PreviewKeyDown="ChatInput_PreviewKeyDown"
                                      Text="{Binding ChatInput, UpdateSourceTrigger=PropertyChanged}" />
                             <!-- 입력칸이 비어 있을 때만 보이는 안내 문구. 클릭은 아래 입력칸으로 통과한다. -->
-                            <TextBlock Text="채팅을 입력해주세요." IsHitTestVisible="False" Margin="12,0,0,0"
+                            <TextBlock Text="채팅 입력 · Enter 전송, Shift+Enter 줄바꿈" IsHitTestVisible="False" Margin="12,0,0,0" TextTrimming="CharacterEllipsis"
                                        VerticalAlignment="Center" Foreground="{DynamicResource BrushTextMuted}">
                                 <TextBlock.Style>
                                     <Style TargetType="TextBlock">
@@ -368,8 +360,8 @@
                         <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
                             <TextBlock Text="모니터" Foreground="{DynamicResource BrushTextSecondary}"
                                        VerticalAlignment="Center" Margin="0,0,6,0" FontSize="11" />
-                            <ComboBox x:Name="MonitorSelector" Style="{StaticResource DarkComboBox}" Width="150" Height="28"
-                                      ItemsSource="{Binding Monitors}" SelectedItem="{Binding SelectedMonitor}" DisplayMemberPath="DeviceName"
+                            <ComboBox x:Name="MonitorSelector" Style="{StaticResource DarkComboBox}" Width="210" Height="28"
+                                      ItemsSource="{Binding Monitors}" SelectedItem="{Binding SelectedMonitor}" DisplayMemberPath="Label"
                                       IsEnabled="{Binding CanSelectMonitor}" ToolTip="공유를 멈춘 뒤 모니터를 바꿀 수 있습니다. 학생은 다시 입력하지 않아도 자동 연결됩니다." />
                         </StackPanel>
                         <TextBlock Style="{StaticResource SectionTitle}" Text="🖥 화면 공유" VerticalAlignment="Center" />
@@ -390,7 +382,7 @@
                         <!-- 실제 판서 실행은 엔진 연결 전까지 비활성. 아래 설정 UI는 독립적으로 준비합니다. -->
                         <ToggleButton x:Name="DrawingToggle" Grid.Column="4" Height="34"
                                       IsEnabled="{Binding IsRdpSharing}"
-                                      ToolTip="선택 모니터 위에 그립니다. Esc 또는 OFF로 그림을 남긴 채 화면 조작으로 돌아갑니다."
+                                      ToolTip="선택 모니터 위에 그립니다. Esc 또는 '판서 끝내기'를 누르면 그림을 남긴 채 화면 조작으로 돌아갑니다."
                                       Click="DrawingToggle_Click">
                             <ToggleButton.Style>
                                 <Style TargetType="ToggleButton">
@@ -399,7 +391,7 @@
                                     <Setter Property="BorderBrush" Value="{DynamicResource BrushDrawingHover}" />
                                     <Setter Property="BorderThickness" Value="1" />
                                     <Setter Property="FontWeight" Value="Bold" />
-                                    <Setter Property="Content" Value="✏ 판서 ON" />
+                                    <Setter Property="Content" Value="✏ 판서 시작" />
                                     <Setter Property="Template">
                                         <Setter.Value>
                                             <ControlTemplate TargetType="ToggleButton">
@@ -416,7 +408,7 @@
                                         <Trigger Property="IsChecked" Value="True">
                                             <Setter Property="Background" Value="{DynamicResource BrushDangerButton}" />
                                             <Setter Property="BorderBrush" Value="{DynamicResource BrushDangerHover}" />
-                                            <Setter Property="Content" Value="✏ 판서 OFF" />
+                                            <Setter Property="Content" Value="✏ 판서 끝내기" />
                                         </Trigger>
                                     </Style.Triggers>
                                 </Style>
@@ -457,10 +449,10 @@
                             <Button DockPanel.Dock="Right" Style="{StaticResource GhostButton}" Content="파일 선택"
                                     Command="{Binding SelectFileCommand}" />
                             <TextBlock Foreground="{DynamicResource BrushTextMuted}" VerticalAlignment="Center"
-                                       TextTrimming="CharacterEllipsis">
+                                       TextTrimming="CharacterEllipsis" ToolTip="{Binding SelectedFilePath}">
                                 <TextBlock.Style>
                                     <Style TargetType="TextBlock">
-                                        <Setter Property="Text" Value="{Binding SelectedFilePath}" />
+                                        <Setter Property="Text" Value="{Binding SelectedFileName}" />
                                         <Style.Triggers>
                                             <DataTrigger Binding="{Binding SelectedFilePath}" Value="">
                                                 <Setter Property="Text" Value="파일 끌어 놓기" />
@@ -479,50 +471,69 @@
                                TextWrapping="Wrap" Text="{Binding FileShareStatus}" />
 
                     <TextBlock Style="{StaticResource FieldLabel}" Margin="0,10,0,6" Text="강의 파일" />
-                    <ListBox Height="120" Style="{StaticResource DarkListBox}"
-                              ScrollViewer.VerticalScrollBarVisibility="Auto"
-                              ItemsSource="{Binding RegisteredFiles}">
-                        <ListBox.ItemTemplate>
-                            <DataTemplate>
-                                <DockPanel Margin="0,4">
-                                    <Button DockPanel.Dock="Right" Style="{StaticResource GhostButton}" Padding="10,0"
-                                            Content="×" Command="{Binding UnregisterCommand}" ToolTip="공유 해제 · 원본 파일 유지" AutomationProperties.Name="파일 공유 해제" />
-                                    <Button DockPanel.Dock="Right" Style="{StaticResource GhostButton}" Padding="8,0" Margin="0,0,4,0"
-                                            Content="{Binding SendLabel}" Command="{Binding SendAllCommand}" ToolTip="현재 접속한 모든 학생에게 전송" />
-                                    <TextBlock Text="{Binding DisplayText}" VerticalAlignment="Center"
-                                               Foreground="{DynamicResource BrushTextSecondary}" TextTrimming="CharacterEllipsis" />
-                                </DockPanel>
-                            </DataTemplate>
-                        </ListBox.ItemTemplate>
-                    </ListBox>
+                    <Grid>
+                        <ListBox x:Name="RegisteredFileList" Height="120" Style="{StaticResource DarkListBox}"
+                                  ScrollViewer.VerticalScrollBarVisibility="Auto"
+                                  ItemsSource="{Binding RegisteredFiles}">
+                            <ListBox.ItemTemplate>
+                                <DataTemplate>
+                                    <DockPanel Margin="0,4">
+                                        <Button DockPanel.Dock="Right" Style="{StaticResource GhostButton}" Padding="10,0"
+                                                Content="×" Command="{Binding UnregisterCommand}" ToolTip="공유 해제 · 원본 파일 유지" AutomationProperties.Name="파일 공유 해제" />
+                                        <Button DockPanel.Dock="Right" Style="{StaticResource GhostButton}" Padding="8,0" Margin="0,0,4,0"
+                                                Content="{Binding SendLabel}" Command="{Binding SendAllCommand}" ToolTip="현재 접속한 모든 학생에게 전송" />
+                                        <TextBlock Text="{Binding DisplayText}" VerticalAlignment="Center"
+                                                   Foreground="{DynamicResource BrushTextSecondary}" TextTrimming="CharacterEllipsis" />
+                                    </DockPanel>
+                                </DataTemplate>
+                            </ListBox.ItemTemplate>
+                        </ListBox>
+                        <TextBlock Text="파일을 끌어 놓거나 선택한 뒤 '목록에 등록'을 누르면 학생이 내려받을 수 있습니다." IsHitTestVisible="False" Margin="12,10" TextWrapping="Wrap"
+                                   Foreground="{DynamicResource BrushTextMuted}" FontSize="12"
+                                   Visibility="{Binding HasItems, ElementName=RegisteredFileList, Converter={StaticResource BoolToVis}, ConverterParameter=Invert}" />
+                    </Grid>
 
-                    <Expander Header="학생 파일 제출" IsExpanded="False" Margin="0,8,0,0" Foreground="{DynamicResource BrushTextSecondary}">
+                    <Expander Header="{Binding SubmissionHeader}" IsExpanded="False" Margin="0,8,0,0" Foreground="{DynamicResource BrushTextSecondary}">
                         <StackPanel Margin="0,8,0,0">
                             <TextBlock Text="{Binding SubmissionStatus}" TextWrapping="Wrap" Margin="0,0,0,8" />
                             <WrapPanel>
                                 <Button Content="{Binding SubmissionToggleText}" Command="{Binding ToggleSubmissionsCommand}" Style="{StaticResource GhostButton}" Margin="0,0,6,6" />
                                 <Button Content="제출 폴더 열기" Command="{Binding OpenSubmissionsFolderCommand}" Style="{StaticResource GhostButton}" Margin="0,0,0,6" />
                             </WrapPanel>
-                            <ListBox Height="140" Style="{StaticResource DarkListBox}" ItemsSource="{Binding SubmissionReceipts}">
-                                <ListBox.ItemTemplate><DataTemplate>
-                                    <StackPanel Margin="0,4" ToolTip="{Binding LocalPath}">
-                                        <TextBlock Text="{Binding FileName}" TextTrimming="CharacterEllipsis" />
-                                        <TextBlock Text="{Binding Student}" Foreground="{DynamicResource BrushTextSecondary}" FontSize="12" />
-                                    </StackPanel>
-                                </DataTemplate></ListBox.ItemTemplate>
-                            </ListBox>
+                            <Grid>
+                                <ListBox x:Name="SubmissionList" Height="140" Style="{StaticResource DarkListBox}" ItemsSource="{Binding SubmissionReceipts}">
+                                    <ListBox.ItemTemplate><DataTemplate>
+                                        <DockPanel Margin="0,4" ToolTip="{Binding LocalPath}">
+                                            <Button DockPanel.Dock="Right" Content="파일 위치" Command="{Binding RevealCommand}" Style="{StaticResource GhostButton}" Padding="8,0"
+                                                    VerticalAlignment="Center" ToolTip="파일을 실행하지 않고 탐색기에서 선택합니다" />
+                                            <StackPanel>
+                                                <TextBlock Text="{Binding FileName}" TextTrimming="CharacterEllipsis" />
+                                                <TextBlock Foreground="{DynamicResource BrushTextSecondary}" FontSize="12"><Run Text="{Binding Student, Mode=OneWay}" /><Run Text=" · " /><Run Text="{Binding TimeText, Mode=OneWay}" /></TextBlock>
+                                            </StackPanel>
+                                        </DockPanel>
+                                    </DataTemplate></ListBox.ItemTemplate>
+                                </ListBox>
+                                <TextBlock Text="'제출 열기'를 누르면 학생이 파일을 보낼 수 있습니다. 받은 파일이 여기에 보입니다." IsHitTestVisible="False" Margin="12,10" TextWrapping="Wrap"
+                                           Foreground="{DynamicResource BrushTextMuted}" FontSize="12"
+                                           Visibility="{Binding HasItems, ElementName=SubmissionList, Converter={StaticResource BoolToVis}, ConverterParameter=Invert}" />
+                            </Grid>
                         </StackPanel>
                     </Expander>
                     <Expander Header="학생별 다운로드 현황" IsExpanded="False" Margin="0,8,0,0" Foreground="{DynamicResource BrushTextSecondary}">
                         <StackPanel Margin="0,8,0,0">
-                            <ListBox Height="140" Style="{StaticResource DarkListBox}" ItemsSource="{Binding FileDeliveries}">
-                                <ListBox.ItemTemplate><DataTemplate>
-                                    <StackPanel Margin="0,4">
-                                        <TextBlock Text="{Binding FileName}" TextTrimming="CharacterEllipsis" />
-                                        <TextBlock Foreground="{DynamicResource BrushTextSecondary}" FontSize="12"><Run Text="{Binding Student}" /><Run Text=" · " /><Run Text="{Binding Status}" /></TextBlock>
-                                    </StackPanel>
-                                </DataTemplate></ListBox.ItemTemplate>
-                            </ListBox>
+                            <Grid>
+                                <ListBox x:Name="DeliveryList" Height="140" Style="{StaticResource DarkListBox}" ItemsSource="{Binding FileDeliveries}">
+                                    <ListBox.ItemTemplate><DataTemplate>
+                                        <StackPanel Margin="0,4">
+                                            <TextBlock Text="{Binding FileName}" TextTrimming="CharacterEllipsis" />
+                                            <TextBlock Foreground="{DynamicResource BrushTextSecondary}" FontSize="12"><Run Text="{Binding Student}" /><Run Text=" · " /><Run Text="{Binding Status}" /></TextBlock>
+                                        </StackPanel>
+                                    </DataTemplate></ListBox.ItemTemplate>
+                                </ListBox>
+                                <TextBlock Text="학생이 강의 파일을 내려받으면 여기에 보입니다." IsHitTestVisible="False" Margin="12,10" TextWrapping="Wrap"
+                                           Foreground="{DynamicResource BrushTextMuted}" FontSize="12"
+                                           Visibility="{Binding HasItems, ElementName=DeliveryList, Converter={StaticResource BoolToVis}, ConverterParameter=Invert}" />
+                            </Grid>
                         </StackPanel>
                     </Expander>
                 </StackPanel>
@@ -561,9 +572,23 @@
                 <DockPanel>
                     <Button DockPanel.Dock="Right" Content="찾기" Style="{StaticResource GhostButton}"
                             Margin="6,0,0,0" Click="FindStudent_Click" />
-                    <TextBox x:Name="StudentSearchBox" Style="{StaticResource DarkTextBox}"
-                             ToolTip="학생 이름 일부 입력 · Enter로 다음 일치 학생 찾기"
-                             PreviewKeyDown="StudentSearch_PreviewKeyDown" />
+                    <Grid>
+                        <TextBox x:Name="StudentSearchBox" Style="{StaticResource DarkTextBox}"
+                                 ToolTip="이름이나 학번 일부 입력 · Enter로 다음 일치 학생 찾기"
+                                 PreviewKeyDown="StudentSearch_PreviewKeyDown" />
+                        <!-- 비어 있을 때만 보이는 안내. 클릭은 입력칸으로 통과한다. -->
+                        <TextBlock Text="이름·학번 검색 (Enter: 다음)" IsHitTestVisible="False" Margin="12,0,0,0"
+                                   VerticalAlignment="Center" Foreground="{DynamicResource BrushTextMuted}" TextTrimming="CharacterEllipsis">
+                            <TextBlock.Style>
+                                <Style TargetType="TextBlock">
+                                    <Setter Property="Visibility" Value="Collapsed" />
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding Text, ElementName=StudentSearchBox}" Value=""><Setter Property="Visibility" Value="Visible" /></DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </TextBlock.Style>
+                        </TextBlock>
+                    </Grid>
                 </DockPanel>
                 <TextBlock x:Name="StudentSearchResult" Margin="0,4,0,0" TextWrapping="Wrap"
                            FontSize="11" Foreground="{DynamicResource BrushTextMuted}" />
