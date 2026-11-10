@@ -34,9 +34,9 @@ public sealed class ProductionReleaseTests
     public void DesktopAssembliesHaveStableReleaseMetadata(Type appType)
     {
         var assembly = appType.Assembly;
-        Assert.Equal(new Version(1, 1, 1, 0), assembly.GetName().Version);
+        Assert.Equal(new Version(1, 1, 2, 0), assembly.GetName().Version);
         var info = assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()!.InformationalVersion;
-        Assert.Equal("1.1.1", info.Split('+')[0]);
+        Assert.Equal("1.1.2", info.Split('+')[0]);
         Assert.DoesNotContain("preview", info, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("test", info, StringComparison.OrdinalIgnoreCase);
     }
