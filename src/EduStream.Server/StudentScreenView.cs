@@ -25,7 +25,8 @@ public sealed class StudentScreenView : System.Windows.Controls.UserControl
     private readonly StackPanel _root = new();
     private readonly ProfessorReception _reception = new();
     private readonly SemaphoreSlim _lifecycle = new(1, 1);
-    private readonly System.Windows.Controls.Button _control = ThemedButton("원격 제어", enabled: false);
+    private readonly System.Windows.Controls.Button _control = ThemedButton("원격 제어 시작", enabled: false);
+    private readonly TextBlock _hint = new() { FontSize = 11, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 2, 0, 0) };
     private ReverseCollaborationRouter? _router;
     private ReverseInvitationDelivery? _delivery;
     private AxRDPViewer? _viewer;
@@ -58,7 +59,9 @@ public sealed class StudentScreenView : System.Windows.Controls.UserControl
         _status.SetResourceReference(TextBlock.ForegroundProperty, "BrushTextSecondary");
         var open = new System.Windows.Controls.Button
         {
-            Content = "원격 제어", Height = 34, Margin = new Thickness(0, 8, 0, 0),
+            // 누르면 바로 제어가 시작되지 않고 큰 창이 열린다. 제어는 큰 창의 '원격 제어 시작'으로 시작한다.
+            Content = "크게 보기 · 원격 제어", Height = 34, Margin = new Thickness(0, 8, 0, 0),
+            ToolTip = "학생 화면을 큰 창으로 엽니다. 창 위쪽의 '원격 제어 시작'을 눌러 조작합니다.",
             HorizontalAlignment = System.Windows.HorizontalAlignment.Stretch,
             Style = (Style)System.Windows.Application.Current.FindResource("PrimaryButton"),
         };
@@ -71,17 +74,26 @@ public sealed class StudentScreenView : System.Windows.Controls.UserControl
                 await ConnectAsync(delivery);
         };
 
-        // 학생 화면 창 상단: 원격 제어 · 다시 연결 · 화면 맞춤. 한 번만 만들어 창을 다시 열 때도 재사용한다.
+        // 학생 화면 창 상단: 크게 보이는 원격 제어 시작/중지와 다시 연결. 한 번만 만들어 창을 다시 열 때도 재사용한다.
+        // 화면은 창 크기에 맞춰 자동으로 맞춰지므로 별도 '화면 맞춤' 버튼은 두지 않는다.
         _control.Click += async (_, _) => await ChangeControlAsync();
-        var retry = ThemedButton("새로고침");
+        ShowControlButton(active: false);
+        var retry = ThemedButton("다시 연결");
+        retry.ToolTip = "화면이 멈추거나 연결에 실패했을 때 학생 화면을 다시 연결합니다.";
+        retry.Margin = new Thickness(10, 0, 0, 0);
+        retry.VerticalAlignment = VerticalAlignment.Center;
         retry.Click += async (_, _) => await RefreshViewAsync();
-        var fit = ThemedButton("화면 맞춤");
-        fit.Click += (_, _) => _surface?.Fit();
-        var bar = new StackPanel { Orientation = System.Windows.Controls.Orientation.Horizontal };
-        bar.Children.Add(_control); bar.Children.Add(retry); bar.Children.Add(fit); bar.Children.Add(_status);
+        _status.FontSize = 13;
+        _hint.SetResourceReference(TextBlock.ForegroundProperty, "BrushTextMuted");
+        var texts = new StackPanel { VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(14, 0, 0, 0) };
+        _status.Margin = new Thickness(0);
+        texts.Children.Add(_status); texts.Children.Add(_hint);
+        var bar = new DockPanel { LastChildFill = true };
+        DockPanel.SetDock(_control, Dock.Left); DockPanel.SetDock(retry, Dock.Right);
+        bar.Children.Add(_control); bar.Children.Add(retry); bar.Children.Add(texts);
         var toolbar = new Border
         {
-            Child = bar, Padding = new Thickness(8, 6, 8, 6), BorderThickness = new Thickness(0, 0, 0, 1),
+            Child = bar, Padding = new Thickness(12, 10, 12, 10), BorderThickness = new Thickness(0, 0, 0, 1),
             Background = (System.Windows.Media.Brush)System.Windows.Application.Current.FindResource("BrushBgSurface"),
             BorderBrush = (System.Windows.Media.Brush)System.Windows.Application.Current.FindResource("BrushBorder"),
         };
@@ -127,7 +139,7 @@ public sealed class StudentScreenView : System.Windows.Controls.UserControl
         {
             if (_stopped || _viewerStudent != state.Student) return;
             var active = state.Phase == EduStream.Core.Collaboration.ControlPhase.Active;
-            _control.Content = active ? "제어 중지" : "원격 제어";
+            ShowControlButton(active);
             SetStatus(state.Phase switch
             {
                 EduStream.Core.Collaboration.ControlPhase.Active => "원격 제어 중",
@@ -243,11 +255,38 @@ public sealed class StudentScreenView : System.Windows.Controls.UserControl
                 await manager.StopControlAsync();
             else await manager.RequestControlAsync(StudentName);
             var active = manager.CurrentControlState is { Phase: EduStream.Core.Collaboration.ControlPhase.Active } state && state.Student == _delivery.Student;
-            _control.Content = active ? "제어 중지" : "원격 제어";
+            ShowControlButton(active);
             SetStatus(active ? "원격 제어 중" : "");
         }
         catch (Exception ex) { SetStatus("제어 확인 실패: " + ex.GetType().Name); }
         finally { _control.IsEnabled = _connection?.IsConnectionLive == true; }
+    }
+
+    /// <summary>큰 창을 닫을 때 이 학생에게 걸린 원격 제어(요청 중 포함)를 끝낸다. 다른 학생 제어는 건드리지 않는다.</summary>
+    private async Task StopControlOnCloseAsync()
+    {
+        var student = _viewerStudent ?? _delivery?.Student;
+        if (student is null || Model?.SessionManager is not { } manager) return;
+        if (manager.CurrentControlState is not { Phase: EduStream.Core.Collaboration.ControlPhase.Active or EduStream.Core.Collaboration.ControlPhase.Requested } state
+            || state.Student != student) return;
+        try
+        {
+            await manager.StopControlAsync();
+            ShowControlButton(active: false);
+            SetStatus("창을 닫아 원격 제어를 끝냈습니다.");
+        }
+        catch (Exception ex) { SetStatus("원격 제어 종료 실패: " + ex.GetType().Name); }
+    }
+
+    private void ShowControlButton(bool active)
+    {
+        _control.Content = active ? "원격 제어 중지" : "원격 제어 시작";
+        _control.Style = (Style)System.Windows.Application.Current.FindResource(active ? "SecondaryButton" : "PrimaryButton");
+        _control.MinWidth = 150; _control.Height = 38; _control.FontSize = 14;
+        _control.Padding = new Thickness(18, 0, 18, 0); _control.Margin = new Thickness(0);
+        _control.ToolTip = active ? "누르면 학생 PC 조작을 멈춥니다." : "누르면 학생 PC를 직접 조작할 수 있습니다.";
+        _hint.Text = active ? "창을 닫으면 원격 제어도 자동으로 끝납니다."
+            : "'원격 제어 시작'을 눌러야 학생 PC를 조작할 수 있습니다.";
     }
 
     /// <summary>카드의 "원격 제어" 버튼: 카드의 뷰어를 별도 창으로 옮겨 크게 보여 준다. 이미 열려 있으면 앞으로 가져온다.</summary>
@@ -275,8 +314,9 @@ public sealed class StudentScreenView : System.Windows.Controls.UserControl
         };
         window.Closed += (_, _) =>
         {
-            // 창을 닫으면 뷰어를 카드 미리보기로 되돌린다. 연결은 끊지 않는다.
+            // 창을 닫으면 뷰어를 카드 미리보기로 되돌린다. 보기 연결은 끊지 않고, 이 학생 원격 제어만 끝낸다.
             window.Content = null;
+            _ = StopControlOnCloseAsync();
             _windowLayout.Children.Remove(_host);
             _host.Height = 180;
             if (!_root.Children.Contains(_host)) _root.Children.Insert(1, _host);

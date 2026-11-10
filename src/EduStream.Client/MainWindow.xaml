@@ -12,6 +12,8 @@
         MinHeight="640"
         MinWidth="960"
         Background="{DynamicResource BrushBgPrimary}"
+        BorderBrush="{DynamicResource BrushBorder}"
+        BorderThickness="1"
         WindowStyle="None"
         ResizeMode="CanResize"
         WindowStartupLocation="CenterScreen">
@@ -199,7 +201,7 @@
                                    Text="교수자가 개설한 세션에 참가합니다." />
 
                         <TextBlock Style="{StaticResource FieldLabel}" Text="학생 이름" />
-                        <TextBox Style="{StaticResource DarkTextBox}" behaviors:StudentIdentityInput.Kind="Name" MaxLength="5" ToolTip="한글 5자 이내"
+                        <TextBox Style="{StaticResource DarkTextBox}" behaviors:StudentIdentityInput.Kind="Name" MaxLength="20" ToolTip="학생 명단에 적힌 이름 그대로 입력 (한글·영문·띄어쓰기, 20자 이내)"
                                  Text="{Binding DisplayName, UpdateSourceTrigger=PropertyChanged}" />
                         <TextBlock Style="{StaticResource FieldLabel}" Text="학번 (명단 대조 수업에서 필수)" Margin="0,12,0,6" />
                         <TextBox Style="{StaticResource DarkTextBox}" behaviors:StudentIdentityInput.Kind="StudentId" InputMethod.IsInputMethodEnabled="False" MaxLength="32" Text="{Binding StudentId, UpdateSourceTrigger=PropertyChanged}" />

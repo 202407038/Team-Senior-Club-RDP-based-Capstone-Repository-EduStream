@@ -9,8 +9,8 @@ namespace EduStream.FileTransfer.Tests;
 public sealed class FeedbackInputBindingTests
 {
     [Theory]
-    [InlineData("Name", "가나다라마바사123", "가나다라마")]
-    [InlineData("Name", "가 나다", "가나다")]
+    [InlineData("Name", "가나다라마바사123", "가나다라마바사")]
+    [InlineData("Name", "가  나다😀", "가 나다")]
     [InlineData("StudentId", "000-123한글", "000123")]
     public Task InputChangeFiltersTextWithoutDetachingBinding(string kind, string input, string expected)
     {

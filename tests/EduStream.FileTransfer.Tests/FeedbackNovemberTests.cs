@@ -29,11 +29,29 @@ public sealed class FeedbackNovemberTests
 
     [Theory]
     [InlineData("가나다", "가나다")]
-    [InlineData("가 나다123ABC", "가나다")]
-    [InlineData("가나다라마바사", "가나다라마")]
+    [InlineData("가 나다123ABC", "가 나다ABC")]
+    [InlineData("남궁가나다라마", "남궁가나다라마")]
+    [InlineData("NGUYEN VAN AN", "NGUYEN VAN AN")]
+    [InlineData("  김  민수A", "김 민수A")]
+    [InlineData("Jean-Luc.K·Lee", "Jean-Luc.K·Lee")]
+    [InlineData("가나다라마바사아자차카타파하가나다라마바사", "가나다라마바사아자차카타파하가나다라마바")]
     [InlineData("가나다", "가나다")]
     [InlineData("ㄱㅏ!", "")]
-    public void StudentNameAllowsFiveComposedHangulSyllables(string input, string expected) => Assert.Equal(expected, StudentInputRules.Name(input));
+    [InlineData("ㄱㅏ!😀(복학)", "복학")]
+    public void StudentNameAllowsRosterStyleNamesUpToTwentyCharacters(string input, string expected) => Assert.Equal(expected, StudentInputRules.Name(input));
+
+    [Fact]
+    public void LongForeignRosterNameCanJoinWhenTypedExactly()
+    {
+        var policy = new RosterAdmissionPolicy();
+        policy.Configure([new(2, "NGUYEN VAN AN", "001", "", ""), new(3, "남궁가나다라마", "002", "", "")], true);
+        foreach (var (typed, id) in new[] { ("NGUYEN VAN AN ", "001"), ("남궁가나다라마", "002") })
+        {
+            var name = StudentInputRules.Name(typed).Trim();
+            Assert.True(policy.Allows(new() { DisplayName = RosterIdentity.ConnectionName(name, id), RosterName = name, StudentId = id }));
+        }
+        Assert.False(policy.Allows(new() { DisplayName = RosterIdentity.ConnectionName("NGUYEN VAN A", "001"), RosterName = "NGUYEN VAN A", StudentId = "001" }));
+    }
 
     [Fact]
     public void TruncatedEmojiPasteDoesNotThrowDuringHangulNormalization()
@@ -74,6 +92,36 @@ public sealed class FeedbackNovemberTests
         Assert.Same(chat, book.GetOrAdd("professor", "교수자"));
         book.SetScope("host-A/student-B");
         Assert.Single(book.Items);
+    }
+
+    [Fact]
+    public void ClientRejoinKeepsChatButClearsOldSessionNotices()
+    {
+        var publicMessages = new System.Collections.ObjectModel.ObservableCollection<ChatLine>();
+        var book = new ChatConversations(publicMessages) { KeepHistoryAcrossSessions = true, ResetNoticesOnNewSession = true };
+        book.SetScope("host-A/student-A"); book.SetSession(Guid.NewGuid());
+        Assert.Empty(publicMessages); // 첫 참가에는 구분선을 넣지 않음
+        publicMessages.Add(ChatLine.User("교수자", "과제 안내"));
+        publicMessages.Add(ChatLine.System("서버와의 연결이 끊어졌습니다."));
+        var direct = book.GetOrAdd("professor", "교수자");
+        direct.Messages.Add(ChatLine.User("교수자", "개인"));
+        direct.Messages.Add(ChatLine.System("원격 제어가 끝났습니다."));
+
+        book.SetScope("host-A/student-A"); book.SetSession(Guid.NewGuid());
+        Assert.Equal(2, publicMessages.Count);
+        Assert.Equal("과제 안내", publicMessages[0].Message);
+        Assert.True(publicMessages[1].IsSystem);
+        Assert.StartsWith("── 새 수업 참가", publicMessages[1].Message);
+        Assert.Equal("개인", Assert.Single(direct.Messages).Message);
+
+        book.SetScope("host-B/student-A");
+        Assert.Empty(publicMessages); // 다른 교수자는 전체 대화도 섞지 않음
+        Assert.Single(book.Items);
+
+        var professorBook = new ChatConversations([]) { KeepHistoryAcrossSessions = true };
+        professorBook.Items[0].Messages.Add(ChatLine.System("세션 열림"));
+        professorBook.SetSession(Guid.NewGuid());
+        Assert.Single(professorBook.Items[0].Messages); // 교수자 쪽 안내는 유지
     }
 
     [Theory]

@@ -116,7 +116,9 @@ public partial class MainWindow : Window
             MessageBox.Show("공유 종료를 확인해 주세요: " + ex.GetType().Name, "EduStream");
             _closing = false; IsEnabled = true; return;
         }
-        _closed = true; Close();
+        _closed = true;
+        // 정리가 모두 동기로 끝나면 아직 Closing 처리 안이므로, 바로 Close하면 재진입 예외가 난다. 처리 뒤에 닫는다.
+        _ = Dispatcher.BeginInvoke(new Action(Close));
     }
     private void CopyHostAddress_Click(object sender, RoutedEventArgs e)
     {
@@ -178,11 +180,31 @@ private void CollapseAllStudents_Click(object sender, RoutedEventArgs e) => SetA
             return;
         }
         _lastStudentMatch = index;
-        StudentSearchResult.Text = _viewModel.StudentRows[index].ParticipantName;
+        var row = _viewModel.StudentRows[index];
+        StudentSearchResult.Text = row.ParticipantName + (row.IsConnected ? "" : " · 미접속이라 기록만 펼침");
+        // 찾은 학생의 화면(접속 중일 때)과 입퇴장 기록을 펼친다. 다음 학생으로 넘어가면 이전 찾기로 펼친 것만 되돌린다.
+        if (_searchOpened is { } previous && !ReferenceEquals(previous.Row, row))
+        {
+            if (!previous.WasScreenExpanded) previous.Row.IsScreenExpanded = false;
+            if (!previous.WasHistoryExpanded) previous.Row.IsHistoryExpanded = false;
+        }
+        if (_searchOpened?.Row != row) _searchOpened = (row, row.IsScreenExpanded, row.IsHistoryExpanded);
+        row.IsScreenExpanded = true;
+        row.IsHistoryExpanded = true;
+        // 펼친 뒤 높이가 바뀌므로 배치가 끝난 다음 카드 머리를 목록 맨 위로 올린다. 목록 순서·연결·제어 상태는 바꾸지 않는다.
+        Dispatcher.BeginInvoke(new Action(() => ScrollStudentToTop(row)), System.Windows.Threading.DispatcherPriority.Loaded);
+    }
+
+    private (StudentListRow Row, bool WasScreenExpanded, bool WasHistoryExpanded)? _searchOpened;
+
+    private void ScrollStudentToTop(StudentListRow row)
+    {
+        var index = _viewModel.StudentRows.IndexOf(row);
+        if (index < 0) return;
         StudentListItems.UpdateLayout();
-        if (StudentListItems.ItemContainerGenerator.ContainerFromIndex(index) is FrameworkElement container)
-            (FindVisualChild<Expander>(container, "StudentExpander") ?? container).BringIntoView();
-        // 찾기는 펼침/연결/제어 상태와 목록 순서를 바꾸지 않는다.
+        if (StudentListItems.ItemContainerGenerator.ContainerFromIndex(index) is not FrameworkElement container) return;
+        var top = container.TransformToAncestor(StudentListScroll).Transform(new System.Windows.Point(0, 0)).Y;
+        StudentListScroll.ScrollToVerticalOffset(Math.Max(0, StudentListScroll.VerticalOffset + top));
     }
 
     private void StudentSearch_PreviewKeyDown(object sender, System.Windows.Input.KeyEventArgs e)

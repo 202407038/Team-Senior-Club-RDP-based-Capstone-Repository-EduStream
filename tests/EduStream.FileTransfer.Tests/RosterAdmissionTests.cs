@@ -56,7 +56,14 @@ public sealed class RosterAdmissionTests
                 vm.DisconnectCommand.Execute(null);
                 await Until(() => manager.ParticipantCount == 0 && !vm.IsConnected);
             }
-            else Assert.Contains("명단", vm.LastErrorMessage);
+            else
+            {
+                Assert.Contains("명단", vm.LastErrorMessage);
+                // 거부 뒤 연결 정리 안내가 덮어써도 학생이 보는 안내는 명단 불일치여야 한다.
+                await Task.Delay(1500);
+                Assert.Contains("명단", vm.StatusMessage);
+                Assert.DoesNotContain("호스트 주소", vm.StatusMessage);
+            }
         }
         finally { await vm.ShutdownAsync(); await manager.CloseSessionAsync(); if (Directory.Exists(temp)) Directory.Delete(temp, true); }
     }

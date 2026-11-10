@@ -52,7 +52,8 @@ public partial class MainWindow : Window
             {
                 if (DataContext is ClientViewModel model) await model.ShutdownAsync();
                 _shutdownComplete = true;
-                Close();
+                // 정리가 동기로 끝나면 아직 Closing 처리 안이라 바로 Close하면 재진입 예외가 난다. 처리 뒤에 닫는다.
+                _ = Dispatcher.BeginInvoke(new Action(Close));
             }
             catch (Exception ex)
             {
@@ -161,6 +162,8 @@ public partial class MainWindow : Window
         var maximized = WindowState == WindowState.Maximized;
         // 사용자 정의 상단바는 최대화 때 화면 밖으로 넘치므로 테두리 두께만큼 안쪽으로 당긴다.
         WindowRoot.Margin = maximized ? SystemParameters.WindowResizeBorderThickness : new Thickness(0);
+        // 교수자 앱의 기본 창 테두리처럼 일반 크기에서만 바깥 테두리를 그린다.
+        BorderThickness = maximized ? new Thickness(0) : new Thickness(1);
         MaximizeButton.Content = maximized ? "" : "";
         MaximizeButton.ToolTip = maximized ? "이전 크기로" : "최대화";
     }

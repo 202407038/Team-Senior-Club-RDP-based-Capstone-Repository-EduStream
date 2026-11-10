@@ -11,6 +11,8 @@ public sealed class ChatConversations : ObservableObject
     private Guid? _sessionId;
     private string? _scope;
     public bool KeepHistoryAcrossSessions { get; set; }
+    /// <summary>학생 앱: 새 세션 참가 때 대화는 두고 이전 세션의 시스템 안내만 지운다.</summary>
+    public bool ResetNoticesOnNewSession { get; set; }
     public ObservableCollection<ChatConversation> Items { get; } = [];
     public event Action? AttentionRequested;
     public event Action<int>? VisibleMessagesAdded;
@@ -37,14 +39,22 @@ public sealed class ChatConversations : ObservableObject
     {
         if (_sessionId == sessionId) return;
         _sessionId = sessionId;
-        if (KeepHistoryAcrossSessions) return;
-        ClearPrivateHistory();
+        if (!KeepHistoryAcrossSessions) { ClearPrivateHistory(); return; }
+        if (!ResetNoticesOnNewSession) return;
+        // 대화는 남기되 이전 세션의 연결 끊김·원격 제어 같은 안내는 지우고, 새 세션 시작 위치를 한 줄로 표시한다.
+        foreach (var item in Items)
+            for (var i = item.Messages.Count - 1; i >= 0; i--)
+                if (item.Messages[i].IsSystem) item.Messages.RemoveAt(i);
+        var publicMessages = Items[0].Messages;
+        if (publicMessages.Count > 0)
+            publicMessages.Add(ChatLine.System($"── 새 수업 참가 · {DateTime.Now:HH:mm} ──"));
     }
-    // 학생 앱에서 다른 교수자/다른 학생으로 참가할 때 이전 개인 기록을 섞지 않는다.
+    // 학생 앱에서 다른 교수자/다른 학생으로 참가할 때 이전 전체·개인 기록을 섞지 않는다.
     public void SetScope(string scope)
     {
         if (_scope == scope) return;
         _scope = scope;
+        Items[0].Messages.Clear();
         ClearPrivateHistory();
     }
     private void ClearPrivateHistory()
