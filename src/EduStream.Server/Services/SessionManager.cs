@@ -1262,7 +1262,7 @@ public sealed partial class SessionManager
         if (!_clientDisplayNames.TryGetValue(clientId, out var participantId))
         {
             await _tcpServer.SendToClientAsync(clientId,
-                CreateError(ErrorCodes.NotParticipant, "세션에 참여하지 않은 상태에서는 RDP 초대를 요청할 수 없습니다.", true, request));
+                CreateError(ErrorCodes.NotParticipant, "세션에 참가한 뒤 강의 화면을 연결할 수 있습니다. 다시 참가해 주세요.", true, request));
             _logSink.Write($"[Rdp] 비참가자 초대 요청 차단: clientId={clientId}");
             return;
         }

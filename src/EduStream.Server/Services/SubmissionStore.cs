@@ -87,9 +87,8 @@ public sealed class SubmissionStore : IDisposable
                 item.Output.Flush(true); item.Output.Dispose();
                 var targetDirectory = Path.Combine(DirectoryPath, StudentFolder(item.Student));
                 Directory.CreateDirectory(targetDirectory);
-                var target = Path.Combine(targetDirectory, $"{DateTime.Now:yyyyMMdd-HHmmss}-{Guid.NewGuid():N}-{item.Begin.FileName}");
-                File.Move(item.Path, target, false);
-                _receipts.Add(new(item.Student, item.Begin.FileName, target, item.Begin.Length, item.Begin.Sha256, DateTimeOffset.Now));
+                var target = MoveKeepingName(item.Path, targetDirectory, item.Begin.FileName);
+                _receipts.Add(new(item.Student, Path.GetFileName(target), target, item.Begin.Length, item.Begin.Sha256, DateTimeOffset.Now));
                 _incoming.Remove(connectionId); item.Dispose();
                 Changed?.Invoke();
                 return Reply(message, SubmissionAction.Stored);
@@ -100,6 +99,22 @@ public sealed class SubmissionStore : IDisposable
                 return Reply(message, SubmissionAction.Rejected, "저장 또는 파일 검증에 실패했습니다. 다시 제출해 주세요.");
             }
         }
+    }
+    /// <summary>학생이 보낸 파일명 그대로 저장한다. 같은 이름이 있으면 덮어쓰지 않고 "이름 (2).확장자"처럼 번호를 붙인다.</summary>
+    internal static string MoveKeepingName(string source, string directory, string fileName)
+    {
+        var stem = Path.GetFileNameWithoutExtension(fileName);
+        var extension = Path.GetExtension(fileName);
+        for (var n = 1; n <= 999; n++)
+        {
+            var target = Path.Combine(directory, n == 1 ? fileName : $"{stem} ({n}){extension}");
+            if (File.Exists(target) || Directory.Exists(target)) continue;
+            try { File.Move(source, target, false); return target; }
+            catch (IOException) when (File.Exists(target)) { }
+        }
+        var fallback = Path.Combine(directory, $"{stem} ({DateTime.Now:yyyyMMdd-HHmmss}-{Guid.NewGuid():N}){extension}");
+        File.Move(source, fallback, false);
+        return fallback;
     }
     private SubmissionMessage Reply(SubmissionMessage request, SubmissionAction action, string detail = "") => new(SessionId, request.RequestId, action, Detail: detail);
     public static string StudentFolder(string verifiedName)

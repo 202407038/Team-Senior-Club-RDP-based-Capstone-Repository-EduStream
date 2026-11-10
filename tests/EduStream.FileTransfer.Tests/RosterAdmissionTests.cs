@@ -37,6 +37,10 @@ public sealed class RosterAdmissionTests
                 vm.ChatInput = "identity-test"; vm.SendChatCommand.Execute(null);
                 Assert.Equal("합성 학생 (001)", await chat.Task.WaitAsync(TimeSpan.FromSeconds(5)));
                 await manager.SetSubmissionsOpenAsync(true);
+                // 제출이 열리면 접혀 있던 파일·제출 칸을 펼치고 '제출 열림'을 보인다.
+                await Until(() => vm.IsSubmissionOpen);
+                Assert.True(vm.IsFilesPanelExpanded && vm.IsSubmissionPanelExpanded && vm.IsCompanionPanelVisible);
+                Assert.Contains("파일 제출을 열었습니다", vm.StatusMessage);
                 var submission = (EduStream.Client.Services.SubmissionClient)typeof(ClientViewModel)
                     .GetField("_submissionClient", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!.GetValue(vm)!;
                 await Until(() => submission.IsOpen);
@@ -49,6 +53,15 @@ public sealed class RosterAdmissionTests
                 Assert.Equal("합성 학생 (001)", receipt.Student);
                 await submission.SubmitAsync(path).WaitAsync(TimeSpan.FromSeconds(10));
                 Assert.Equal(2, manager.Submissions.Receipts.Count);
+                // 같은 이름으로 다시 내면 덮어쓰지 않고 번호를 붙인다.
+                Assert.Equal(["source.txt", "source (2).txt"], manager.Submissions.Receipts.Select(x => Path.GetFileName(x.LocalPath)));
+                // 화면 흐름: 파일을 정해 두고 '제출하기'를 눌러야 보내지고, 보낸 뒤 선택은 비워진다.
+                vm.PrepareSubmissionFile([path]);
+                Assert.Equal(2, manager.Submissions.Receipts.Count);
+                Assert.True(vm.SendSelectedSubmissionCommand.CanExecute(null));
+                vm.SendSelectedSubmissionCommand.Execute(null);
+                await Until(() => manager.Submissions.Receipts.Count == 3 && !vm.HasSelectedSubmission);
+                Assert.Equal("source (3).txt", Path.GetFileName(manager.Submissions.Receipts[2].LocalPath));
                 await manager.SetSubmissionsOpenAsync(false); await Until(() => !submission.IsOpen);
                 await Assert.ThrowsAsync<InvalidOperationException>(() => submission.SubmitAsync(path));
                 Assert.True(manager.Attendance.Presence.Single().Connected);

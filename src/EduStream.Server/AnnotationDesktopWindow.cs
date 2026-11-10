@@ -29,7 +29,7 @@ public sealed class AnnotationDesktopWindow : IDisposable
     private readonly MonitorInfo _monitor;
     private readonly List<Point> _points = new();
     private readonly TextBlock _status = new() { Foreground = (Brush)System.Windows.Application.Current.FindResource("BrushTextMuted"), FontSize = 11, VerticalAlignment = VerticalAlignment.Center };
-    private readonly Button _drawingButton = new() { Content = "그림 유지하고 OFF" };
+    private readonly Button _drawingButton = new() { Content = "그리기 멈춤 (그림 유지)" };
     private readonly Border _toolsPanel = new();
     private readonly Dictionary<string, ToggleButton> _toolButtons = new();
     private readonly Dictionary<string, ToggleButton> _colorButtons = new();
@@ -292,7 +292,7 @@ public sealed class AnnotationDesktopWindow : IDisposable
         _drawing = enabled;
         _toolArmed = false; // ON 직후에는 도구를 직접 골라야 그려진다.
         _controller.SetDrawing(enabled);
-        _drawingButton.Content = enabled ? "그림 유지하고 OFF" : "그리기 ON";
+        _drawingButton.Content = enabled ? "그리기 멈춤 (그림 유지)" : "다시 그리기";
         ApplyInputMode();
         if (!enabled) CancelGesture();
         DrawingChanged?.Invoke(enabled);
@@ -312,7 +312,7 @@ public sealed class AnnotationDesktopWindow : IDisposable
         SetWindowLong(hwnd, -20, interactive ? style & ~0x20 : style | 0x20); // 그림은 보존하고 마우스를 아래 앱으로 통과시킨다.
         _status.Text = !_drawing ? "화면 조작 중 · 그림 유지"
             : _toolArmed ? "그리기 중 · Esc로 화면 조작 복귀"
-            : "판서 ON · 펜 등 도구를 누르면 그릴 수 있어요";
+            : "판서 중 · 펜 등 도구를 누르면 그릴 수 있어요";
         if (!interactive) CancelGesture();
         RefreshSelection();
     }
@@ -321,7 +321,7 @@ public sealed class AnnotationDesktopWindow : IDisposable
         if (_busy || _disposed) return;
         _busy = true;
         try { await action(); }
-        catch (Exception ex) { _status.Text = "판서 실패: " + ex.GetType().Name; }
+        catch (Exception ex) { System.Diagnostics.Debug.WriteLine(ex); _status.Text = "판서 동작을 처리하지 못했습니다. 다시 눌러 주세요."; }
         finally { _busy = false; }
     }
     private async void OnUndoKey(object sender, System.Windows.Input.KeyEventArgs e)

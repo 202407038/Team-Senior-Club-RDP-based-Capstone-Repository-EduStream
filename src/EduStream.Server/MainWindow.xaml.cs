@@ -113,7 +113,8 @@ public partial class MainWindow : Window
         }
         catch (Exception ex)
         {
-            MessageBox.Show("공유 종료를 확인해 주세요: " + ex.GetType().Name, "EduStream");
+            System.Diagnostics.Debug.WriteLine(ex);
+            MessageBox.Show("화면 공유나 원격 제어가 끝났는지 확인하지 못했습니다. 잠시 뒤 다시 닫아 주세요.", "EduStream");
             _closing = false; IsEnabled = true; return;
         }
         _closed = true;

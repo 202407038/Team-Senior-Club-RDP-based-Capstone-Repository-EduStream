@@ -45,6 +45,18 @@ namespace EduStream.ShareHost
         public int DpiY { get; init; }
         public double ScaleFactor { get; init; } // 1.0 = 100%, 1.25 = 125%, 1.5 = 150%
         public bool IsPrimary { get; init; }
-        public override string ToString() => $"{DeviceName} · {Width}×{Height}{(IsPrimary ? " (주)" : string.Empty)}";
+        /// <summary>교수자 화면용 이름. 장치 이름 대신 "모니터 1 (주 모니터) · 2560×1440"처럼 보인다.</summary>
+        public string Label
+        {
+            get
+            {
+                var end = DeviceName.Length;
+                while (end > 0 && char.IsDigit(DeviceName[end - 1])) end--;
+                var digits = DeviceName[end..];
+                var name = digits.Length > 0 ? "모니터 " + digits : (DisplayName.Length > 0 ? DisplayName : "모니터");
+                return $"{name}{(IsPrimary ? " (주 모니터)" : string.Empty)} · {Width}×{Height}";
+            }
+        }
+        public override string ToString() => Label;
     }
 }

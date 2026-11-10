@@ -89,11 +89,12 @@ public sealed class AdditionalFeaturesHeadlessIntegrationTests
             await Task.WhenAll(uploads).WaitAsync(TimeSpan.FromSeconds(15));
             await Until(() => manager.FileTransfers!.DeliveryStatus.Count(x => x.Status == "저장 완료") == 3, "다운로드 저장 확인");
             Assert.Equal(3, manager.Submissions!.Receipts.Count);
-            Assert.All(clients, c => { Assert.Single(c.SubmittedFiles); Assert.Empty(c.SubmissionStatus); });
+            Assert.All(clients, c => { Assert.Single(c.SubmittedFiles); Assert.StartsWith("제출 완료", c.SubmissionStatus); });
             Assert.Equal(3, manager.Submissions.Receipts.Select(x => Path.GetDirectoryName(x.LocalPath)).Distinct().Count());
             foreach (var receipt in manager.Submissions.Receipts)
             {
                 Assert.Equal(bytes, await File.ReadAllBytesAsync(receipt.LocalPath));
+                Assert.Equal("한글 과제.bin", Path.GetFileName(receipt.LocalPath)); // 학생이 보낸 파일명 그대로
                 Assert.Equal(SubmissionStore.StudentFolder(receipt.Student), Path.GetFileName(Path.GetDirectoryName(receipt.LocalPath)));
             }
             for (var i = 0; i < clients.Length; i++)
