@@ -36,7 +36,7 @@ GitHub **Code → Download ZIP** 및 Releases의 **Source code (zip)**은 개발
 
 - v1.1.1 전체 자동 테스트 1111개 중 1059개 통과·실패 0·건너뜀 52(실제 WDS·두 PC 환경이 필요한 검사). 새 다중 PC 인수 결과는 아닙니다.
 - ZIP의 SHA-256은 [정식 릴리스](https://github.com/202407038/Team-Senior-Club-RDP-based-Capstone-Repository-EduStream/releases/tag/v1.1.1)의 같은 파일명에 `.sha256`이 붙은 파일과 대조합니다. 각 ZIP에 .NET 8.0.31 self-contained 구성과 RDP interop를 포함합니다.
-- 압축 해제본의 파일 해시·역할 분리·self-contained 구성을 확인했습니다. v1.1.1은 빌드 PC에서 앱 실행 확인을 하지 않았고, 다른 환경에서 실행·원격 제어를 확인합니다.
+- 압축 해제본의 파일 해시·역할 분리·self-contained 구성과 양 앱 시작, 교수자 창 캡처 제외 값 `0x11`을 확인했습니다. 이 시작 검사는 화면 전송이나 실제 원격 제어 검사가 아니며, 실제 사용은 다른 환경에서 확인합니다.
 - 사용자의 양방향 공유·원격 제어·동시 접속 현장 확인은 별도입니다. 동일 Windows 로그인에서 동시 WDS 송신 제약이 있으며, 최대 동시 접속 인원은 보장하지 않습니다. [현재 검증 근거](./STATUS_AND_ROADMAP.md)를 확인하세요.
 - Windows WDS/COM 지원은 별도 OS 조건이며 .NET 포함만으로 보장되지 않습니다.
 - 코드 서명은 미적용입니다. 공식 Releases의 파일/해시를 확인하고 조직 정책 차단 시 관리자에게 문의하세요. 백신/방화벽 전체 해제나 정책 우회는 하지 마세요.
