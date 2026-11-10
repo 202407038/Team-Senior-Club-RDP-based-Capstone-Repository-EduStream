@@ -4,12 +4,12 @@
 
 ## 정식 버전 다운로드
 
-### EduStream v1.1.0 — 역할별 다운로드
+### EduStream v1.1.1 — 역할별 다운로드
 
-- **[교수자용 ZIP 받기](https://github.com/202407038/Team-Senior-Club-RDP-based-Capstone-Repository-EduStream/releases/download/v1.1.0/EduStream-Server-win-x64.zip)**
-- **[학생용 ZIP 받기](https://github.com/202407038/Team-Senior-Club-RDP-based-Capstone-Repository-EduStream/releases/download/v1.1.0/EduStream-Client-win-x64.zip)**
+- **[교수자용 ZIP 받기](https://github.com/202407038/Team-Senior-Club-RDP-based-Capstone-Repository-EduStream/releases/download/v1.1.1/EduStream-Server-win-x64.zip)**
+- **[학생용 ZIP 받기](https://github.com/202407038/Team-Senior-Club-RDP-based-Capstone-Repository-EduStream/releases/download/v1.1.1/EduStream-Client-win-x64.zip)**
 
-각 ZIP에는 해당 역할의 앱만 들어 있습니다. 학생에게는 **학생용 ZIP만** 전달하세요. 두 앱 모두 v1.1.0입니다. 학생 목록 정렬·개별 출입 기록, 화면 겹침 수정과 더 하얀 라이트 테마가 반영됐습니다.
+각 ZIP에는 해당 역할의 앱만 들어 있습니다. 학생에게는 **학생용 ZIP만** 전달하세요. 두 앱 모두 v1.1.1입니다. 명단을 불러오면 대조가 바로 켜지고, 원격 제어 창·학생 찾기·긴 이름 입력·재참가 채팅 정리가 개선됐습니다.
 
 **다운로드 → 모두 압축 풀기 → EduStream 폴더 → 역할에 맞는 EXE 더블클릭**
 
@@ -18,13 +18,13 @@
 
 Windows x64용이며 .NET 실행 환경을 포함합니다. 설치 프로그램이나 명령어 입력은 필요하지 않습니다. ZIP 안에서 바로 실행하지 말고 전체 압축을 풀어주세요. EXE 옆의 DLL과 하위 폴더도 함께 유지해야 합니다.
 
-[배포 정보·SHA-256](https://github.com/202407038/Team-Senior-Club-RDP-based-Capstone-Repository-EduStream/releases/tag/v1.1.0) · [자세한 실행 안내](docs/work/DESKTOP_LAUNCH.md) · [변경 이력](CHANGELOG.md)
+[배포 정보·SHA-256](https://github.com/202407038/Team-Senior-Club-RDP-based-Capstone-Repository-EduStream/releases/tag/v1.1.1) · [자세한 실행 안내](docs/work/DESKTOP_LAUNCH.md) · [변경 이력](CHANGELOG.md)
 
 GitHub의 **Code → Download ZIP**과 **Source code (zip)**은 개발용 소스입니다. 프로그램 실행만 필요하면 위 **실행용 ZIP**을 받으세요. 설치형은 배포하지 않습니다.
 
 ## 처음 사용하기
 
-1. 교수자는 방 비밀번호 사용 여부를 정한 뒤 **세션 열기**를 누릅니다. 필요하면 세션을 열기 전에 엑셀 학생 명단을 적용합니다.
+1. 교수자는 방 비밀번호 사용 여부를 정한 뒤 **세션 열기**를 누릅니다. 필요하면 세션을 열기 전에 엑셀 학생 명단을 불러옵니다. 불러오면 명단 대조가 바로 켜집니다.
 2. 학생은 **교수자 자동 찾기**에서 원하는 교수자를 선택하거나 교수자 화면에 표시된 IP를 입력합니다. 이름, 명단 대조 수업의 학번, 설정된 방 비밀번호를 입력하고 **세션 참여**를 누릅니다.
 3. 교수자는 모니터를 선택하고 **공유 시작**을 누릅니다. 학생은 별도의 접속 코드나 RDP 초대 비밀번호를 입력하지 않습니다.
 
