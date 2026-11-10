@@ -500,7 +500,7 @@ public sealed partial class ClientViewModel : ObservableObject
 
     public ObservableCollection<ChatLine> ChatMessages { get; } = [];
     private ChatConversations? _conversations;
-    public ChatConversations Conversations => _conversations ??= new ChatConversations(ChatMessages) { KeepHistoryAcrossSessions = true };
+    public ChatConversations Conversations => _conversations ??= new ChatConversations(ChatMessages) { KeepHistoryAcrossSessions = true, ResetNoticesOnNewSession = true };
     private bool _supportsDirectChat;
     private Guid _chatConnectionId;
     private bool _isSendingChat;

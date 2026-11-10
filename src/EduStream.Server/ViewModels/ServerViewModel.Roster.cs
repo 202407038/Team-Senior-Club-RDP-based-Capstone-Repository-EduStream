@@ -140,11 +140,22 @@ public sealed partial class ServerViewModel
             RosterPreviewRows.Clear();
             foreach (var row in preview.Rows) RosterPreviewRows.Add(row);
             RefreshStudentRows();
-            RosterImportStatus = preview.Summary + (preview.CanUseForAdmission
-                ? " · 적용 가능"
-                : " · 오류 행 수정 필요 · 적용 불가");
-            if (_sessionManager.IsRosterAdmissionEnabled) RosterImportStatus += " 기존에 적용한 명단은 그대로 유지됩니다.";
-        }
+            if (!preview.CanUseForAdmission)
+            {
+                RosterImportStatus = preview.Summary + " · 오류 행 수정 필요 · 적용 불가";
+                if (_sessionManager.IsRosterAdmissionEnabled) RosterImportStatus += " 기존에 적용한 명단은 그대로 유지됩니다.";
+            }
+            else if (!IsSessionOpen && !IsBusy)
+            {
+                // 명단만 불러오고 대조를 켜지 않아 명단 밖 학생이 들어오는 일을 막는다.
+                _sessionManager.ConfigureRosterAdmission(preview.Rows, true);
+                RosterImportStatus = preview.Summary + " · 명단 대조 켜짐";
+            }
+            else
+            {
+                RosterImportStatus = preview.Summary + " · 세션이 열려 있어 아직 대조에 쓰이지 않습니다. 세션을 닫고 '명단 대조 켜기'를 누른 뒤 다시 여세요.";
+                if (_sessionManager.IsRosterAdmissionEnabled) RosterImportStatus += " 기존에 적용한 명단은 그대로 유지됩니다.";
+            }        }
         catch (Exception ex)
         {
             RosterImportStatus = "가져오기 실패. 기존 미리보기는 유지됩니다. " +
