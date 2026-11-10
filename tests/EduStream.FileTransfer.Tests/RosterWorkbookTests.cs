@@ -66,7 +66,10 @@ public sealed class RosterWorkbookTests
             await File.WriteAllBytesAsync(path, workbook.ToArray());
             await vm.PreviewRosterAsync(path);
             Assert.Single(vm.RosterPreviewRows);
-            Assert.Contains("적용 가능", vm.RosterImportStatus);
+            // 올바른 명단을 불러오면 따로 켜지 않아도 대조가 켜져 명단 밖 학번은 거부된다.
+            Assert.Contains("명단 대조 켜짐", vm.RosterImportStatus);
+            Assert.Equal("명단 대조 켜짐 · 1명", vm.RosterAdmissionStatus);
+            Assert.True(vm.SessionManager.IsRosterAdmissionEnabled);
             vm.ApplyRosterAdmission();
             Assert.Equal("명단 적용 완료", vm.RosterImportStatus);
             Assert.Equal("명단 대조 켜짐 · 1명", vm.RosterAdmissionStatus);

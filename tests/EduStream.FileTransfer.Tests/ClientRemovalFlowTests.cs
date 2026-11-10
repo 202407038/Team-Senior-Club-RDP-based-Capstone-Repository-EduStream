@@ -82,7 +82,8 @@ public sealed class ClientRemovalFlowTests
 
             var systemBroadcasts = serverLog.Snapshot()
                 .Count(e => e.Contains("[Chat] 시스템 브로드캐스트: Alice님의 연결이 끊어졌습니다."));
-            Assert.Equal(1, systemBroadcasts);
+            // 출입은 교수자 학생 목록에만 기록하고 다른 학생에게 끊김 안내를 뿌리지 않는다.
+            Assert.Equal(0, systemBroadcasts);
         }
         finally
         {
