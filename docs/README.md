@@ -2,7 +2,7 @@
 
 문서는 작업자가 바로 보는 문서와 필요할 때만 보는 참고 문서로 나눠 관리합니다.
 
-## 사용자 안내 — v1.1.1
+## 사용자 안내 — v1.1.2
 
 - [정식 실행용 ZIP 다운로드와 실행](./work/DESKTOP_LAUNCH.md)
 - [기능별 사용법](./work/ADDITIONAL_FEATURES_GUIDE.md)
